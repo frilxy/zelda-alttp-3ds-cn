@@ -17,10 +17,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install makerom + bannertool (best-effort)
+      - name: Install makerom + bannertool via devkitPro pacman
         run: |
-          dkp-pacman -S --noconfirm --needed bannertool makerom || \
-            echo "Tools install skipped (3DSX-only build) — name the tools in build.sh if needed."
+          export DEVKITPRO=/opt/devkitpro
+          dkp-pacman -Sy --noconfirm || echo "sync failed"
+          dkp-pacman -S --noconfirm --needed makerom bannertool || \
+            { echo "=== pacman install failed; dump state ==="; \
+              ls -la /opt/devkitpro/tools/bin/ || true; \
+              command -v makerom || true; command -v bannertool || true; }
 
       - name: Build
         env:
