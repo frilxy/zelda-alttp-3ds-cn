@@ -20,6 +20,11 @@ jobs:
       - name: Install makerom + bannertool via devkitPro pacman
         run: |
           export DEVKITPRO=/opt/devkitpro
+          CONF=$(find /etc /opt -name "dkp-pacman.conf" 2>/dev/null | head -1)
+          echo "pacman conf: ${CONF:-none}"
+          if [ -n "$CONF" ] && ! grep -q '\[dkp-tools\]' "$CONF" 2>/dev/null; then
+            printf '\n[dkp-tools]\nSigLevel = Required DatabaseOptional\nServer = https://pkg.devkitpro.org/dkp-tools\n' >> "$CONF"
+          fi
           dkp-pacman -Sy --noconfirm || echo "sync failed"
           dkp-pacman -S --noconfirm --needed makerom bannertool || \
             { echo "=== pacman install failed; dump state ==="; \
