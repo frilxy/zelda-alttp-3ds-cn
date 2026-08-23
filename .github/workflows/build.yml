@@ -8,10 +8,10 @@ on:
 
 jobs:
   build:
-    # devkitPro publishes devkitARM images with the 3DS toolchain (libctru,
-    # citro2d, SDL2 cross files) preinstalled.
+    # devkitPro publishes devkitARM images on Docker Hub with the 3DS
+    # toolchain (libctru, citro2d, SDL2 cross files, makerom, bannertool).
     runs-on: ubuntu-latest
-    container: ghcr.io/devkitpro/devkitarm
+    container: docker.io/devkitpro/devkitarm:latest
 
     steps:
       - name: Checkout
