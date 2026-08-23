@@ -1,0 +1,40 @@
+name: Build 3DS CIA
+
+on:
+  push:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    # devkitPro publishes devkitARM images with the 3DS toolchain (libctru,
+    # citro2d, SDL2 cross files) preinstalled.
+    runs-on: ubuntu-latest
+    container: ghcr.io/devkitpro/devkitarm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install makerom + bannertool (best-effort)
+        run: |
+          dkp-pacman -S --noconfirm --needed bannertool makerom || \
+            echo "Tools install skipped (3DSX-only build) — name the tools in build.sh if needed."
+
+      - name: Build
+        env:
+          ZELDA3_TOOLS_ROOT: /opt/devkitpro/tools/bin
+        run: |
+          chmod +x platform/3ds/build.sh
+          platform/3ds/build.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zelda3-3ds-cn
+          path: |
+            build-3ds/game/*.cia
+            build-3ds/game/*.3dsx
+            cn_language.bin
+          if-no-files-found: warn

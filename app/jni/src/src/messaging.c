@@ -2224,6 +2224,11 @@ uint32 Text_DecodeCmd(uint8 a, const uint8 *src) {
       return TEXTCMD_MK(0, a - kTextCommandStart_US, 0);
   } else {
     // EU encoding
+    // Chinese escape prefixes: 0x6F-0x73 encode CJK characters
+    // Each prefix byte followed by 1 index byte:
+    //   char = alphabet_size(111) + (prefix-0x6F)*256 + next_byte
+    if ((g_zenv.dialogue_flags & 4) && a >= 0x6F && a <= 0x73)
+      return TEXTCMD_MK(111 + (a - 0x6F) * 256 + *src, kTextCmd_IsLetter, 1);
     if (a < 0x7f)
       return TEXTCMD_MK(a, kTextCmd_IsLetter, 0);
     static const uint8 kSoundLut[] = {45};
@@ -2525,7 +2530,13 @@ void VWF_RenderSingle(int c) {  // 8ecab8
     vwf_var1 = kVWF_RenderCharacter_linePositions[vwf_curline>>1];
     vwf_flag_next_line = 0;
   }
-  
+
+  // Chinese CJK characters (char index >= 111) use 16x16 rendering
+  if ((g_zenv.dialogue_flags & 4) && c >= 111) {
+    VWF_RenderChinese(c - 111);
+    return;
+  }
+
   const uint8 *kFontData = FindIndexInMemblk(g_zenv.dialogue_font_blk, 0).ptr;
   uint8 width = FindIndexInMemblk(g_zenv.dialogue_font_blk, 1).ptr[c];
   assert(width <= 8);
@@ -2583,6 +2594,83 @@ void VWF_RenderSingle(int c) {  // 8ecab8
     if (r4 != 0)
       WORD(mbuf[x + 0]) = r4;
   }
+}
+
+// Render a single 8x16 half-tile (top+bottom) into the messaging buffer.
+// Used by VWF_RenderChinese to render each 8-pixel-wide column of a 16x16 CJK char.
+static void VWF_RenderHalf(const uint8 *tile_top, const uint8 *tile_bot, int width) {
+  int i = vwf_var1++;
+  uint8 arrval = vwf_arr[i];
+  vwf_arr[i + 1] = arrval + width;
+  uint16 r0 = arrval * 2;
+  uint8 *mbuf = (uint8 *)messaging_buf;
+
+  // Top 8 rows
+  const uint16 *src_top = (const uint16 *)tile_top;
+  for (int row = 0; row < 16; row += 2) {
+    uint16 r4 = *src_top++;
+    int y = r0 + vwf_line_ptr;
+    int x = (y & 0xff0) + row;
+    y = (y >> 1) & 7;
+    uint8 r3 = width;
+    do {
+      if (r4 & 0x0080)
+        mbuf[x + 0] ^= kVWF_RenderCharacter_setMasks[y];
+      else
+        mbuf[x + 0] &= ~kVWF_RenderCharacter_setMasks[y];
+      if (r4 & 0x8000)
+        mbuf[x + 1] ^= kVWF_RenderCharacter_setMasks[y];
+      else
+        mbuf[x + 1] &= ~kVWF_RenderCharacter_setMasks[y];
+      r4 = (r4 & ~0x8080) << 1;
+    } while (--r3 && ++y != 8);
+    x += 16;
+    if (r4 != 0)
+      WORD(mbuf[x + 0]) = r4;
+  }
+
+  // Bottom 8 rows
+  uint16 r8 = vwf_line_ptr + 0x150;
+  const uint16 *src_bot = (const uint16 *)tile_bot;
+  for (int row = 0; row < 16; row += 2) {
+    uint16 r4 = *src_bot++;
+    int y = r8 + r0;
+    int x = (y & 0xff0) + row;
+    y = (y >> 1) & 7;
+    uint8 r3 = width;
+    do {
+      if (r4 & 0x0080)
+        mbuf[x + 0] ^= kVWF_RenderCharacter_setMasks[y];
+      else
+        mbuf[x + 0] &= ~kVWF_RenderCharacter_setMasks[y];
+      if (r4 & 0x8000)
+        mbuf[x + 1] ^= kVWF_RenderCharacter_setMasks[y];
+      else
+        mbuf[x + 1] &= ~kVWF_RenderCharacter_setMasks[y];
+      r4 = (r4 & ~0x8080) << 1;
+    } while (--r3 && ++y != 8);
+    x += 16;
+    if (r4 != 0)
+      WORD(mbuf[x + 0]) = r4;
+  }
+}
+
+void VWF_RenderChinese(int c) {
+  // CJK font data starts at offset 4096 in the font blob (after 256 standard 8x16 tiles).
+  // Each CJK char is 64 bytes: TL(16B) + TR(16B) + BL(16B) + BR(16B).
+  MemBlk font_blk = FindIndexInMemblk(g_zenv.dialogue_font_blk, 0);
+  const uint8 *cjk_base = font_blk.ptr + 4096 + c * 64;
+  MemBlk width_blk = FindIndexInMemblk(g_zenv.dialogue_font_blk, 1);
+  uint8 total_width = width_blk.ptr[111 + c];
+
+  // Render left half (TL + BL), 8 pixels wide
+  uint8 left_width = (total_width > 8) ? 8 : total_width;
+  VWF_RenderHalf(cjk_base + 0, cjk_base + 32, left_width);  // TL, BL
+
+  // Render right half (TR + BR)
+  uint8 right_width = (total_width > 8) ? total_width - 8 : 0;
+  if (right_width > 0)
+    VWF_RenderHalf(cjk_base + 16, cjk_base + 48, right_width);  // TR, BR
 }
 
 void RenderText_Draw_Choose2LowOr3() {  // 8ecd1a
