@@ -73,16 +73,20 @@ jobs:
           $GH --version
           # git in the container runs as a different owner; whitelist the checkout.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          # Remove every release except the rolling "latest" so only the newest build remains.
+          # Remove every release (and its tag) except the rolling "latest".
+          $GH release delete latest --yes --cleanup-tag 2>/dev/null || true
           $GH release list --limit 100 --json tagName --jq '.[].tagName' | while read -r t; do
-            [ "$t" != "latest" ] && $GH release delete "$t" --yes 2>/dev/null || true
+            [ "$t" != "latest" ] && $GH release delete "$t" --yes --cleanup-tag 2>/dev/null || true
           done
-          # Publish (upsert) the current build as the single rolling "latest" release.
-          $GH release create latest --force \
+          # Create the (empty) rolling "latest" release, then upload build assets
+          # separately; splitting create from upload avoids an upload race.
+          $GH release create latest \
             --title "Zelda ALTTP 3DS 中文版 — latest" \
             --notes "最新构建（内置简体中文）。含 3DSX + CIA + cn_language.bin。带下屏汉化版（*-cn-bottom）。" \
             --target "$GITHUB_SHA" \
-            build-3ds/game/*.cia build-3ds/game/*.3dsx \
-            build-3ds-cn-bottom/game/*.cia build-3ds-cn-bottom/game/*.3dsx \
-            cn_language.bin \
             --latest
+          for f in build-3ds/game/*.cia build-3ds/game/*.3dsx \
+                   build-3ds-cn-bottom/game/*.cia build-3ds-cn-bottom/game/*.3dsx \
+                   cn_language.bin; do
+            $GH release upload latest "$f" --clobber 2>/dev/null || echo "warn: could not upload $f"
+          done
