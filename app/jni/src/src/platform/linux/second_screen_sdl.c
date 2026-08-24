@@ -1086,11 +1086,11 @@ static void draw_settings_row(RectFS *row, bool armed) {
 }
 
 static void draw_remap_panel(RectFS r) {
-  draw_text("REMAP BUTTONS", r.x + r.w / 2 - text_width("REMAP BUTTONS", 3 * u) / 2,
+  draw_text(SS_STR("REMAP BUTTONS","按键设置"), r.x + r.w / 2 - text_width(SS_STR("REMAP BUTTONS","按键设置"), 3 * u) / 2,
             r.y + 18 * u, 3 * u);
   remap_back_r = (RectFS){r.x + 14 * u, r.y + 12 * u, 76 * u, 32 * u};
   draw_settings_row(&remap_back_r, false);
-  draw_text("BACK", remap_back_r.x + remap_back_r.w / 2 - text_width("BACK", 1.8f * u) / 2,
+  draw_text(SS_STR("BACK","返回"), remap_back_r.x + remap_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 1.8f * u) / 2,
             remap_back_r.y + remap_back_r.h / 2 - 7 * u, 1.8f * u);
 
   // resolve a pending capture from the game thread
@@ -1114,9 +1114,9 @@ static void draw_remap_panel(RectFS r) {
 
   remap_page_r = (RectFS){r.x + r.w - 86 * u, r.y + 12 * u, 72 * u, 32 * u};
   draw_settings_row(&remap_page_r, false);
-  draw_text(remap_first_row == 0 ? "MORE" : "TOP",
+  draw_text(remap_first_row == 0 ? SS_STR("MORE","下一页") : SS_STR("TOP","上一页"),
             remap_page_r.x + remap_page_r.w / 2 -
-              text_width(remap_first_row == 0 ? "MORE" : "TOP", 1.8f * u) / 2,
+              text_width(remap_first_row == 0 ? SS_STR("MORE","下一页") : SS_STR("TOP","上一页"), 1.8f * u) / 2,
             remap_page_r.y + remap_page_r.h / 2 - 7 * u, 1.8f * u);
 
   float row_h = 44 * u, gap = 6 * u;
@@ -1219,14 +1219,14 @@ static void draw_screen_panel(RectFS r) {
 }
 
 static void draw_developer_panel(RectFS r) {
-  draw_text(SS_STR("DEVELOPER","开发者"), r.x + r.w / 2 - text_width(SS_STR("DEVELOPER","开发者"), 3 * u) / 2,
+  draw_text(SS_STR("DEVELOPER","开发者选项"), r.x + r.w / 2 - text_width(SS_STR("DEVELOPER","开发者选项"), 3 * u) / 2,
             r.y + 18 * u, 3 * u);
   developer_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&developer_back_r, false);
   draw_text(SS_STR("BACK","返回"), developer_back_r.x + developer_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2.2f * u) / 2,
             developer_back_r.y + developer_back_r.h / 2 - 9 * u, 2.2f * u);
 
-  const char *labels[2] = {SS_STR("MEM DUMP","内存转存"), SS_STR("OVERLAY","叠加")};
+  const char *labels[2] = {SS_STR("MEM DUMP","内存转存"), SS_STR("OVERLAY","叠加层")};
   const char *values[2] = {
     SDL_GetTicks() < dump_flash_until ? "DONE" : "WRITE",
     "OPEN",
@@ -1245,7 +1245,7 @@ static void draw_developer_panel(RectFS r) {
 }
 
 static void draw_developer_overlay_panel(RectFS r) {
-  draw_text(SS_STR("OVERLAY","叠加"), r.x + r.w / 2 - text_width(SS_STR("OVERLAY","叠加"), 3 * u) / 2,
+  draw_text(SS_STR("OVERLAY","叠加层"), r.x + r.w / 2 - text_width(SS_STR("OVERLAY","叠加层"), 3 * u) / 2,
             r.y + 18 * u, 3 * u);
   developer_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&developer_back_r, false);
@@ -1339,8 +1339,8 @@ static void draw_settings(RectFS r) {
   snprintf(turbo_value, sizeof(turbo_value), "X5");
 #endif
   static const char *const labels[6] = {
-    SS_STR("SCREEN","画面"), SS_STR("TURBO SPEED","加速速度"), SS_STR("REMAP BUTTONS","重映射按键"),
-    SS_STR("DEVELOPER","开发者"), SS_STR("RESTART","重启"), SS_STR("SELECT ROM","选择游戏"),
+    SS_STR("SCREEN","画面"), SS_STR("TURBO SPEED","加速倍率"), SS_STR("REMAP BUTTONS","按键设置"),
+    SS_STR("DEVELOPER","开发者选项"), SS_STR("RESTART","重启"), SS_STR("SELECT ROM","选择游戏"),
   };
   const char *values[6] = {
     "", turbo_value, "", "", NULL, NULL,
