@@ -39,12 +39,15 @@ jobs:
           chmod +x /opt/tools/makerom /opt/tools/bannertool
           ls -la /opt/tools/
 
-      - name: Build (3DSX + CIA)
+      - name: Build (3DSX + CIA), both variants
         env:
           ZELDA3_TOOLS_ROOT: /opt/tools
         run: |
           chmod +x platform/3ds/build.sh
+          echo "== standard (dialogue Chinese, bottom screen English) =="
           platform/3ds/build.sh
+          echo "== bottom-screen Chinese version =="
+          BOTTOM_SCREEN_CN=1 platform/3ds/build.sh
 
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
@@ -53,6 +56,8 @@ jobs:
           path: |
             build-3ds/game/*.cia
             build-3ds/game/*.3dsx
+            build-3ds-cn-bottom/game/*.cia
+            build-3ds-cn-bottom/game/*.3dsx
             cn_language.bin
           if-no-files-found: warn
 
@@ -75,7 +80,9 @@ jobs:
           # Publish the current build as the single rolling "latest" release.
           $GH release create latest \
             --title "Zelda ALTTP 3DS 中文版 — latest" \
-            --notes "最新构建（内置简体中文）。含 3DSX + CIA + cn_language.bin。" \
+            --notes "最新构建（内置简体中文）。含 3DSX + CIA + cn_language.bin。带下屏汉化版（*-cn-bottom）。" \
             --target "$GITHUB_SHA" \
-            build-3ds/game/*.cia build-3ds/game/*.3dsx cn_language.bin \
+            build-3ds/game/*.cia build-3ds/game/*.3dsx \
+            build-3ds-cn-bottom/game/*.cia build-3ds-cn-bottom/game/*.3dsx \
+            cn_language.bin \
             --latest

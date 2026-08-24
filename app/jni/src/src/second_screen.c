@@ -13,6 +13,7 @@
 #include "load_gfx.h"
 #include "messaging.h"
 #include "config.h"
+#include "ss_cjk_data.h"
 #include "zelda_rtl.h"
 #include "snes/ppu.h"
 #include "second_screen_tables.h"
@@ -255,6 +256,29 @@ bool SS_RenderLetterSheet(uint32 *px) {
   }
   return true;
 }
+
+#ifdef BOTTOM_SCREEN_CN
+// CJK glyph sheet for the bottom screen: kSSCjkCount cells of 16x16, arranged
+// kSS_CjkCols per row.  Built from the auto-generated ss_cjk_data.h atlas
+// (16x16 2bpp: 0=transparent, 1=outline, 2=body), matching the bottom-screen
+// letter style (dark outline + white body).
+#define kSS_CjkCols 16
+bool SS_RenderCjkSheet(uint32 *px) {
+  int w = kSS_CjkCols * 16, h = ((kSSCjkCount + kSS_CjkCols - 1) / kSS_CjkCols) * 16;
+  memset(px, 0, (size_t)w * h * 4);
+  for (int i = 0; i < kSSCjkCount; i++) {
+    const uint8_t *g = kSSCjkGlyphs + i * 64;
+    int x0 = (i % kSS_CjkCols) * 16, y0 = (i / kSS_CjkCols) * 16;
+    for (int y = 0; y < 16; y++)
+      for (int x = 0; x < 16; x++) {
+        int v = (g[y * 4 + x / 4] >> ((3 - (x % 4)) * 2)) & 3;
+        if (v == 1) px[(y0 + y) * w + x0 + x] = 0xff282830u;    // outline
+        else if (v == 2) px[(y0 + y) * w + x0 + x] = 0xfff8f8f8u; // body
+      }
+  }
+  return true;
+}
+#endif // BOTTOM_SCREEN_CN
 
 // The 512x512 world map, composited from the game's mode-7 map data.
 bool SS_RenderWorldMap(uint32 *px, bool dark) {

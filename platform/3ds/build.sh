@@ -6,7 +6,15 @@ DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
 DEVKITARM="${DEVKITARM:-${DEVKITPRO}/devkitARM}"
 SDL_BUILD="${ROOT}/build-3ds/sdl"
 SDL_PREFIX="${ROOT}/build-3ds/prefix"
-GAME_BUILD="${ROOT}/build-3ds/game"
+# Build a separate "bottom-screen Chinese" version when BOTTOM_SCREEN_CN=1.
+SUFFIX=""
+BSCN_FLAG=OFF
+if [[ "${BOTTOM_SCREEN_CN:-}" == "1" ]]; then
+  SUFFIX="-cn-bottom"
+  BSCN_FLAG=ON
+fi
+GAME_BUILD="${ROOT}/build-3ds${SUFFIX}/game"
+OUT_BASE="zelda3-3ds-v2.9.2${SUFFIX}"
 TOOLS_ROOT="${ZELDA3_TOOLS_ROOT:-${ROOT}/../../Tools/bin}"
 
 export DEVKITPRO DEVKITARM
@@ -31,7 +39,8 @@ cmake \
   -B "${GAME_BUILD}" \
   -DCMAKE_TOOLCHAIN_FILE="${DEVKITPRO}/cmake/3DS.cmake" \
   -DCMAKE_BUILD_TYPE=Release \
-  -DSDL2_ROOT="${SDL_PREFIX}"
+  -DSDL2_ROOT="${SDL_PREFIX}" \
+  -DBOTTOM_SCREEN_CN="${BSCN_FLAG}"
 cmake --build "${GAME_BUILD}" --parallel
 
 MAKEROM="${MAKEROM:-${TOOLS_ROOT}/makerom}"
@@ -58,16 +67,16 @@ fi
   cd "${ROOT}"
   "${MAKEROM}" \
     -f cia \
-    -o "${GAME_BUILD}/zelda3-3ds-v2.9.2.cia" \
-    -DAPP_ROMFS=build-3ds/game/romfs \
+    -o "${GAME_BUILD}/${OUT_BASE}.cia" \
+    -DAPP_ROMFS="build-3ds${SUFFIX}/game/romfs" \
     -rsf platform/3ds/cia/zelda3.rsf \
     -target t \
     -exefslogo \
-    -elf build-3ds/game/zelda3-3ds.elf \
-    -icon build-3ds/game/zelda3-3ds.icn \
-    -banner build-3ds/game/zelda3-3ds.bnr
+    -elf "build-3ds${SUFFIX}/game/zelda3-3ds.elf" \
+    -icon "build-3ds${SUFFIX}/game/zelda3-3ds.icn" \
+    -banner "build-3ds${SUFFIX}/game/zelda3-3ds.bnr"
 )
 
 printf 'Listos:\n'
-printf '  %s\n' "${GAME_BUILD}/zelda3-3ds-v2.9.2.3dsx"
-printf '  %s\n' "${GAME_BUILD}/zelda3-3ds-v2.9.2.cia"
+printf '  %s\n' "${GAME_BUILD}/${OUT_BASE}.3dsx"
+printf '  %s\n' "${GAME_BUILD}/${OUT_BASE}.cia"

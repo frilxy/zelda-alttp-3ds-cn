@@ -55,6 +55,9 @@ target_compile_definitions(zelda3-3ds PRIVATE
   ZELDA3_3DS_VERSION=\"2.9.2\"
   NDEBUG=1
 )
+if(BOTTOM_SCREEN_CN)
+  target_compile_definitions(zelda3-3ds PRIVATE BOTTOM_SCREEN_CN=1)
+endif()
 
 target_compile_options(zelda3-3ds PRIVATE
   -O3
