@@ -158,7 +158,7 @@ static const char *const kPadCmdNames[12] = {
   "UP", "DOWN", "LEFT", "RIGHT", "SELECT", "START", "A", "B", "X", "Y", "L", "R",
 };
 static const char *const kPadButtonLabel[17] = {
-  "A", "B", "X", "Y", SS_STR("BACK","返回"), "GUIDE", "START", "L3", "R3",
+  "A", "B", "X", "Y", "BACK", "GUIDE", "START", "L3", "R3",
   "L1", "R1", "D UP", "D DOWN", "D LEFT", "D RIGHT", "L2", "R2",
 };
 static const char *const kPadButtonIni[17] = {
@@ -1086,11 +1086,11 @@ static void draw_settings_row(RectFS *row, bool armed) {
 }
 
 static void draw_remap_panel(RectFS r) {
-  draw_text(SS_STR("REMAP BUTTONS","重映射按键"), r.x + r.w / 2 - text_width(SS_STR("REMAP BUTTONS","重映射按键"), 3 * u) / 2,
+  draw_text("REMAP BUTTONS", r.x + r.w / 2 - text_width("REMAP BUTTONS", 3 * u) / 2,
             r.y + 18 * u, 3 * u);
   remap_back_r = (RectFS){r.x + 14 * u, r.y + 12 * u, 76 * u, 32 * u};
   draw_settings_row(&remap_back_r, false);
-  draw_text(SS_STR("BACK","返回"), remap_back_r.x + remap_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 1.8f * u) / 2,
+  draw_text("BACK", remap_back_r.x + remap_back_r.w / 2 - text_width("BACK", 1.8f * u) / 2,
             remap_back_r.y + remap_back_r.h / 2 - 7 * u, 1.8f * u);
 
   // resolve a pending capture from the game thread
@@ -1114,9 +1114,9 @@ static void draw_remap_panel(RectFS r) {
 
   remap_page_r = (RectFS){r.x + r.w - 86 * u, r.y + 12 * u, 72 * u, 32 * u};
   draw_settings_row(&remap_page_r, false);
-  draw_text(remap_first_row == 0 ? SS_STR("MORE","更多") : SS_STR("TOP","顶部"),
+  draw_text(remap_first_row == 0 ? "MORE" : "TOP",
             remap_page_r.x + remap_page_r.w / 2 -
-              text_width(remap_first_row == 0 ? SS_STR("MORE","更多") : SS_STR("TOP","顶部"), 1.8f * u) / 2,
+              text_width(remap_first_row == 0 ? "MORE" : "TOP", 1.8f * u) / 2,
             remap_page_r.y + remap_page_r.h / 2 - 7 * u, 1.8f * u);
 
   float row_h = 44 * u, gap = 6 * u;
@@ -1130,7 +1130,7 @@ static void draw_remap_panel(RectFS r) {
     draw_settings_row(row, armed);
     float ty = row->y + row->h / 2 - 9 * u;
     draw_text(kPadCmdNames[i], row->x + 12 * u, ty, 2.1f * u);
-    const char *v = armed ? SS_STR("PRESS KEY","按键")
+    const char *v = armed ? "PRESS KEY"
         : (pad_controls[i] >= 0 && pad_controls[i] < 17 ? kPadButtonLabel[pad_controls[i]] : "----");
     draw_text(v, row->x + row->w - 12 * u - text_width(v, 2.1f * u), ty, 2.1f * u);
   }
