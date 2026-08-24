@@ -66,6 +66,8 @@ jobs:
           curl -sL https://github.com/cli/cli/releases/download/v2.98.0/gh_2.98.0_linux_amd64.tar.gz | tar xz -C /tmp
           GH=/tmp/gh_2.98.0_linux_amd64/bin/gh
           $GH --version
+          # git in the container runs as a different owner; whitelist the checkout.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           # Remove every existing release/tag so only the newest build remains.
           $GH release list --limit 100 --json tagName --jq '.[].tagName' | while read -r t; do
             $GH release delete "$t" --yes 2>/dev/null || true
