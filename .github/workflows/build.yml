@@ -29,7 +29,10 @@ jobs:
           make -C /tmp/pctr/makerom -j"$(nproc)"
           cp /tmp/pctr/makerom/bin/makerom /opt/tools/makerom
           # --- bannertool (Epicpkmn11 fork) ---
-          git clone --depth 1 --recurse-submodules https://github.com/Epicpkmn11/bannertool.git /tmp/bt
+          git clone --depth 1 https://github.com/Epicpkmn11/bannertool.git /tmp/bt
+          # its "buildtools" submodule uses the blocked git:// protocol, so
+          # fetch it over https into the expected location instead.
+          git clone --depth 1 https://github.com/Steveice10/buildtools.git /tmp/bt/buildtools
           git -C /tmp/bt tag v1.2.3 2>/dev/null || true   # so git describe succeeds on a shallow clone
           make -C /tmp/bt -j"$(nproc)"
           cp /tmp/bt/output/bannertool /opt/tools/bannertool
