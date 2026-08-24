@@ -73,12 +73,12 @@ jobs:
           $GH --version
           # git in the container runs as a different owner; whitelist the checkout.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          # Remove every existing release/tag so only the newest build remains.
+          # Remove every release except the rolling "latest" so only the newest build remains.
           $GH release list --limit 100 --json tagName --jq '.[].tagName' | while read -r t; do
-            $GH release delete "$t" --yes 2>/dev/null || true
+            [ "$t" != "latest" ] && $GH release delete "$t" --yes 2>/dev/null || true
           done
-          # Publish the current build as the single rolling "latest" release.
-          $GH release create latest \
+          # Publish (upsert) the current build as the single rolling "latest" release.
+          $GH release create latest --force \
             --title "Zelda ALTTP 3DS 中文版 — latest" \
             --notes "最新构建（内置简体中文）。含 3DSX + CIA + cn_language.bin。带下屏汉化版（*-cn-bottom）。" \
             --target "$GITHUB_SHA" \
