@@ -155,11 +155,7 @@ static const int kDotPalette[4] = {0, 1, 2, 1};  // marker blink cycle (kDungMap
 
 // joypad command names + gamepad button names, in the game's orders
 static const char *const kPadCmdNames[12] = {
-#ifdef BOTTOM_SCREEN_CN
-  "上", "下", "左", "右", "选择", "开始", "A", "B", "X", "Y", "L", "R",
-#else
   "UP", "DOWN", "LEFT", "RIGHT", "SELECT", "START", "A", "B", "X", "Y", "L", "R",
-#endif
 };
 static const char *const kPadButtonLabel[17] = {
   "A", "B", "X", "Y", SS_STR("BACK","返回"), "GUIDE", "START", "L3", "R3",
@@ -404,7 +400,7 @@ static void draw_text(const char *s, float x, float y, float sc) {
     if ((unsigned char)*s & 0x80) {
       int cp = ss_utf8_decode(&s);
       int idx = ss_cjk_index(cp);
-      if (idx >= 0 && tex_cjk) draw_cell(tex_cjk, idx, 16, 16, cx, y, sc);
+      if (idx >= 0 && tex_cjk) draw_cell(tex_cjk, idx, 16, 16, cx, y - 4.0f * sc, sc);
       cx += 16 * sc;
       continue;
     }
@@ -456,15 +452,29 @@ static const uint8_t *tiny_letter(char ch) {
 
 static float tiny_text_width(const char *s, float sc) {
   float w = 0;
-  for (; *s; s++)
+  while (*s) {
+#ifdef BOTTOM_SCREEN_CN
+    if ((unsigned char)*s & 0x80) { ss_utf8_decode(&s); w += 16 * sc; continue; }
+#endif
     w += (*s == ' ' ? 4 : 6) * sc;
+    s++;
+  }
   return w;
 }
 
 static void draw_tiny_text(const char *s, float x, float y, float sc, uint32_t c) {
   float cx = floorf(x + 0.5f);
   float cy = floorf(y + 0.5f);
-  for (; *s; s++) {
+  while (*s) {
+#ifdef BOTTOM_SCREEN_CN
+    if ((unsigned char)*s & 0x80) {
+      int cp = ss_utf8_decode(&s);
+      int idx = ss_cjk_index(cp);
+      if (idx >= 0 && tex_cjk) draw_cell(tex_cjk, idx, 16, 16, cx, cy - 4.0f * sc, sc);
+      cx += 16 * sc;
+      continue;
+    }
+#endif
     const uint8_t *rows = tiny_letter(*s);
     if (rows) {
       for (int yy = 0; yy < 7; yy++)
@@ -473,6 +483,7 @@ static void draw_tiny_text(const char *s, float x, float y, float sc, uint32_t c
             fill_rect(cx + xx * sc, cy + yy * sc, sc, sc, c);
     }
     cx += (*s == ' ' ? 4 : 6) * sc;
+    s++;
   }
 }
 
@@ -812,7 +823,7 @@ static void draw_items(RectFS r) {
 
 static void draw_gear(RectFS r) {
   menu_box(r, COL_BOX_BORDER2);
-  draw_tiny_text("GEAR", r.x + r.w / 2 - tiny_text_width("GEAR", 2.0f) / 2,
+  draw_tiny_text(SS_STR("GEAR","装备"), r.x + r.w / 2 - tiny_text_width(SS_STR("GEAR","装备"), 2.0f) / 2,
                  r.y + 12.0f, 2.0f, COL(250, 250, 250));
 
   int sword = sram8(0x59), shield = sram8(0x5A);
@@ -848,7 +859,7 @@ static void draw_gear(RectFS r) {
   float y1 = y0 + cell + 24.0f;
   float bottle_cell = 25.0f;
   float bottle_gap = 7.0f;
-  draw_tiny_text("BOTTLES", x0, y1 - 12.0f, 1.0f, COL(250, 250, 250));
+  draw_tiny_text(SS_STR("BOTTLES","瓶子"), x0, y1 - 12.0f, 1.0f, COL(250, 250, 250));
   for (int i = 0; i < 4; i++) {
     float x = x0 + i * (bottle_cell + bottle_gap);
     slot_bg(x, y1, bottle_cell);
@@ -862,7 +873,7 @@ static void draw_gear(RectFS r) {
     }
   }
   float pend_x = r.x + r.w - 108.0f;
-  draw_tiny_text("PENDANTS", pend_x, y1 - 12.0f, 1.0f, COL(250, 250, 250));
+  draw_tiny_text(SS_STR("PENDANTS","吊坠"), pend_x, y1 - 12.0f, 1.0f, COL(250, 250, 250));
   int pend = sram8(0x74);
   static const int pbit[3] = {4, 2, 1};
   static const uint32_t pcol[3] = {COL(64, 200, 88), COL(70, 110, 240), COL(230, 60, 60)};
@@ -874,7 +885,7 @@ static void draw_gear(RectFS r) {
   }
 
   float cyC = y1 + 49.0f;
-  draw_tiny_text("CRYSTALS", x0, cyC - 12.0f, 1.0f, COL(250, 250, 250));
+  draw_tiny_text(SS_STR("CRYSTALS","水晶"), x0, cyC - 12.0f, 1.0f, COL(250, 250, 250));
   float crystal_start = x0 + 78.0f;
   float crystal_step = 23.0f;
   int owned7 = sram8(0x7A) & 0x7F, n_owned = 0;
@@ -1380,8 +1391,8 @@ static void draw_tab_bar(float tab_h) {
   tab_gear_r  = (RectFS){x0, y, bw, bh};
   tab_map_r   = (RectFS){x0 + bw + tgap, y, bw, bh};
   tab_items_r = (RectFS){x0 + 2 * (bw + tgap), y, bw, bh};
-  draw_tab_button(tab_gear_r, "GEAR", tab == TAB_GEAR);
-  draw_tab_button(tab_map_r, "MAP", tab == TAB_MAP);
+  draw_tab_button(tab_gear_r, SS_STR("GEAR","装备"), tab == TAB_GEAR);
+  draw_tab_button(tab_map_r, SS_STR("MAP","地图"), tab == TAB_MAP);
   draw_tab_button(tab_items_r, SS_STR("ITEMS","道具"), tab == TAB_ITEMS);
   draw_tab_button(tab_settings_r, NULL, tab == TAB_SETTINGS);
   draw_cog(tab_settings_r.x + tab_settings_r.w / 2, tab_settings_r.y + tab_settings_r.h / 2,
