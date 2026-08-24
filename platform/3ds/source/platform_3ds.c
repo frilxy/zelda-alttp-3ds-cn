@@ -20,7 +20,6 @@
 #include "types.h"
 #include "util.h"
 #include "zelda_rtl.h"
-#include "cn_language_data.h"
 
 extern void SecondScreenSDL_OpenDeveloperOverlay(void);
 
@@ -2310,202 +2309,7 @@ static bool WriteTranslatedProfileIni(const char *language_code) {
 // translation ROM.  dialogue_flags bits: 1 = new/EU encoding, 2 = text no
 // longer matches the US ROM, 4 = Chinese (16x16 CJK) mode.  LinkFish1 ships
 // 1|2|4 == 7 for 'cn'.
-static bool InjectChineseLanguage(const uint8 *assets_data, size_t assets_size,
-                                  uint8 **out_data, size_t *out_size) {
-  *out_data = NULL;
-  *out_size = 0;
-  if (assets_size < 88)
-    return false;
-  static const char signature[] = { kAssets_Sig };
-  if (memcmp(assets_data, signature, sizeof(signature)) != 0)
-    return false;
 
-  // The CN language block is compiled directly into the binary (see
-  // cn_language_data.h), so it's always available, no romfs or SD file needed.
-  const uint8_t *bin = kCnLanguageData;
-  size_t bin_size = kCnLanguageDataSize;
-  if (bin_size < 12 || memcmp(bin, "ZCNB", 4) != 0) {
-    return false;
-  }
-  uint32 dlen = ReadU32LE(bin + 4);
-  uint32 flen = ReadU32LE(bin + 8 + dlen);
-  if (dlen == 0 || flen == 0 || 12ULL + dlen + 4 + flen > bin_size) {
-    free(bin);
-    return false;
-  }
-  const uint8 *dialogue_blk = bin + 8;
-  const uint8 *font_blk = bin + 8 + dlen + 4;
-
-  static const uint8 kCnName[] = { 'c', 'n' };
-  const uint8 kCnFlags = 7;  // new encoding | no US match | CJK mode
-  bool ok = true;
-
-  uint32 asset_count = ReadU32LE(assets_data + 80);
-  uint32 names_size = ReadU32LE(assets_data + 84);
-  if (asset_count != kNumberOfAssets ||
-      assets_size < 88 + asset_count * 4 + names_size)
-    ok = false;
-
-  OwnedBlock *assets = NULL;
-  OwnedBlock *dialogues = NULL, *fonts = NULL, *map = NULL;
-  int dialogue_count = 0, font_count = 0, map_count = 0;
-  if (ok) {
-    assets = calloc(asset_count, sizeof(*assets));
-    if (!assets)
-      ok = false;
-  }
-  if (ok) {
-    size_t offset = 88 + asset_count * 4 + names_size;
-    for (uint32 i = 0; i < asset_count; i++) {
-      uint32 size = ReadU32LE(assets_data + 88 + i * 4);
-      offset = (offset + 3) & ~3;
-      if (offset + size > assets_size ||
-          !CopyBlock(&assets[i], assets_data + offset, size)) {
-        ok = false;
-        break;
-      }
-      offset += size;
-    }
-  }
-  if (ok)
-    ok = UnpackBlocks(assets[94].data, assets[94].size,
-                      &dialogues, &dialogue_count) &&
-         UnpackBlocks(assets[95].data, assets[95].size,
-                      &fonts, &font_count) &&
-         UnpackBlocks(assets[96].data, assets[96].size,
-                      &map, &map_count);
-  if (ok && (dialogue_count != font_count || map_count <= 0))
-    ok = false;
-
-  if (ok) {
-    int index = dialogue_count;
-    OwnedBlock *nd = calloc(dialogue_count + 1, sizeof(*nd));
-    OwnedBlock *nf = calloc(font_count + 1, sizeof(*nf));
-    OwnedBlock *nm = calloc(map_count + 1, sizeof(*nm));
-    if (!nd || !nf || !nm) {
-      free(nd); free(nf); free(nm);
-      ok = false;
-    } else {
-      memcpy(nd, dialogues, dialogue_count * sizeof(*dialogues));
-      memcpy(nf, fonts, font_count * sizeof(*fonts));
-      memcpy(nm, map, map_count * sizeof(*map));
-      free(dialogues); free(fonts); free(map);
-      dialogues = nd; fonts = nf; map = nm;
-      dialogue_count++; font_count++; map_count++;
-      if (!CopyBlock(&dialogues[index], dialogue_blk, dlen) ||
-          !CopyBlock(&fonts[index], font_blk, flen)) {
-        ok = false;
-      }
-      if (ok) {
-        OwnedBlock parts[2] = {0};
-        uint8 conf[3] = { (uint8)index, (uint8)index, kCnFlags };
-        ok = CopyBlock(&parts[0], kCnName, sizeof(kCnName)) &&
-             CopyBlock(&parts[1], conf, sizeof(conf)) &&
-             PackBlocks(parts, 2, &map[index]);
-        FreeBlocks(parts, 2);
-      }
-    }
-  }
-
-  OwnedBlock pd = {0}, pf = {0}, pm = {0};
-  if (ok)
-    ok = PackBlocks(dialogues, dialogue_count, &pd) &&
-         PackBlocks(fonts, font_count, &pf) &&
-         PackBlocks(map, map_count, &pm);
-  if (ok) {
-    free(assets[94].data); free(assets[95].data); free(assets[96].data);
-    assets[94] = pd; assets[95] = pf; assets[96] = pm;
-    pd.data = NULL; pf.data = NULL; pm.data = NULL;
-    size_t total = 88 + asset_count * 4 + names_size;
-    for (uint32 i = 0; i < asset_count; i++)
-      total = ((total + 3) & ~3) + assets[i].size;
-    uint8 *out = calloc(1, total);
-    if (!out) {
-      ok = false;
-    } else {
-      memcpy(out, assets_data, 88);
-      for (uint32 i = 0; i < asset_count; i++)
-        WriteU32LE(out + 88 + i * 4, (uint32)assets[i].size);
-      memcpy(out + 88 + asset_count * 4,
-             assets_data + 88 + asset_count * 4, names_size);
-      size_t o = 88 + asset_count * 4 + names_size;
-      for (uint32 i = 0; i < asset_count; i++) {
-        o = (o + 3) & ~3;
-        memcpy(out + o, assets[i].data, assets[i].size);
-        o += assets[i].size;
-      }
-      *out_data = out;
-      *out_size = total;
-    }
-  }
-
-  FreeBlocks(&pd, 1); FreeBlocks(&pf, 1); FreeBlocks(&pm, 1);
-  FreeBlocks(dialogues, dialogue_count);
-  FreeBlocks(fonts, font_count);
-  FreeBlocks(map, map_count);
-  free(dialogues); free(fonts); free(map);
-  if (assets)
-    for (uint32 i = 0; i < asset_count; i++)
-      FreeBlocks(&assets[i], 1);
-  free(assets);
-  return ok;
-}
-
-// True if the assets already carry the 'cn' language (so we don't double-add).
-static bool AssetsContainCn(const uint8 *assets_data, size_t assets_size) {
-  if (assets_size < 88)
-    return false;
-  static const char signature[] = { kAssets_Sig };
-  if (memcmp(assets_data, signature, sizeof(signature)) != 0)
-    return false;
-  uint32 asset_count = ReadU32LE(assets_data + 80);
-  uint32 names_size = ReadU32LE(assets_data + 84);
-  if (asset_count != kNumberOfAssets ||
-      assets_size < 88 + asset_count * 4 + names_size)
-    return false;
-  size_t offset = 88 + asset_count * 4 + names_size;
-  const uint8 *map_data = NULL;
-  uint32 map_size = 0;
-  for (uint32 i = 0; i < asset_count; i++) {
-    uint32 sz = ReadU32LE(assets_data + 88 + i * 4);
-    offset = (offset + 3) & ~3;
-    if (offset + sz > assets_size)
-      return false;
-    if (i == 96) {  // kDialogueMap
-      map_data = assets_data + offset;
-      map_size = sz;
-    }
-    offset += sz;
-  }
-  if (!map_data)
-    return false;
-  OwnedBlock *map = NULL;
-  int map_count = 0;
-  if (!UnpackBlocks(map_data, map_size, &map, &map_count) || map_count <= 0) {
-    FreeBlocks(map, map_count);
-    free(map);
-    return false;
-  }
-  bool found = false;
-  for (int i = 0; i < map_count && !found; i++) {
-    OwnedBlock *lang = NULL;
-    int lang_count = 0;
-    if (UnpackBlocks(map[i].data, map[i].size, &lang, &lang_count) &&
-        lang_count >= 1 && lang[0].size == 2 &&
-        memcmp(lang[0].data, "cn", 2) == 0)
-      found = true;
-    FreeBlocks(lang, lang_count);
-    free(lang);
-  }
-  FreeBlocks(map, map_count);
-  free(map);
-  return found;
-}
-
-// Set (or insert) `Language = <code>` in the profile zelda3.ini, so the game
-// boots straight into that language without the user editing anything.  The
-// bundled ini has the key commented out, and the parser accepts a trailing
-// [General] section, so appending is a reliable, idempotent-safe fallback.
 static void ForceLanguageInProfileIni(const char *code) {
   size_t size = 0;
   char *text = (char *)ReadWholeFile("zelda3.ini", &size);
@@ -2550,29 +2354,23 @@ static void ForceLanguageInProfileIni(const char *code) {
 // Make sure the profile assets contain the CN language and that the config
 // boots straight into it.  Idempotent and runs on every launch, not just the
 // first extraction, so it works even with previously cached English assets.
+// Make sure the active assets contain the Simplified Chinese language and that
+// the config boots straight into it.  The CN assets are baked in at build time
+// (LinkFish1-style), so here we simply make sure the bundled file wins over any
+// stale English cache on every launch.  Idempotent and safe (no ROM, no
+// injection), so it can't crash.
 static bool EnsureChineseLanguage(void) {
-  size_t assets_size = 0;
-  uint8 *assets = ReadWholeFile(kAssetsFilename, &assets_size);
-  if (!assets || !AssetsBlobLooksValid(assets, assets_size)) {
-    free(assets);
+  size_t bsz = 0;
+  uint8_t *bundle = ReadWholeFile("romfs:/zelda3_assets.dat", &bsz);
+  if (!bundle || !bsz || !AssetsBlobLooksValid(bundle, bsz)) {
+    free(bundle);
     return false;
   }
-  if (!AssetsContainCn(assets, assets_size)) {
-    uint8 *out = NULL;
-    size_t out_size = 0;
-    if (!InjectChineseLanguage(assets, assets_size, &out, &out_size)) {
-      free(assets);
-      return false;
-    }
-    free(assets);
-    assets = out;
-    assets_size = out_size;
-  }
-  bool written = WriteAssetsFile(assets, assets_size);
-  free(assets);
+  bool written = WriteAssetsFile(bundle, bsz);
+  free(bundle);
   if (written) {
     ForceLanguageInProfileIni("cn");
-    LogSetup("Chinese language ensured (default)");
+    LogSetup("Chinese assets ensured (default)");
   }
   return written;
 }
@@ -3101,9 +2899,21 @@ static bool EnsureProfileReady(RomEntry *rom, bool force_extract) {
   CopyFileIfMissing(kBundledConfig, "zelda3.ini");
   bool ready = !force_extract && AssetsFileLooksValid(kAssetsFilename);
   if (!ready) {
-    char rom_path[640];
-    snprintf(rom_path, sizeof(rom_path), "../../%s", rom->filename);
-    ready = ExtractAssetsFromRom(rom_path);
+    // Prefer the pre-baked assets (already include Chinese).  Unlike the
+    // runtime BPS extraction this needs no ROM and, importantly, cannot
+    // crash the injection path.
+    size_t bsz = 0;
+    uint8_t *bundle = ReadWholeFile("romfs:/zelda3_assets.dat", &bsz);
+    if (bundle && bsz && AssetsBlobLooksValid(bundle, bsz)) {
+      LogSetup("Using pre-baked Chinese assets (%lu bytes)", (unsigned long)bsz);
+      ready = WriteAssetsFile(bundle, bsz);
+      free(bundle);
+    } else {
+      free(bundle);
+      char rom_path[640];
+      snprintf(rom_path, sizeof(rom_path), "../../%s", rom->filename);
+      ready = ExtractAssetsFromRom(rom_path);
+    }
   }
   chdir(cwd);
   if (ready) {

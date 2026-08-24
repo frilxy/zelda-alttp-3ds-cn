@@ -90,9 +90,12 @@ configure_file(
   "${ZELDA3_ROMFS}/zelda3.ini"
   COPYONLY
 )
+# Pre-baked assets that already include the Simplified Chinese language
+# (baked at build time, LinkFish1-style).  The game copies these instead of
+# extracting from the ROM at runtime.
 configure_file(
-  "${CMAKE_CURRENT_LIST_DIR}/romfs/cn_language.bin"
-  "${ZELDA3_ROMFS}/cn_language.bin"
+  "${CMAKE_CURRENT_LIST_DIR}/romfs/zelda3_assets.dat"
+  "${ZELDA3_ROMFS}/zelda3_assets.dat"
   COPYONLY
 )
 
