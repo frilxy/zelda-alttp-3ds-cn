@@ -823,8 +823,8 @@ static void draw_items(RectFS r) {
 
 static void draw_gear(RectFS r) {
   menu_box(r, COL_BOX_BORDER2);
-  draw_tiny_text(SS_STR("GEAR","装备"), r.x + r.w / 2 - tiny_text_width(SS_STR("GEAR","装备"), 2.0f) / 2,
-                 r.y + 12.0f, 2.0f, COL(250, 250, 250));
+  draw_tiny_text(SS_STR("GEAR","装备"), r.x + r.w / 2 - tiny_text_width(SS_STR("GEAR","装备"), 1.4f) / 2,
+                 r.y + 12.0f, 1.4f, COL(250, 250, 250));
 
   int sword = sram8(0x59), shield = sram8(0x5A);
   int gear_cells[7];
