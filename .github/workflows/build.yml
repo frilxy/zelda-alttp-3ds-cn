@@ -61,12 +61,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
+          # gh isn't preinstalled in the devkitARM container, so fetch the
+          # self-contained static binary.
+          curl -sL https://github.com/cli/cli/releases/download/v2.98.0/gh_2.98.0_linux_amd64.tar.gz | tar xz -C /tmp
+          GH=/tmp/gh_2.98.0_linux_amd64/bin/gh
+          $GH --version
           # Remove every existing release/tag so only the newest build remains.
-          gh release list --limit 100 --json tagName --jq '.[].tagName' | while read -r t; do
-            gh release delete "$t" --yes 2>/dev/null || true
+          $GH release list --limit 100 --json tagName --jq '.[].tagName' | while read -r t; do
+            $GH release delete "$t" --yes 2>/dev/null || true
           done
           # Publish the current build as the single rolling "latest" release.
-          gh release create latest \
+          $GH release create latest \
             --title "Zelda ALTTP 3DS 中文版 — latest" \
             --notes "最新构建（内置简体中文）。含 3DSX + CIA + cn_language.bin。" \
             --target "$GITHUB_SHA" \
