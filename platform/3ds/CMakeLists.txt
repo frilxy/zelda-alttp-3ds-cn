@@ -90,6 +90,11 @@ configure_file(
   "${ZELDA3_ROMFS}/zelda3.ini"
   COPYONLY
 )
+configure_file(
+  "${CMAKE_CURRENT_LIST_DIR}/romfs/cn_language.bin"
+  "${ZELDA3_ROMFS}/cn_language.bin"
+  COPYONLY
+)
 
 set(ZELDA3_SMDH "${CMAKE_CURRENT_BINARY_DIR}/zelda3-3ds.smdh")
 ctr_generate_smdh(

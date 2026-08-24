@@ -31,6 +31,7 @@ static const char kAssetsFilename[] = "zelda3_assets.dat";
 static const char kTemporaryAssetsFilename[] = "zelda3_assets.tmp";
 static const char kBundledPatch[] = "romfs:/zelda3_assets.bps";
 static const char kBundledConfig[] = "romfs:/zelda3.ini";
+static const char kCnLanguageAsset[] = "romfs:/cn_language.bin";
 
 static enum Platform3DSDisplayMode g_display_mode =
   kPlatform3DSDisplayOriginal;
@@ -2320,7 +2321,7 @@ static bool InjectChineseLanguage(const uint8 *assets_data, size_t assets_size,
     return false;
 
   size_t bin_size = 0;
-  uint8 *bin = ReadWholeFile("../../cn_language.bin", &bin_size);
+  uint8 *bin = ReadWholeFile(kCnLanguageAsset, &bin_size);
   if (!bin || bin_size < 12 || memcmp(bin, "ZCNB", 4) != 0) {
     free(bin);
     return false;
@@ -2448,6 +2449,132 @@ static bool InjectChineseLanguage(const uint8 *assets_data, size_t assets_size,
   free(assets);
   free(bin);
   return ok;
+}
+
+// True if the assets already carry the 'cn' language (so we don't double-add).
+static bool AssetsContainCn(const uint8 *assets_data, size_t assets_size) {
+  if (assets_size < 88)
+    return false;
+  static const char signature[] = { kAssets_Sig };
+  if (memcmp(assets_data, signature, sizeof(signature)) != 0)
+    return false;
+  uint32 asset_count = ReadU32LE(assets_data + 80);
+  uint32 names_size = ReadU32LE(assets_data + 84);
+  if (asset_count != kNumberOfAssets ||
+      assets_size < 88 + asset_count * 4 + names_size)
+    return false;
+  size_t offset = 88 + asset_count * 4 + names_size;
+  const uint8 *map_data = NULL;
+  uint32 map_size = 0;
+  for (uint32 i = 0; i < asset_count; i++) {
+    uint32 sz = ReadU32LE(assets_data + 88 + i * 4);
+    offset = (offset + 3) & ~3;
+    if (offset + sz > assets_size)
+      return false;
+    if (i == 96) {  // kDialogueMap
+      map_data = assets_data + offset;
+      map_size = sz;
+    }
+    offset += sz;
+  }
+  if (!map_data)
+    return false;
+  OwnedBlock *map = NULL;
+  int map_count = 0;
+  if (!UnpackBlocks(map_data, map_size, &map, &map_count) || map_count <= 0) {
+    FreeBlocks(map, map_count);
+    free(map);
+    return false;
+  }
+  bool found = false;
+  for (int i = 0; i < map_count && !found; i++) {
+    OwnedBlock *lang = NULL;
+    int lang_count = 0;
+    if (UnpackBlocks(map[i].data, map[i].size, &lang, &lang_count) &&
+        lang_count >= 1 && lang[0].size == 2 &&
+        memcmp(lang[0].data, "cn", 2) == 0)
+      found = true;
+    FreeBlocks(lang, lang_count);
+    free(lang);
+  }
+  FreeBlocks(map, map_count);
+  free(map);
+  return found;
+}
+
+// Set (or insert) `Language = <code>` in the profile zelda3.ini, so the game
+// boots straight into that language without the user editing anything.  The
+// bundled ini has the key commented out, and the parser accepts a trailing
+// [General] section, so appending is a reliable, idempotent-safe fallback.
+static void ForceLanguageInProfileIni(const char *code) {
+  size_t size = 0;
+  char *text = (char *)ReadWholeFile("zelda3.ini", &size);
+  if (!text)
+    return;
+  char *data = (char *)malloc(size + 1);
+  if (!data) {
+    free(text);
+    return;
+  }
+  memcpy(data, text, size);
+  data[size] = 0;
+  free(text);
+
+  bool has_active_lang = false;
+  for (char *line = data; line && *line; ) {
+    char *nl = strchr(line, '\n');
+    if (nl) *nl = 0;
+    char *p = line;
+    while (*p == ' ' || *p == '\t' || *p == '\r') p++;
+    if (strncasecmp(p, "language", 8) == 0) {
+      char *eq = p + 8;
+      while (*eq == ' ' || *eq == '\t') eq++;
+      if (*eq == '=') {
+        has_active_lang = true;
+        break;
+      }
+    }
+    line = nl ? nl + 1 : NULL;
+  }
+
+  if (!has_active_lang) {
+    FILE *f = fopen("zelda3.ini", "a");
+    if (f) {
+      fprintf(f, "\n[General]\nLanguage = %s\n", code);
+      fclose(f);
+    }
+  }
+  free(data);
+}
+
+// Make sure the profile assets contain the CN language and that the config
+// boots straight into it.  Idempotent and runs on every launch, not just the
+// first extraction, so it works even with previously cached English assets.
+static bool EnsureChineseLanguage(void) {
+  size_t assets_size = 0;
+  uint8 *assets = ReadWholeFile(kAssetsFilename, &assets_size);
+  if (!assets || !AssetsBlobLooksValid(assets, assets_size)) {
+    free(assets);
+    return false;
+  }
+  if (!AssetsContainCn(assets, assets_size)) {
+    uint8 *out = NULL;
+    size_t out_size = 0;
+    if (!InjectChineseLanguage(assets, assets_size, &out, &out_size)) {
+      free(assets);
+      return false;
+    }
+    free(assets);
+    assets = out;
+    assets_size = out_size;
+  }
+  bool written = WriteAssetsFile(assets, assets_size);
+  free(assets);
+  if (written) {
+    ForceLanguageInProfileIni("cn");
+    LogSetup("Chinese language ensured (default)");
+  }
+  return written;
 }
 
 static bool TryBuildTranslatedAssets(const uint8 *rom, size_t rom_size,
@@ -2641,19 +2768,6 @@ static bool ExtractAssetsFromRom(const char *rom_path) {
   if (!assets) {
     LogSetup("ROM not compatible with available extraction paths");
     return false;
-  }
-
-  // Inject the bundled Simplified Chinese language if cn_language.bin is
-  // present alongside the ROMs.  Requires the clean US ROM build above.
-  uint8 *cn_assets = NULL;
-  size_t cn_assets_size = 0;
-  if (InjectChineseLanguage(assets, assets_size, &cn_assets, &cn_assets_size)) {
-    LogSetup("Chinese language injected into assets (%lu bytes)",
-             (unsigned long)cn_assets_size);
-    free(assets);
-    assets = cn_assets;
-    assets_size = cn_assets_size;
-    WriteTranslatedProfileIni("cn");
   }
 
   bool written = WriteAssetsFile(assets, assets_size);
@@ -3092,6 +3206,11 @@ bool Platform3DS_PrepareStorage(void) {
   Platform3DS_LogRuntime("Active ROM profile: %s", profile);
   Platform3DS_DetectModel();
   CopyFileIfMissing(kBundledConfig, "zelda3.ini");
+  // Force Simplified Chinese: inject the bundled 'cn' language into the
+  // (possibly previously cached) assets and boot straight into it.  Runs on
+  // every launch and is idempotent, so the game is Chinese by default.
+  EnsureChineseLanguage();
+
   Platform3DS_LoadRuntimeSettings();
   if (!AssetsFileLooksValid(kAssetsFilename)) {
     Platform3DS_LogRuntime("ERROR active profile assets missing/invalid");
