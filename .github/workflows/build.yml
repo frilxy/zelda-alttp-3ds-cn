@@ -3,8 +3,9 @@ name: Build 3DS CIA
 on:
   push:
   workflow_dispatch:
-  release:
-    types: [published]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -24,7 +25,6 @@ jobs:
           mkdir -p /opt/tools
           # --- makerom (3DSGuy/Project_CTR) ---
           git clone --depth 1 https://github.com/3DSGuy/Project_CTR.git /tmp/pctr
-          # native target is the default for the makefile on Linux
           make -C /tmp/pctr/makerom deps >/dev/null 2>&1
           make -C /tmp/pctr/makerom -j"$(nproc)"
           cp /tmp/pctr/makerom/bin/makerom /opt/tools/makerom
@@ -46,7 +46,7 @@ jobs:
           chmod +x platform/3ds/build.sh
           platform/3ds/build.sh
 
-      - name: Upload artifacts
+      - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
         with:
           name: zelda3-3ds-cn
@@ -55,3 +55,20 @@ jobs:
             build-3ds/game/*.3dsx
             cn_language.bin
           if-no-files-found: warn
+
+      - name: Publish rolling-latest GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          # Remove every existing release/tag so only the newest build remains.
+          gh release list --limit 100 --json tagName --jq '.[].tagName' | while read -r t; do
+            gh release delete "$t" --yes 2>/dev/null || true
+          done
+          # Publish the current build as the single rolling "latest" release.
+          gh release create latest \
+            --title "Zelda ALTTP 3DS 中文版 — latest" \
+            --notes "最新构建（内置简体中文）。含 3DSX + CIA + cn_language.bin。" \
+            --target "$GITHUB_SHA" \
+            build-3ds/game/*.cia build-3ds/game/*.3dsx cn_language.bin \
+            --latest
