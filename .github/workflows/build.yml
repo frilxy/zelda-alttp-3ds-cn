@@ -33,7 +33,7 @@ jobs:
           # its "buildtools" submodule uses the blocked git:// protocol, so
           # fetch it over https into the expected location instead.
           git clone --depth 1 https://github.com/Steveice10/buildtools.git /tmp/bt/buildtools
-          git -C /tmp/bt tag v1.2.3 2>/dev/null || true   # so git describe succeeds on a shallow clone
+          git -C /tmp/bt tag 1.2.3 2>/dev/null || true   # no 'v' prefix so VERSION_MAJOR parses to a number
           make -C /tmp/bt -j"$(nproc)"
           cp /tmp/bt/output/bannertool /opt/tools/bannertool
           chmod +x /opt/tools/makerom /opt/tools/bannertool
