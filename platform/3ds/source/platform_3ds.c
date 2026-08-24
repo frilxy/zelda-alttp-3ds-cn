@@ -20,6 +20,7 @@
 #include "types.h"
 #include "util.h"
 #include "zelda_rtl.h"
+#include "cn_language_data.h"
 
 extern void SecondScreenSDL_OpenDeveloperOverlay(void);
 
@@ -31,7 +32,6 @@ static const char kAssetsFilename[] = "zelda3_assets.dat";
 static const char kTemporaryAssetsFilename[] = "zelda3_assets.tmp";
 static const char kBundledPatch[] = "romfs:/zelda3_assets.bps";
 static const char kBundledConfig[] = "romfs:/zelda3.ini";
-static const char kCnLanguageAsset[] = "romfs:/cn_language.bin";
 
 static enum Platform3DSDisplayMode g_display_mode =
   kPlatform3DSDisplayOriginal;
@@ -2320,10 +2320,11 @@ static bool InjectChineseLanguage(const uint8 *assets_data, size_t assets_size,
   if (memcmp(assets_data, signature, sizeof(signature)) != 0)
     return false;
 
-  size_t bin_size = 0;
-  uint8 *bin = ReadWholeFile(kCnLanguageAsset, &bin_size);
-  if (!bin || bin_size < 12 || memcmp(bin, "ZCNB", 4) != 0) {
-    free(bin);
+  // The CN language block is compiled directly into the binary (see
+  // cn_language_data.h), so it's always available, no romfs or SD file needed.
+  const uint8_t *bin = kCnLanguageData;
+  size_t bin_size = kCnLanguageDataSize;
+  if (bin_size < 12 || memcmp(bin, "ZCNB", 4) != 0) {
     return false;
   }
   uint32 dlen = ReadU32LE(bin + 4);
@@ -2447,7 +2448,6 @@ static bool InjectChineseLanguage(const uint8 *assets_data, size_t assets_size,
     for (uint32 i = 0; i < asset_count; i++)
       FreeBlocks(&assets[i], 1);
   free(assets);
-  free(bin);
   return ok;
 }
 
