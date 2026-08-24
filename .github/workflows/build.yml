@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     # devkitPro publishes devkitARM images on Docker Hub with the 3DS
-    # toolchain (libctru, citro2d, SDL2 cross files, makerom, bannertool).
+    # toolchain (devkitARM, libctru, citro2d, SDL2 cross files).
     runs-on: ubuntu-latest
     container: docker.io/devkitpro/devkitarm:latest
 
@@ -17,23 +17,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install makerom + bannertool via devkitPro pacman
+      - name: Build makerom + bannertool from source
         run: |
-          export DEVKITPRO=/opt/devkitpro
-          CONF=$(find /etc /opt -name "dkp-pacman.conf" 2>/dev/null | head -1)
-          echo "pacman conf: ${CONF:-none}"
-          if [ -n "$CONF" ] && ! grep -q '\[dkp-tools\]' "$CONF" 2>/dev/null; then
-            printf '\n[dkp-tools]\nSigLevel = Required DatabaseOptional\nServer = https://pkg.devkitpro.org/dkp-tools\n' >> "$CONF"
-          fi
-          dkp-pacman -Sy --noconfirm || echo "sync failed"
-          dkp-pacman -S --noconfirm --needed makerom bannertool || \
-            { echo "=== pacman install failed; dump state ==="; \
-              ls -la /opt/devkitpro/tools/bin/ || true; \
-              command -v makerom || true; command -v bannertool || true; }
+          set -e
+          echo "== host compilers ==" ; which gcc g++ cc make cmake git || true
+          mkdir -p /opt/tools
+          # --- makerom (3DSGuy/Project_CTR) ---
+          git clone --depth 1 https://github.com/3DSGuy/Project_CTR.git /tmp/pctr
+          # native target is the default for the makefile on Linux
+          make -C /tmp/pctr/makerom deps >/dev/null 2>&1
+          make -C /tmp/pctr/makerom -j"$(nproc)"
+          cp /tmp/pctr/makerom/bin/makerom /opt/tools/makerom
+          # --- bannertool (Epicpkmn11 fork) ---
+          git clone --depth 1 https://github.com/Epicpkmn11/bannertool.git /tmp/bt
+          make -C /tmp/bt -j"$(nproc)"
+          cp /tmp/bt/output/bannertool /opt/tools/bannertool
+          chmod +x /opt/tools/makerom /opt/tools/bannertool
+          ls -la /opt/tools/
 
-      - name: Build
+      - name: Build (3DSX + CIA)
         env:
-          ZELDA3_TOOLS_ROOT: /opt/devkitpro/tools/bin
+          ZELDA3_TOOLS_ROOT: /opt/tools
         run: |
           chmod +x platform/3ds/build.sh
           platform/3ds/build.sh
