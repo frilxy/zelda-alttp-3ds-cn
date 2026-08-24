@@ -43,6 +43,12 @@ cmake \
   -DBOTTOM_SCREEN_CN="${BSCN_FLAG}"
 cmake --build "${GAME_BUILD}" --parallel
 
+# CMake pegs the .3dsx name at zelda3-3ds-v2.9.2.3dsx; rename it so the
+# bottom-screen-CN build doesn't collide with the standard build in the release.
+if [[ "${SUFFIX}" != "" && -f "${GAME_BUILD}/zelda3-3ds-v2.9.2.3dsx" ]]; then
+  mv "${GAME_BUILD}/zelda3-3ds-v2.9.2.3dsx" "${GAME_BUILD}/${OUT_BASE}.3dsx"
+fi
+
 MAKEROM="${MAKEROM:-${TOOLS_ROOT}/makerom}"
 BANNERTOOL="${BANNERTOOL:-${TOOLS_ROOT}/bannertool}"
 if [[ ! -x "${MAKEROM}" || ! -x "${BANNERTOOL}" ]]; then
