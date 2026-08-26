@@ -20,8 +20,8 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 | 版本 | 内容 |
 |---|---|
-| **标准版** `zelda3-3ds-v2.9.2` | 对话全中文，下屏仍为英文 |
-| **下屏汉化版** `zelda3-3ds-v2.9.2-cn-bottom` | 对话 + **下屏菜单/设置/地图 UI 全中文** |
+| **标准版** `zelda3-3ds-v3.0-E3` | 对话全中文，下屏仍为英文 |
+| **下屏汉化版** `zelda3-3ds-v3.0-E3-cn-bottom` | 对话 + **下屏菜单/设置/地图 UI 全中文** |
 
 > 想要下屏中文就用 **`-cn-bottom`** 那个。
 
@@ -46,10 +46,10 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 | 文件 | 用途 |
 |---|---|
-| `zelda3-3ds-v2.9.2.cia` | 标准版，FBI 安装（对话中文，下屏英文） |
-| `zelda3-3ds-v2.9.2.3dsx` | 标准版，Homebrew Launcher |
-| `zelda3-3ds-v2.9.2-cn-bottom.cia` | **下屏汉化版**，FBI 安装（下屏也中文） |
-| `zelda3-3ds-v2.9.2-cn-bottom.3dsx` | **下屏汉化版**，Homebrew Launcher |
+| `zelda3-3ds-v3.0-E3.cia` | 标准版，FBI 安装（对话中文，下屏英文） |
+| `zelda3-3ds-v3.0-E3.3dsx` | 标准版，Homebrew Launcher |
+| `zelda3-3ds-v3.0-E3-cn-bottom.cia` | **下屏汉化版**，FBI 安装（下屏也中文） |
+| `zelda3-3ds-v3.0-E3-cn-bottom.3dsx` | **下屏汉化版**，Homebrew Launcher |
 | `cn_language.bin` | 备用中文语言块（一般无需使用） |
 
 ---
