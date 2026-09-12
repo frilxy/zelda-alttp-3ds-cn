@@ -2,7 +2,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#define UPDATE_REPOSITORY "EstebanPdN/zelda-alttp-3ds"
+// The in-game updater must look at this fork's releases: pointing it at upstream
+// would offer, download and install a build without the Chinese translation.
+// Releases must be tagged with a version the parser accepts (e.g. "v3.2-E1",
+// never a rolling "latest") and carry zelda3-3ds-v<version>.cia / .3dsx, both of
+// which platform/3ds/build.sh produces.
+#define UPDATE_REPOSITORY "frilxy/zelda-alttp-3ds-cn"
 #define UPDATE_MAX_FILE (32u * 1024u * 1024u)
 typedef struct UpdateRelease {
   char version[48];

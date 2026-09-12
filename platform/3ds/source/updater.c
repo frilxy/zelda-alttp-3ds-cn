@@ -10,6 +10,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+// The bottom-screen UI is Simplified Chinese in the -cn-bottom build
+// (BOTTOM_SCREEN_CN, see platform/3ds/CMakeLists.txt); the status messages it
+// shows follow the same switch as the rest of that screen.  UpdateStatus.message
+// is 80 bytes, which the 3-bytes-per-character translations below stay inside.
+#ifdef BOTTOM_SCREEN_CN
+#define UPD_STR(en, zh) zh
+#else
+#define UPD_STR(en, zh) en
+#endif
+
 #define UPDATE_DIR "sdmc:/3ds/Zelda 3DS/update"
 #define UPDATE_PART UPDATE_DIR "/download.part"
 #define CHANNEL_FILE UPDATE_DIR "/channel.txt"
@@ -166,7 +176,7 @@ static void run_job(void *arg) {
   UpdateStatus s; Updater_GetStatus(&s);
   if (R_FAILED(acInit())) goto done;
   ac_ready = true; u32 wifi = 0;
-  if (R_FAILED(ACU_GetWifiStatus(&wifi)) || !wifi) { publish(UPDATE_ERROR, "NO WI-FI CONNECTION"); goto done; }
+  if (R_FAILED(ACU_GetWifiStatus(&wifi)) || !wifi) { publish(UPDATE_ERROR, UPD_STR("NO WI-FI CONNECTION", "未连接无线网络")); goto done; }
   soc_buffer = memalign(4096, 1024 * 1024);
   if (!soc_buffer || R_FAILED(socInit(soc_buffer, 1024 * 1024))) goto done;
   soc_ready = true;
@@ -179,31 +189,31 @@ static void run_job(void *arg) {
     if (!fetch(url, &t)) goto done;
     UpdateRelease candidate;
     int result = Update_ParseRelease(t.data, t.size, s.prerelease, homebrew, &candidate);
-    if (result < 0) { publish(UPDATE_ERROR, "INVALID RELEASE DATA"); goto done; }
-    if (!result) { publish(UPDATE_EMPTY, "NO PRE-RELEASE AVAILABLE"); ok = true; goto done; }
+    if (result < 0) { publish(UPDATE_ERROR, UPD_STR("INVALID RELEASE DATA", "版本数据无效")); goto done; }
+    if (!result) { publish(UPDATE_EMPTY, UPD_STR("NO PRE-RELEASE AVAILABLE", "无预发布版本")); ok = true; goto done; }
     LightLock_Lock(&lock); release = candidate; strcpy(status.version, release.version); LightLock_Unlock(&lock);
     bool newer = Update_IsNewer(release.version, ZELDA3_3DS_VERSION);
-    publish(newer ? UPDATE_AVAILABLE : UPDATE_CURRENT, newer ? "UPDATE AVAILABLE" : "YOU ARE UP TO DATE");
+    publish(newer ? UPDATE_AVAILABLE : UPDATE_CURRENT, newer ? UPD_STR("UPDATE AVAILABLE", "发现新版本") : UPD_STR("YOU ARE UP TO DATE", "已是最新版本"));
     ok = true;
   } else {
     if (!Update_AllowedDownloadUrl(release.url) || !enough_space(release.size * 2ull + 16 * 1024 * 1024)) {
-      publish(UPDATE_ERROR, "NOT ENOUGH SD SPACE"); goto done;
+      publish(UPDATE_ERROR, UPD_STR("NOT ENOUGH SD SPACE", "SD卡空间不足")); goto done;
     }
-    if (homebrew && !launch_file[0]) { publish(UPDATE_ERROR, "3DSX LAUNCH PATH UNKNOWN"); goto done; }
+    if (homebrew && !launch_file[0]) { publish(UPDATE_ERROR, UPD_STR("3DSX LAUNCH PATH UNKNOWN", "未知3DSX启动路径")); goto done; }
     t.expected = release.size; t.file = fopen(UPDATE_PART, "wb");
-    if (!t.file) { publish(UPDATE_ERROR, "CANNOT WRITE TO SD CARD"); goto done; }
+    if (!t.file) { publish(UPDATE_ERROR, UPD_STR("CANNOT WRITE TO SD CARD", "无法写入SD卡")); goto done; }
     bool fetched = fetch(release.url, &t);
     int closed = fclose(t.file); t.file = NULL;
     if (!fetched || closed || t.size != release.size) goto done;
-    publish(UPDATE_VERIFYING, "VERIFYING DOWNLOAD");
-    if (!verify_file()) { publish(UPDATE_ERROR, "DOWNLOAD CHECK FAILED"); goto done; }
+    publish(UPDATE_VERIFYING, UPD_STR("VERIFYING DOWNLOAD", "正在校验下载"));
+    if (!verify_file()) { publish(UPDATE_ERROR, UPD_STR("DOWNLOAD CHECK FAILED", "下载校验失败")); goto done; }
     if (cancelled() || !aptIsActive()) goto done;
     bool home_allowed = aptIsHomeAllowed(), sleep_allowed = aptIsSleepAllowed();
     aptSetHomeAllowed(false); aptSetSleepAllowed(false);
-    publish(UPDATE_INSTALLING, "INSTALLING UPDATE");
+    publish(UPDATE_INSTALLING, UPD_STR("INSTALLING UPDATE", "正在安装更新"));
     ok = homebrew ? install_3dsx() : install_cia();
     aptSetSleepAllowed(sleep_allowed); aptSetHomeAllowed(home_allowed);
-    publish(ok ? UPDATE_DONE : UPDATE_ERROR, ok ? "UPDATE INSTALLED" : "INSTALLATION FAILED");
+    publish(ok ? UPDATE_DONE : UPDATE_ERROR, ok ? UPD_STR("UPDATE INSTALLED", "更新完成") : UPD_STR("INSTALLATION FAILED", "安装失败"));
   }
 done:
   if (t.file) fclose(t.file);
@@ -215,7 +225,7 @@ done:
   if (ac_ready) acExit();
   Updater_GetStatus(&s);
   if (!ok && s.state != UPDATE_ERROR)
-    publish(UPDATE_ERROR, cancelled() ? "UPDATE CANCELLED" : "CONNECTION FAILED - RETRY");
+    publish(UPDATE_ERROR, cancelled() ? UPD_STR("UPDATE CANCELLED", "更新已取消") : UPD_STR("CONNECTION FAILED - RETRY", "连接失败，请重试"));
   __atomic_store_n(&busy, false, __ATOMIC_RELEASE);
 }
 static void start(bool downloading) {
@@ -227,10 +237,10 @@ static void start(bool downloading) {
   __atomic_store_n(&cancel, false, __ATOMIC_RELEASE);
   __atomic_store_n(&busy, true, __ATOMIC_RELEASE);
   publish(downloading ? UPDATE_DOWNLOADING : UPDATE_CHECKING,
-          downloading ? "DOWNLOADING UPDATE" : "CHECKING FOR UPDATES");
+          downloading ? UPD_STR("DOWNLOADING UPDATE", "正在下载更新") : UPD_STR("CHECKING FOR UPDATES", "正在检查更新"));
   // Background priority on Core 0; the main thread never waits for HTTP.
   worker = threadCreate(run_job, NULL, 96 * 1024, 0x31, 0, false);
-  if (!worker) { __atomic_store_n(&busy, false, __ATOMIC_RELEASE); publish(UPDATE_ERROR, "CANNOT START UPDATE"); }
+  if (!worker) { __atomic_store_n(&busy, false, __ATOMIC_RELEASE); publish(UPDATE_ERROR, UPD_STR("CANNOT START UPDATE", "无法启动更新")); }
 }
 void Updater_Check(void) { start(false); }
 void Updater_Download(void) { start(true); }
@@ -245,7 +255,7 @@ void Updater_SetChannel(bool pre) {
     if (had_old) rename(backup, CHANNEL_FILE);
     saved = false;
   }
-  if (!saved) { remove(temp); publish(UPDATE_ERROR, "CANNOT SAVE UPDATE CHANNEL"); return; }
+  if (!saved) { remove(temp); publish(UPDATE_ERROR, UPD_STR("CANNOT SAVE UPDATE CHANNEL", "无法保存更新通道")); return; }
   remove(backup);
   LightLock_Lock(&lock); status.prerelease = pre; status.version[0] = 0; LightLock_Unlock(&lock);
   Updater_Check();

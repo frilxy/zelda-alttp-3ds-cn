@@ -34,6 +34,8 @@ DEFAULT_FONT = os.path.join(
 SOURCES = [
     "app/jni/src/src/platform/linux/second_screen_sdl.c",
     "app/jni/src/src/second_screen.c",
+    # Updater status messages, shown on the bottom screen's UPDATE panel.
+    "platform/3ds/source/updater.c",
 ]
 
 # Rendering parameters.  The 10px face draws into a 10x10 box; the box is blitted

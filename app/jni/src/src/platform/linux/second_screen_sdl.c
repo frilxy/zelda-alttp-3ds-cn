@@ -1376,13 +1376,14 @@ static void draw_developer_panel(RectFS r) {
 }
 
 static void draw_load_confirmation(RectFS r) {
-  draw_text("LOAD STATE",
-            r.x + r.w / 2 - text_width("LOAD STATE", 3 * u) / 2,
+  const char *title = SS_STR("LOAD STATE", "读取存档");
+  draw_text(title,
+            r.x + r.w / 2 - text_width(title, 3 * u) / 2,
             r.y + 24 * u, 3 * u);
   const char *lines[] = {
-    "LOAD THE LATEST DUMP",
-    "FOR THIS ROM PROFILE",
-    "UNSAVED PROGRESS IS LOST",
+    SS_STR("LOAD THE LATEST DUMP", "读取最新存档"),
+    SS_STR("FOR THIS ROM PROFILE", "当前游戏存档"),
+    SS_STR("UNSAVED PROGRESS IS LOST", "未保存的进度将丢失"),
   };
   for (int i = 0; i < 3; i++)
     draw_text(lines[i],
@@ -1396,13 +1397,15 @@ static void draw_load_confirmation(RectFS r) {
                             button_y, button_w, 46 * u};
   draw_settings_row(&load_cancel_r, false);
   draw_settings_row(&load_confirm_r, false);
-  draw_text("CANCEL",
+  const char *cancel = SS_STR("CANCEL", "取消");
+  const char *load = SS_STR("LOAD", "读取");
+  draw_text(cancel,
             load_cancel_r.x + load_cancel_r.w / 2 -
-              text_width("CANCEL", 2 * u) / 2,
+              text_width(cancel, 2 * u) / 2,
             load_cancel_r.y + 14 * u, 2 * u);
-  draw_text("LOAD",
+  draw_text(load,
             load_confirm_r.x + load_confirm_r.w / 2 -
-              text_width("LOAD", 2 * u) / 2,
+              text_width(load, 2 * u) / 2,
             load_confirm_r.y + 14 * u, 2 * u);
 }
 
@@ -1472,43 +1475,56 @@ static void draw_developer_overlay_panel(RectFS r) {
 }
 
 static void draw_update_panel(RectFS r) {
-  draw_text("UPDATE", r.x + r.w / 2 - text_width("UPDATE", 3 * u) / 2,
+  const char *title = SS_STR("UPDATE", "更新");
+  draw_text(title, r.x + r.w / 2 - text_width(title, 3 * u) / 2,
             r.y + 18 * u, 3 * u);
   update_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&update_back_r, false);
-  draw_text("BACK", update_back_r.x + 16 * u, update_back_r.y + 10 * u, 2 * u);
+  draw_text(SS_STR("BACK", "返回"), update_back_r.x + 16 * u,
+            update_back_r.y + 10 * u, 2 * u);
 #ifdef __3DS__
   UpdateStatus st; Updater_GetStatus(&st);
   update_channel_r = (RectFS){r.x + 28 * u, r.y + 62 * u, r.w - 56 * u, 44 * u};
   draw_settings_row(&update_channel_r, false);
-  const char *channel = st.prerelease ? "PRE-RELEASE" : "STABLE";
-  draw_text("CHANNEL", update_channel_r.x + 16 * u, update_channel_r.y + 16 * u, 2 * u);
+  const char *channel = st.prerelease ? SS_STR("PRE-RELEASE", "预发布版")
+                                      : SS_STR("STABLE", "稳定版");
+  draw_text(SS_STR("CHANNEL", "通道"), update_channel_r.x + 16 * u,
+            update_channel_r.y + 16 * u, 2 * u);
   draw_text(channel, update_channel_r.x + update_channel_r.w - 16 * u - text_width(channel, 2 * u),
             update_channel_r.y + 16 * u, 2 * u);
   update_release_r = (RectFS){r.x + 28 * u, r.y + 119 * u, r.w - 56 * u, 44 * u};
   draw_settings_row(&update_release_r, update_show_notes);
-  const char *release_name = st.version[0] ? st.version : "NO RELEASE SELECTED";
+  const char *release_name = st.version[0] ? st.version
+                                           : SS_STR("NO RELEASE SELECTED", "未选择版本");
   draw_text(release_name, r.x + r.w / 2 - text_width(release_name, 2 * u) / 2,
             update_release_r.y + 14 * u, 2 * u);
-  const char *message = update_confirm ? "DOWNLOAD AND INSTALL" : st.message;
-  if (!message[0]) message = "CHECK FOR UPDATE";
+  const char *message = update_confirm ? SS_STR("DOWNLOAD AND INSTALL", "下载并安装")
+                                       : st.message;
+  if (!message[0]) message = SS_STR("CHECK FOR UPDATE", "检查更新");
   draw_text(message, r.x + r.w / 2 - text_width(message, 2 * u) / 2,
             r.y + 184 * u, 2 * u);
-  const char *hint = update_confirm ? "UNSAVED PROGRESS IS LOST" :
-    update_show_notes ? "CHANGELOG ON TOP SCREEN" : "TAP THE RELEASE FOR CHANGELOG";
+  const char *hint = update_confirm
+    ? SS_STR("UNSAVED PROGRESS IS LOST", "未保存的进度将丢失")
+    : update_show_notes ? SS_STR("CHANGELOG ON TOP SCREEN", "更新日志见上屏")
+                        : SS_STR("TAP THE RELEASE FOR CHANGELOG", "点击版本查看日志");
   draw_text(hint, r.x + r.w / 2 - text_width(hint, 2 * u) / 2,
             r.y + 216 * u, 2 * u);
-  update_prev_r = (RectFS){r.x + 28 * u, r.y + 246 * u, 100 * u, 34 * u};
-  update_next_r = (RectFS){r.x + r.w - 128 * u, r.y + 246 * u, 100 * u, 34 * u};
+  // 120 wide so the two-character Chinese labels keep clear of the frame.
+  update_prev_r = (RectFS){r.x + 28 * u, r.y + 246 * u, 120 * u, 34 * u};
+  update_next_r = (RectFS){r.x + r.w - 148 * u, r.y + 246 * u, 120 * u, 34 * u};
   if (update_show_notes && !update_confirm) {
     draw_settings_row(&update_prev_r, false); draw_settings_row(&update_next_r, false);
-    draw_text("PREV", update_prev_r.x + 22 * u, update_prev_r.y + 10 * u, 2 * u);
-    draw_text("NEXT", update_next_r.x + 22 * u, update_next_r.y + 10 * u, 2 * u);
+    const char *prev = SS_STR("PREV", "上一页");
+    const char *next = SS_STR("NEXT", "下一页");
+    draw_text(prev, update_prev_r.x + update_prev_r.w / 2 - text_width(prev, 2 * u) / 2,
+              update_prev_r.y + 10 * u, 2 * u);
+    draw_text(next, update_next_r.x + update_next_r.w / 2 - text_width(next, 2 * u) / 2,
+              update_next_r.y + 10 * u, 2 * u);
   }
-  const char *action = update_confirm ? "INSTALL UPDATE" :
-    st.state == UPDATE_AVAILABLE ? "DOWNLOAD UPDATE" :
-    (st.state == UPDATE_CHECKING || st.state == UPDATE_DOWNLOADING || st.state == UPDATE_VERIFYING) ? "CANCEL" :
-    st.state == UPDATE_INSTALLING ? "PLEASE WAIT" : st.state == UPDATE_DONE ? "UPDATE INSTALLED" : "CHECK FOR UPDATE";
+  const char *action = update_confirm ? SS_STR("INSTALL UPDATE", "安装更新") :
+    st.state == UPDATE_AVAILABLE ? SS_STR("DOWNLOAD UPDATE", "下载更新") :
+    (st.state == UPDATE_CHECKING || st.state == UPDATE_DOWNLOADING || st.state == UPDATE_VERIFYING) ? SS_STR("CANCEL", "取消") :
+    st.state == UPDATE_INSTALLING ? SS_STR("PLEASE WAIT", "请稍候") : st.state == UPDATE_DONE ? SS_STR("UPDATE INSTALLED", "更新完成") : SS_STR("CHECK FOR UPDATE", "检查更新");
   update_action_r = (RectFS){r.x + 28 * u, r.y + r.h - 68 * u, r.w - 56 * u, 48 * u};
   if (st.state == UPDATE_DOWNLOADING || st.state == UPDATE_INSTALLING) {
     float by = update_action_r.y - 36 * u;
@@ -1596,9 +1612,9 @@ static void draw_cinema_settings_overlay(void) {
   if (!screen_mode && !remap_mode && !developer_mode && !update_mode) {
     cinema_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
     draw_settings_row(&cinema_back_r, false);
-    draw_text("BACK",
+    draw_text(SS_STR("BACK", "返回"),
               cinema_back_r.x + cinema_back_r.w / 2 -
-                text_width("BACK", 2.2f * u) / 2,
+                text_width(SS_STR("BACK", "返回"), 2.2f * u) / 2,
               cinema_back_r.y + cinema_back_r.h / 2 - 9 * u, 2.2f * u);
   } else {
     cinema_back_r = (RectFS){0, 0, 0, 0};
