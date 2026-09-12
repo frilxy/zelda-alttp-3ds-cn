@@ -49,7 +49,7 @@ jobs:
             done
           }
           echo "== what this image already ships =="
-          ls "$DEPS/lib" 2>/dev/null | head -60 || true
+          ls "$DEPS/lib" 2>/dev/null || true
           dkp-pacman -Q 2>/dev/null | grep -iE '3ds-(curl|mbedtls|jansson)' || echo "  (no updater deps installed)"
           if ! have_deps "$DEPS"; then
             echo "== installing the devkitPro packages =="

@@ -96,6 +96,10 @@ target_link_libraries(zelda3-3ds PRIVATE
   mbedtls
   mbedx509
   mbedcrypto
+  # devkitPro ships libcurl built with zlib support (the upstream reference build
+  # leaves compression out), so its content encoding objects need libz. Linking
+  # it unconditionally is harmless for a compression-less libcurl.
+  z
   ctru
   m
 )
