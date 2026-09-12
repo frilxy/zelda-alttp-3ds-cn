@@ -102,24 +102,26 @@ jobs:
           $GH --version
           # git in the container runs as a different owner; whitelist the checkout.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          # One release per build, tagged with the version compiled in.  The
-          # in-game updater rejects anything that isn't a parseable version
-          # (update_manifest.c), so a rolling "latest" tag would make releases
-          # invisible to it, and its asset lookup wants exactly
-          # zelda3-3ds-v<version>.cia / .3dsx.
+          # One release per version, tagged with the version compiled in, and
+          # kept: a version bump adds a new release, rebuilding the same version
+          # replaces that release in place so the tag keeps pointing at the
+          # commit that produced the published files.  The in-game updater
+          # rejects anything that isn't a parseable version (update_manifest.c),
+          # so a rolling "latest" tag would make releases invisible to it, and
+          # its asset lookup wants exactly zelda3-3ds-v<version>.cia / .3dsx.
           VERSION="$(sed -n 's/.*ZELDA3_3DS_VERSION=\\"\([^"\\]*\)\\".*/\1/p' platform/3ds/CMakeLists.txt)"
           [ -n "$VERSION" ] || { echo "could not read ZELDA3_3DS_VERSION"; exit 1; }
           TAG="v${VERSION}"
           echo "publishing $TAG"
-          # Keep exactly one release: drop every tag that exists.
-          $GH release list --limit 100 --json tagName --jq '.[].tagName' | while read -r t; do
-            [ -n "$t" ] && $GH release delete "$t" --yes --cleanup-tag 2>/dev/null || true
-          done
+          if $GH release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists: replacing it with this build"
+            $GH release delete "$TAG" --yes --cleanup-tag
+          fi
           # The top screen renders the changelog with an ASCII-only font and
           # Update_FormatNotes strips every byte >= 128, so keep the notes ASCII.
           $GH release create "$TAG" \
             --title "Zelda ALTTP 3DS - Simplified Chinese ($TAG)" \
-            --notes "Rolling build of the Simplified Chinese translation for the 3DS port of A Link to the Past.
+            --notes "Simplified Chinese translation for the 3DS port of A Link to the Past.
 
           Assets: install the .cia with FBI, or copy the .3dsx for the Homebrew Launcher.
           The *-cn-bottom packages also translate the bottom screen.

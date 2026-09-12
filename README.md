@@ -69,13 +69,14 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 - 只有版本号**变大**（上游发 3.2-E2，或我们提升 `platform/3ds/CMakeLists.txt` 里的
   `ZELDA3_3DS_VERSION`）才会提示「发现新版本」并允许下载安装。
 
-所以「同一版本重编译」的用户不会被反复打扰，要拿新构建直接从 Release 页下载即可。
+所以「同一版本重编译」的用户不会被反复打扰；要拿新构建直接从 Release 页下载即可
+（同版本会**原地覆盖**那个 Release，所以 `/releases/latest` 永远指向当前发布的最新构建）。
 
 ---
 
 ## 下载（GitHub Release）
 
-每次构建都会发布到 [**Releases**](https://github.com/frilxy/zelda-alttp-3ds-cn/releases/latest)，**只保留最新一次**：
+[**Releases**](https://github.com/frilxy/zelda-alttp-3ds-cn/releases) 里**每个版本一个 Release，永久保留**：
 
 | 文件 | 用途 |
 |---|---|
@@ -85,8 +86,13 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 | `zelda3-3ds-v3.2-E1-cn-bottom.3dsx` | **下屏汉化版**，Homebrew Launcher |
 | `cn_language.bin` | 备用中文语言块（一般无需使用） |
 
-> Release 的 tag 就是编译进程序的版本号（当前 `v3.2-E1`）——游戏内更新器只认这种
-> 合法版本号，所以不再使用 `latest` 之类的滚动 tag；`/releases/latest` 链接依旧可用。
+发布规则：
+
+- Release 的 tag 就是编译进程序的版本号（当前 `v3.2-E1`）——游戏内更新器只认这种合法版本号，
+  所以不使用 `latest` 之类的滚动 tag；`/releases/latest` 依旧指向最新版本。
+- **版本号变化 → 新增一个 Release**（旧版本保留，可随时回退下载）。
+- **同一版本重新构建 → 原地覆盖该版本的 Release**：资产与说明一并替换，tag 指向产生这些产物的那次提交；
+  不会多出 Release，也不会动其它版本。
 
 ---
 
@@ -110,7 +116,7 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 ### GitHub Actions（自动）
 
-每次 `push` / 手动触发，都会在 devkitARM 容器里**同时编译两个版本（标准 + 下屏汉化）**，并发布到 **GitHub Release（滚动最新）**。
+每次 `push` / 手动触发，都会在 devkitARM 容器里**同时编译两个版本（标准 + 下屏汉化）**，并按上面的规则发布 Release（新版本新增、同版本覆盖）。
 
 CI 会**从源码编译 `makerom`**（[3DSGuy/Project_CTR](https://github.com/3DSGuy/Project_CTR)）和 **`bannertool`**（[Epicpkmn11/bannertool](https://github.com/Epicpkmn11/bannertool)），因此不需要预装 devkitPro 工具。
 
