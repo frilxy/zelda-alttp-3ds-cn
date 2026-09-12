@@ -1,70 +1,115 @@
 # Zelda 3DS platform
 
-This target builds the dual-screen native frontend for Nintendo 3DS.
+Native dual-screen Nintendo 3DS frontend, public v3.0.
 
 ## Console installation
 
-Install the CIA, then create this directory on the SD card:
+Install the CIA or launch the 3DSX. Place a legally obtained compatible `.sfc`
+or `.smc` ROM in `sdmc:/3ds/Zelda 3DS/`. The preferred baseline is USA,
+unheadered. Audio requires `sdmc:/3ds/dspfirm.cdc`; Rosalina can dump the
+console's DSP firmware. Assets are extracted on the console.
 
-```text
-sdmc:/3ds/Zelda 3DS/
-```
-
-Place a legally obtained USA, unheadered ROM there. The preferred filename is
-`zelda3.sfc`, but the setup also accepts `.sfc` and `.smc` files with other
-names. On first launch, press A to validate the ROM and extract
-`zelda3_assets.dat`. The ROM is read locally and is never copied into the CIA.
-
-Audio requires `sdmc:/3ds/dspfirm.cdc`. Luma3DS can create it from the
-console's own firmware through Rosalina's `Dump DSP firmware` command.
+ROM profiles retain their own saves and settings. Keep ROM filenames unchanged
+when updating. The public CIA retains v2.9's title ID `0004000005a13e00`.
 
 ## Display and controls
 
-- Top screen: 400x240 gameplay at 5:3 through a native RGB565 presenter.
-- Bottom screen: 320x240 live map, gear, touch inventory and settings.
-- D-Pad or Circle Pad: movement.
-- A/B/X/Y, L/R, Start and Select: corresponding game buttons.
-- ZL or C-stick on New 3DS: hold for turbo when `TURBO SPEED` is not `OFF`.
-- L + R + A: create a quick dump under `sdmc:/3ds/Zelda 3DS/dumps/`.
+- WIDE: native 400x240 gameplay. ORIGINAL: 256x224. STRETCH fills the display.
+- WIDE camera: STANDARD or FIXED. WIDE/FIXED is applied once per profile;
+  later saved display choices are honored.
+- Bottom screen: 320x240 map, gear, touch inventory and settings.
+- D-Pad/Circle Pad: movement. A/B/X/Y, L/R, Start/Select: game controls.
+- Old 3DS X: tap for normal X; hold one second for configured turbo.
+- New 3DS ZL/C-stick: hold for turbo when enabled. X remains immediate.
+- L + R + A: create a diagnostic dump.
+- Settings > Developer > Load State: confirm loading the newest dump's
+  validated checkpoint. Another ROM profile's checkpoint is rejected.
+- Settings > Developer > Show FPS: optional top-screen counter.
+- Title-screen Triforce: display and turbo settings.
 
-The CIA metadata uses the Legacy memory mode for Old 3DS compatibility and
-requests the New 3DS 804 MHz/L2 configuration when that hardware is available.
-The 3DSX also requests New 3DS speedup at runtime. Normal gameplay advances
-once per VBlank, while the bottom UI redraws at 30 FPS. Quick-dump `info.txt`
-files include average/max frame work time and the number of frames that exceed
-the 16.67 ms budget.
+Both display paths use nearest-neighbor sampling. Old 3DS uses the PICA200
+renderer for supported frames and the CPU path for unsupported effects;
+New 3DS retains its CPU renderer. Logic runs on a fixed 60 Hz accumulator,
+with bounded catch-up. Rendering performance is scene-dependent.
 
-The HOME Menu metadata is versioned for every release. v2.4 uses:
+Old UI drawing is asynchronous. Damage/healing patches retained heart cells
+without rebuilding the map. Automatic map jobs defer through door transitions;
+explicit touch keeps priority. The APT notification thread uses priority0x19
+so HOME/sleep requests can be received while gameplay is busy. Runtime logs
+report the selected priority; other thread priorities are retained.
 
-```text
-Short name: Zelda ALttP 3DS
-Long name:  Zelda A Link to the Past 3DS v2.4
-```
+## Diagnostics
 
-The CIA banner prefers `assets/banner.cgfx` when present. v1.6 uses a real
-HOME Menu CGFX model generated from the supplied SNES box glTF with only the
-base diffuse texture; normal and metallic maps are intentionally omitted to keep
-the banner small and reliable on 3DS hardware. `assets/banner.png` remains as a
-flat fallback for builds where the CGFX asset is removed.
+Press `L + R + A` while the issue is visible and attach the dump from:
 
-## Requirements
+`sdmc:/3ds/Zelda 3DS/dumps/`
 
-- devkitARM, libctru and 3ds-cmake under `DEVKITPRO`
-- `makerom` and `bannertool` for the optional CIA step
-- the SDL 2.28.1 source already vendored at `app/jni/SDL2`
+Folders use `000-dump-YYYYMMDD-HHMMSS`, `001-dump-...`, etc. Numbering continues
+across restarts; an empty collection starts at zero. Legacy dumps remain
+loadable. `DUMP SAVED` confirms a completed capture. Audio pauses during
+capture and resumes afterward.
 
-Run:
+Dumps include physical top/bottom BMP and raw captures, RAM/VRAM/CGRAM/OAM,
+scene/register context, a validated `load-state.bin`, and a checksum manifest.
+Old recent timing history and audio/UI diagnostics help locate stalls. GPU
+submissions and fallback reasons appear in `ppu.txt`; captured GPU output is
+read through CPU-visible VRAM without submitting a separate GPU frame.
+Timing spans include preemption and may overlap; they are not CPU-cycle counts.
+
+## Building
+
+Requirements: devkitARM, libctru, 3ds-cmake, makerom and bannertool. SDL2 is
+vendored in `app/jni/SDL2`.
 
 ```sh
-chmod +x platform/3ds/build.sh
-platform/3ds/build.sh
+bash platform/3ds/build.sh
 ```
 
-The script first builds the vendored SDL port, then creates the 3DSX and CIA.
-No ROM or extracted asset file is included in either package.
+Output: `build-3ds/game/zelda3-3ds-v3.0.cia` and `.3dsx`. Packages contain
+configuration and the extraction patch, never ROMs or extracted game assets.
 
-The expected SHA-256 is:
+HOME Menu metadata:
 
 ```text
-66871d66be19ad2c34c927d6b14cd8eb6fc3181965b6e517cb361f7316009cfb
+Short name:  The Legend of Zelda
+Long name:   A Link to the Past 3DS port
+Author:      EstebanPdN
+ProductCode: CTR-P-Z3DE
+UniqueId:    0x5A13E
 ```
+
+The custom logo banner is prebuilt in `assets/banner.cgfx`. Technical GPU
+implementation records are preserved in `PICA200-E12.md`, `PICA200-E13.md` and
+`PICA200-E14.md`. Focused source-level regressions live in `tests/`.
+
+## Updates
+
+In Settings > Update, choose Stable or Pre-release. Tap the release name to
+read its changelog on the top screen, with Prev/Next below for more pages.
+Choose Download Update and confirm installation, then reopen the game.
+Save in-game before installing. Startup checks also indicate newer releases.
+
+Version [v3.2-E1](https://github.com/EstebanPdN/zelda-alttp-3ds/releases/tag/v3.2-E1)
+is an experimental pre-release; v3.1 remains stable. Select the Pre-release
+channel to install it. It fixes Restart retaining stale game RAM after ROM
+reselection, which could leave gameplay black and silent.
+
+Settings is Screen, Turbo Speed, Developer, Update, Restart. Restart opens
+the ROM selector and starts the selected ROM fresh; existing saves remain.
+
+Downloads use verified HTTPS and the GitHub asset's SHA-256/size. CIA title ID
+must match this port. Channel selection persists in update/channel.txt.
+Versions use vMAJOR.MINOR[.PATCH] with optional -E<number>; matching assets use
+zelda3-3ds-vVERSION.cia or .3dsx. Only newer versions are offered. The
+pre-release list scans 100 release records; changelogs show up to 12 KiB.
+
+Content tabs select their view without toggling back to Map. Touch targets
+cover button borders and spaces between them. A completed UI worker result
+is presented in the same frame when available; unfinished jobs stay asynchronous.
+No additional periodic drawing, busy waiting or game pacing change is used.
+
+Version 3.1 uses the native HID contact flag for touch press and release detection,
+including startup and releases with residual coordinates. Physical coordinates
+remain protected from SDL viewport transforms. The last 32 touch selections
+are included in diagnostic dumps. Use the FBI QR if touch controls prevent
+opening Update.

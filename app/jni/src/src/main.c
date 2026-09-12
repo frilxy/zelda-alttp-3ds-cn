@@ -34,6 +34,10 @@
 #include "android_logging.h"
 #ifdef __3DS__
 #include "platform_3ds.h"
+#include "updater.h"
+extern bool SecondScreenSDL_UpdateIsOpen(void);
+extern bool SecondScreenSDL_UpdateNotesPage(unsigned *page);
+#include "ppu_gpu.h"
 #endif
 
 static bool g_run_without_emu = 0;
@@ -41,7 +45,6 @@ static bool g_run_without_emu = 0;
 // Dual-screen UI (second_screen_sdl.c); stubbed on Android
 bool SecondScreenSDL_Init(SDL_Window *main_window);
 bool SecondScreenSDL_HandleEvent(const SDL_Event *e);
-void SecondScreenSDL_Handle3DSTouch(void);
 void SecondScreenSDL_Update(int logic_frames);
 void SecondScreenSDL_SetDiagnostics(int current_fps, int average_fps);
 #ifdef __3DS__
@@ -117,9 +120,28 @@ static uint32 TicksToMicroseconds(uint64 ticks) {
 }
 #endif
 
+#ifdef __3DS__
+// Error returns and Die() must stop workers before libctru unmaps their heap
+// stacks. The normal ROM-switch path still performs its existing cleanup.
+static void Shutdown3DSRuntimeAtExit(void) {
+  Updater_Shutdown();
+  SDL_QuitSubSystem(SDL_INIT_AUDIO);
+  ZeldaShutdownPpuWorker();
+  SecondScreenSDL_Shutdown();
+  if (g_renderer_funcs.Destroy)
+    g_renderer_funcs.Destroy();
+  SDL_Quit();
+}
+#endif
+
 void NORETURN Die(const char *error) {
 #if defined(NDEBUG) && defined(_WIN32)
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kWindowTitle, error, NULL);
+#endif
+#ifdef __3DS__
+  Platform3DS_LogRuntime("FATAL before runtime shutdown: %s", error);
+  Shutdown3DSRuntimeAtExit();
+  Platform3DS_ShowFatalError(error);
 #endif
   fprintf(stderr, "Error: %s\n", error);
   exit(1);
@@ -201,6 +223,9 @@ static void DrawPpuFrameWithPerf() {
   int pitch = 0;
 #ifdef __3DS__
   uint64 section_start;
+  extern bool SecondScreen_NeedsCaptureFrame(void);
+  if (!Platform3DS_IsNew3DS() && (g_display_perf || SecondScreen_NeedsCaptureFrame()))
+    PpuGpuForceCpuFrame();
   g_3ds_last_ppu_draw_us = 0;
   g_3ds_last_capture_us = 0;
   g_3ds_last_present_us = 0;
@@ -234,12 +259,12 @@ static void DrawPpuFrameWithPerf() {
   if (g_display_perf)
     RenderNumber(pixel_buffer + pitch * render_scale, pitch, g_curr_fps, render_scale == 4);
   // the second screen's save-state picker grabs a thumbnail off this frame
-  extern void SecondScreen_CaptureFrameHook(const uint8 *px, int pitch, int width, int height);
+  extern void SecondScreen_CaptureFrameHook(const uint8 *px, int pitch,
+                                             int width, int height,
+                                             bool rgb565);
   SecondScreen_CaptureFrameHook(pixel_buffer, pitch,
-                                g_snes_width * render_scale, g_snes_height * render_scale);
-  extern void SecondScreen_CaptureDumpTopHook(const uint8 *px, int pitch, int width, int height);
-  SecondScreen_CaptureDumpTopHook(pixel_buffer, pitch,
-                                  g_snes_width * render_scale, g_snes_height * render_scale);
+                                g_snes_width * render_scale,
+                                g_snes_height * render_scale, false);
 #ifdef __3DS__
   g_3ds_last_capture_us =
     TicksToMicroseconds(SDL_GetPerformanceCounter() - section_start);
@@ -401,14 +426,15 @@ static bool SdlRenderer_Init(SDL_Window *window) {
 
 #ifdef __3DS__
   (void)window;
+  size_t top_buffer_size =
+    k3DSTopTextureWidth * k3DSTopTextureHeight * sizeof(uint32);
   g_3ds_top_pixels =
-    linearMemAlign(k3DSTopTextureWidth * k3DSTopTextureHeight * 4, 64);
+    linearMemAlign(top_buffer_size, 64);
   if (!g_3ds_top_pixels) {
     SDL_SetError("Unable to allocate native 3DS top framebuffer");
     return false;
   }
-  memset(g_3ds_top_pixels, 0,
-         k3DSTopTextureWidth * k3DSTopTextureHeight * 4);
+  memset(g_3ds_top_pixels, 0, top_buffer_size);
   if (!Platform3DS_InitTopPresenter()) {
     linearFree(g_3ds_top_pixels);
     g_3ds_top_pixels = NULL;
@@ -473,7 +499,7 @@ static void SdlRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pi
     return;
   }
   *pixels = g_3ds_top_pixels;
-  *pitch = k3DSTopTextureWidth * 4;
+  *pitch = k3DSTopTextureWidth * sizeof(uint32);
 #else
   if (SDL_LockTexture(g_texture, &g_sdl_renderer_rect, (void **)pixels, pitch) != 0) {
     printf("Failed to lock texture: %s\n", SDL_GetError());
@@ -495,7 +521,7 @@ static void SdlRenderer_EndDraw() {
       focus_x += (g_sdl_renderer_rect.w - 256) / 2;
   }
   Platform3DS_PresentTopFrame(g_3ds_top_pixels,
-                              k3DSTopTextureWidth * 4,
+                              k3DSTopTextureWidth * sizeof(uint32),
                               g_sdl_renderer_rect.w,
                               g_sdl_renderer_rect.h,
                               focus_x,
@@ -568,6 +594,13 @@ void ZeldaSet3DSDisplayMode(int mode) {
   if (!wide)
     PpuSetExtraSideSpace(g_zenv.ppu, 0, 0, 0);
   g_snes_width = extra * 2 + 256;
+  // PR #31 (Archaistic): native 400x240 in WIDE; ORIGINAL stays 256x224.
+  g_config.extend_y = wide;
+  g_snes_height = wide ? 240 : 224;
+  if (wide)
+    g_ppu_render_flags |= kPpuRenderFlags_Height240;
+  else
+    g_ppu_render_flags &= ~kPpuRenderFlags_Height240;
   ZeldaApplyRendererSize();
   Platform3DS_SetDisplayMode(display_mode);
 }
@@ -584,6 +617,14 @@ void OpenGLRenderer_Create(struct RendererFuncs *funcs, bool use_opengl_es);
 
 //#undef main
 int main(int argc, char** argv) {
+#ifdef __3DS__
+  if (atexit(Shutdown3DSRuntimeAtExit) != 0)
+    return 1;
+#endif
+#ifdef __3DS__
+  const char *update_launch_path = argc > 0 ? argv[0] : NULL;
+  bool restart_fresh = false;
+#endif
   argc--, argv++;
   const char *config_file = NULL;
   if (argc >= 2 && strcmp(argv[0], "--config") == 0) {
@@ -631,6 +672,10 @@ restart_3ds_runtime:
                        g_config.enhanced_mode7 * kPpuRenderFlags_4x4Mode7 |
                        g_config.extend_y * kPpuRenderFlags_Height240 |
                        g_config.no_sprite_limits * kPpuRenderFlags_NoSpriteLimits;
+#ifdef __3DS__
+  if (Platform3DS_GetHardwareProfile()->old_ppu)
+    g_ppu_render_flags |= kPpuRenderFlags_Old3DS;
+#endif
   ZeldaEnableMsu(g_config.enable_msu);
   ZeldaSetLanguage(g_config.language);
 
@@ -781,17 +826,23 @@ restart_3ds_runtime:
   bool system_exit_requested = false;
 #endif
 
+#ifdef __3DS__
+  Updater_Init(update_launch_path);
+  if (g_config.autosave && !restart_fresh)
+#else
   if (g_config.autosave)
+#endif
     HandleCommand(kKeys_Load + 0, true);
 
   while(running) {
 #ifdef __3DS__
-    if (Platform3DS_ShouldExit()) {
+    if (Platform3DS_ShouldExit() || Updater_ShouldClose()) {
       system_exit_requested = true;
       running = false;
       break;
     }
 #endif
+    // Touch is dispatched from SDL edges here, before paused/update/timing exits.
     while(SDL_PollEvent(&event)) {
       if (SecondScreenSDL_HandleEvent(&event))
         continue;
@@ -841,6 +892,23 @@ restart_3ds_runtime:
     if (!running)
       break;
 
+#ifdef __3DS__
+    if (SecondScreenSDL_UpdateIsOpen()) {
+      if (!audiopaused && device) SDL_PauseAudioDevice(device, 1);
+      audiopaused = true;
+      SecondScreenSDL_BeginFrame(1);
+      unsigned update_page;
+      bool show_notes = SecondScreenSDL_UpdateNotesPage(&update_page);
+      Platform3DS_PresentUpdatePage(show_notes, update_page);
+      SecondScreenSDL_Update(1);
+      Platform3DS_EndFrame();
+      SDL_Delay(16);
+      logic_last_counter = SDL_GetPerformanceCounter();
+      logic_accumulator = 0;
+      last_render_counter = 0;
+      continue;
+    }
+#endif
     if (g_paused != audiopaused) {
       audiopaused = g_paused;
       if (device)
@@ -923,7 +991,6 @@ restart_3ds_runtime:
     int turbo_multiplier;
     inputs = Platform3DS_ReadInput(&turbo_held, &turbo_multiplier);
     SecondScreenSDL_SetDiagnostics(g_3ds_current_fps, g_3ds_average_fps);
-    SecondScreenSDL_Handle3DSTouch();
     if (Platform3DS_TakeQuickDumpRequest())
       SecondScreenSDL_RequestDump();
     g_turbo = turbo_held;
@@ -1054,8 +1121,10 @@ restart_3ds_runtime:
   SDL_DestroyWindow(window);
   SDL_Quit();
 #ifdef __3DS__
-  if (Platform3DS_TakeRomSelectionRequest())
+  if (Platform3DS_TakeRomSelectionRequest()) {
+    restart_fresh = true;
     goto restart_3ds_runtime;
+  }
 #endif
   //SaveConfigFile();
   return 0;

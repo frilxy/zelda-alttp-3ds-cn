@@ -11,6 +11,7 @@
 #include "types.h"
 #include "features.h"
 #include "util.h"
+#include "dump_state.h"
 #include <SDL.h>
 
 struct Snes;
@@ -50,6 +51,8 @@ void ZeldaInitialize();
 void ZeldaReset(bool preserve_sram);
 void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags);
 void ZeldaShutdownPpuWorker(void);
+uint32 ZeldaGetPpuJoinTimeUs(void);
+void ZeldaWriteGameDiagnostics(FILE *file);
 bool ZeldaGetPpuWorkerStats(int *split_line,
                             uint32 *main_time_us,
                             uint32 *worker_time_us);
@@ -76,6 +79,8 @@ enum {
 
 SDL_RWops* SDL_RWFromFileInExternal(const char *filename, const char *mode);
 void SaveLoadSlot(int cmd, int which);
+bool ZeldaWriteDumpState(const char *dump_directory);
+ZeldaDumpStateResult ZeldaLoadLatestDumpState(void);
 void ZeldaClearAutosave();
 void ZeldaWriteSram();
 void ZeldaReadSram();
@@ -104,5 +109,8 @@ enum {
 
   kJoypadH_AnyDir = 0xf,
 };
+
+// Number of background tile words corrected for the last displayed WIDE frame.
+uint32 ZeldaGetWideColumnRepairCount(void);
 
 #endif  // ZELDA3_ZELDA_RTL_H_

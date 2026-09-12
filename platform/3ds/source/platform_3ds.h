@@ -3,6 +3,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "hardware_profile.h"
+
+const Platform3DSHardwareProfile *Platform3DS_GetHardwareProfile(void);
 
 struct Config;
 
@@ -22,6 +25,15 @@ enum Platform3DSCStickMode {
   kPlatform3DSCStickWalk,
   kPlatform3DSCStickDisabled,
 };
+
+typedef struct Platform3DSCaptureStats {
+  uint32_t top_format;
+  uint32_t top_stride;
+  uint32_t bottom_format;
+  uint32_t bottom_stride;
+  uintptr_t top_address;
+  uintptr_t bottom_address;
+} Platform3DSCaptureStats;
 
 bool Platform3DS_PrepareStorage(void);
 void Platform3DS_ApplyConfig(struct Config *config);
@@ -50,12 +62,20 @@ void Platform3DS_FormatSavePath(const char *filename,
                                 char *out, size_t out_size);
 int Platform3DS_GetTurboMultiplier(void);
 void Platform3DS_SetTurboMultiplier(int multiplier);
+bool Platform3DS_GetShowFps(void);
+void Platform3DS_SetShowFps(bool show);
+void Platform3DS_SetCurrentFps(int fps);
+void Platform3DS_PersistRuntimeSettings(void);
+void Platform3DS_ShowDumpSavedOverlay(void);
+void Platform3DS_SetAudioPausedForDump(bool paused);
+void Platform3DS_MarkDumpTimingDiscontinuity(void);
+uint32_t Platform3DS_GetActiveProfileId(void);
 bool Platform3DS_InitTopPresenter(void);
 void Platform3DS_ShutdownTopPresenter(void);
 void Platform3DS_PresentTopFrame(const uint8_t *pixels, int pitch,
                                  int width, int height,
                                  int focus_x, int focus_y);
-void Platform3DS_PresentBottomFrame(const uint8_t *pixels, int pitch,
+bool Platform3DS_PresentBottomFrame(const uint8_t *pixels, int pitch,
                                     int width, int height);
 void Platform3DS_EndFrame(void);
 uint32_t Platform3DS_WaitForVBlank(void);
@@ -71,11 +91,16 @@ void Platform3DS_RecordFrameTiming(uint32_t logic_work_us,
                                    int scheduled_logic_frames,
                                    int executed_logic_frames);
 bool Platform3DS_CreateDumpDirectory(char *out, size_t out_size);
-bool Platform3DS_SaveARGB8888Bmp(const char *path, const uint8_t *pixels,
-                                 int pitch, int width, int height);
-bool Platform3DS_SaveRGB565Bmp(const char *path, const uint8_t *pixels,
-                               int pitch, int width, int height);
+bool Platform3DS_SaveDisplayedScreensDetailed(
+  const char *top_path, const char *bottom_path,
+  const char *top_raw_path, const char *bottom_raw_path,
+  Platform3DSCaptureStats *stats);
 bool Platform3DS_DumpMemory(const char *directory,
                             const uint8_t *ram, size_t ram_size,
                             const uint8_t *sram, size_t sram_size,
-                            const uint16_t *vram, size_t vram_words);
+                            const uint16_t *vram, size_t vram_words,
+                            const Platform3DSCaptureStats *capture_stats,
+                            bool screens_ok);
+
+void Platform3DS_PresentUpdatePage(bool show_notes, unsigned page);
+unsigned Platform3DS_UpdateNotesPages(void);

@@ -10,6 +10,8 @@
 #include "snes/dma.h"
 #include "spc_player.h"
 #include "util.h"
+#include "dump_state.h"
+#include <stddef.h>
 #include <SDL.h>
 #include "audio.h"
 #include "assets.h"
@@ -18,6 +20,7 @@
 #ifdef __3DS__
 #include <3ds.h>
 #include "platform_3ds.h"
+#include "ppu_gpu.h"
 #endif
 /*
  * The saving functions have been rewritten in this file to support saving to external storage on android.
@@ -267,11 +270,9 @@ int ZeldaGetWidescreenFixedCameraMargin(void) {
       !g_zenv.ppu || g_zenv.ppu->extraLeftRight == 0 ||
       context == 0)
     return 0;
-  if (IsDungeonMapMenuActive())
-    return 0;
-  if (context == 7 &&
-      main_module_index == 14 && submodule_index == 7 &&
-      overworld_map_state >= 4)
+  // Map sprites are projected in map-screen coordinates, not the gameplay
+  // camera. Applying the outdoor/dungeon camera delta hides or shifts them.
+  if (WideCamera_IsMapMenu(main_module_index, submodule_index))
     return 0;
   if (context == 7) {
     if (hdr_dungeon_dark_with_lantern && TS_copy != 0)
@@ -526,6 +527,134 @@ static void EndFixedCameraRender(const FixedCameraRenderState *state) {
   g_zenv.ppu->renderObjXOffset = state->ppu_obj_x_offset;
 }
 
+// The SNES streamer may recycle columns still visible behind the fixed WIDE
+// camera. Supply only that narrow visible fringe from the current world map.
+// Restore VRAM after joined CPU rendering / synchronous GPU scene preparation,
+// so prefetch state, game logic and subsequent area transitions remain intact.
+#ifdef __3DS__
+static struct {
+  uint16 address[512], value[512];
+  unsigned count, last_count;
+} g_wide_column_repair;
+
+static void BeginWideOverworldColumns(uint32 render_flags) {
+  g_wide_column_repair.count = g_wide_column_repair.last_count = 0;
+  Ppu *p = g_zenv.ppu;
+  int margin = p->extraLeftRight;
+  if (!margin || g_widescreen_edge_mode != 1 ||
+      !(enhanced_features0 & kFeatures0_WidescreenVisualFixes) ||
+      GetFixedCameraEffectiveContext() != 9 || player_is_indoors ||
+      WideCamera_IsMapMenu(main_module_index, submodule_index) ||
+      (main_module_index == 9 && submodule_index != 0) ||
+      GetFixedCameraTransitionDirection(9) != 0 || p->mode != 1 ||
+      !p->bgLayer[1].tilemapWider || !p->bgLayer[1].tilemapHigher ||
+      (p->bgLayer[1].hScroll & 511) != (BG2HOFS_copy2 & 511) ||
+      (p->bgLayer[1].vScroll & 511) != (BG2VOFS_copy2 & 511))
+    return;
+  int logical = BG2HOFS_copy2, left, right;
+  GetFixedCameraBounds(9, logical, &left, &right);
+  int visual = WideCamera_ClampToBounds(logical, left, right, margin);
+  int x0 = IntMax(visual - margin, left);
+  int x1 = IntMin(visual + 256 + margin, right + 256);
+  // While the visual camera is clamped, the logical camera can move in either
+  // direction without moving the picture. Cover its entire possible range,
+  // including a column recycled before the player reversed direction.
+  int logical_min = logical, logical_max = logical;
+  if (right - left >= margin * 2) {
+    if (visual == left + margin) logical_min = left;
+    if (visual == right - margin) logical_max = right;
+  }
+  int safe_left = (logical_max & ~15) - 128;
+  int safe_right = (logical_min & ~15) + 384;
+  if (x0 >= safe_left && x1 <= safe_right) return;
+  int height = (render_flags & kPpuRenderFlags_Height240) ? 240 : 224;
+  int delta_y = height == 240 ? IntMin(IntMax(16 - (int16)(ow_scroll_vars0.yend - BG2VOFS_copy2), 0), 16) : 0;
+  int y0 = BG2VOFS_copy2 - delta_y + 1;
+  int base_x = WideCamera_Unwrap16(overworld_offset_base_x << 3, visual);
+  int base_y = WideCamera_Unwrap16(overworld_offset_base_y, y0);
+  const uint16 *map8 = kMap16ToMap8;
+  if (!map8) return;
+  for (int x = x0 & ~7; x < x1; x += 8) {
+    if (x >= safe_left && x + 8 <= safe_right) continue;
+    int mx = x - base_x;
+    if ((unsigned)mx >= 1024) continue;
+    for (int y = y0 & ~7; y < y0 + height; y += 8) {
+      int my = y - base_y;
+      if ((unsigned)my >= 1024) continue;
+      unsigned tile = dung_bg2[(my >> 4) * 64 + (mx >> 4)];
+      if (tile >= kMap16ToMap8_SIZE / 8) continue;
+      unsigned part = ((my & 8) >> 2) | ((mx & 8) >> 3);
+      uint16 value = map8[tile * 4 + part];
+      unsigned wx = x & 511, wy = y & 511;
+      unsigned address = (p->bgLayer[1].tilemapAdr + (wy >> 3 & 31) * 32 +
+        (wx >> 3 & 31) + (wx >= 256 ? 0x400 : 0) + (wy >= 256 ? 0x800 : 0)) & 0x7fff;
+      if (p->vram[address] == value) continue;
+      unsigned n = g_wide_column_repair.count;
+      if (n == countof(g_wide_column_repair.address)) return;
+      g_wide_column_repair.address[n] = address;
+      g_wide_column_repair.value[n] = p->vram[address];
+      g_wide_column_repair.count = n + 1;
+      p->vram[address] = value;
+    }
+  }
+}
+
+static void EndWideOverworldColumns(void) {
+  g_wide_column_repair.last_count = g_wide_column_repair.count;
+  while (g_wide_column_repair.count) {
+    unsigned n = --g_wide_column_repair.count;
+    g_zenv.ppu->vram[g_wide_column_repair.address[n]] = g_wide_column_repair.value[n];
+  }
+}
+#endif
+
+uint32 ZeldaGetWideColumnRepairCount(void) {
+#ifdef __3DS__
+  return g_wide_column_repair.last_count;
+#else
+  return 0;
+#endif
+}
+
+// The original camera's lower limit is defined for 224 lines. Near that
+// limit, reveal the missing rows above instead of reading beyond the room.
+// This affects drawing only: collision, camera RAM and saved state stay intact.
+typedef struct VerticalCameraRenderState {
+  int delta;
+  uint16 bg1, bg2;
+  int16 obj;
+} VerticalCameraRenderState;
+
+static VerticalCameraRenderState BeginVerticalCameraRender(void) {
+  VerticalCameraRenderState state = {0};
+#ifdef __3DS__
+  Ppu *p = g_zenv.ppu;
+  uint8 context = GetFixedCameraEffectiveContext();
+  if (!(p->renderFlags & kPpuRenderFlags_Height240) || !context ||
+      WideCamera_IsMapMenu(main_module_index, submodule_index))
+    return state;
+  uint16 bottom = context == 7 ?
+    room_bounds_y.v[(quadrant_fullsize_y >> 1) + 2] : ow_scroll_vars0.yend;
+  int available = (int16)(bottom - BG2VOFS_copy2);
+  state.delta = IntMin(IntMax(16 - available, 0), 16);
+  if (!state.delta) return state;
+  state.bg1 = p->bgLayer[0].vScroll;
+  state.bg2 = p->bgLayer[1].vScroll;
+  state.obj = p->renderObjYOffset;
+  p->bgLayer[0].vScroll = (state.bg1 - state.delta) & 0x3ff;
+  p->bgLayer[1].vScroll = (state.bg2 - state.delta) & 0x3ff;
+  p->renderObjYOffset = state.obj + state.delta;
+#endif
+  return state;
+}
+
+static void EndVerticalCameraRender(const VerticalCameraRenderState *state) {
+  if (!state->delta) return;
+  g_zenv.ppu->bgLayer[0].vScroll = state->bg1;
+  g_zenv.ppu->bgLayer[1].vScroll = state->bg2;
+  g_zenv.ppu->renderObjYOffset = state->obj;
+}
+
 static void ZeldaDrawPpuLines(Ppu *ppu, int height,
                               int first_line, int last_line,
                               uint8 irq_state) {
@@ -548,6 +677,27 @@ static void ZeldaDrawPpuLines(Ppu *ppu, int height,
 }
 
 #ifdef __3DS__
+static bool ZeldaTryGpuPpu(Ppu *ppu, int height, uint8 irq_state) {
+  if (!PpuGpuBegin(ppu, height)) return false;
+  SimpleHdma chans[2];
+  SimpleHdma_Init(&chans[0], &g_zenv.dma->channel[6]);
+  SimpleHdma_Init(&chans[1], &g_zenv.dma->channel[7]);
+  for (int i=0; i<=height; i++) {
+    if (i==128 && irq_state) {
+      ppu_write(ppu, (uint8)BG3HOFS, selectfile_var8);
+      ppu_write(ppu, (uint8)BG3HOFS, selectfile_var8 >> 8);
+      ppu_write(ppu, (uint8)BG3VOFS, 0);
+      ppu_write(ppu, (uint8)BG3VOFS, 0);
+    }
+    if (i) PpuGpuLine(ppu, i-1);
+    SimpleHdma_DoLine(&chans[0], ppu);
+    SimpleHdma_DoLine(&chans[1], ppu);
+  }
+  return PpuGpuFinish(ppu);
+}
+#endif
+
+#ifdef __3DS__
 typedef struct PpuWorkerState {
   Ppu ppu;
   PpuTileCache tile_cache;
@@ -556,10 +706,10 @@ typedef struct PpuWorkerState {
   int last_line;
   uint8 irq_state;
   uint64 duration_ticks;
+  LightEvent start;
   LightEvent done;
   Thread thread;
   bool running;
-  uint32 job_id;
 } PpuWorkerState;
 
 static PpuWorkerState g_ppu_system_worker;
@@ -570,28 +720,31 @@ static int g_ppu_last_split_line = 112;
 static int g_ppu_old3ds_worker_lines = 56;
 static int g_ppu_old3ds_last_worker_lines = 56;
 static uint64 g_ppu_main_duration_ticks;
+static uint32 g_ppu_join_us;
+uint32 ZeldaGetPpuJoinTimeUs(void) { return g_ppu_join_us; }
 
 static void ZeldaPpuWorkerMain(void *argument) {
   PpuWorkerState *state = (PpuWorkerState *)argument;
-  uint32 completed_job = 0;
-  while (__atomic_load_n(&state->running, __ATOMIC_ACQUIRE)) {
-    uint32 job = __atomic_load_n(&state->job_id, __ATOMIC_ACQUIRE);
-    if (job == completed_job) {
-      __asm__ volatile("yield");
-      continue;
-    }
+  for (;;) {
+    LightEvent_Wait(&state->start);
+    // Pair the job publication fence with an acquire before reading the PPU
+    // pointer and line range. LightEvent provides the wakeup; these fences
+    // make the data handoff explicit to both the compiler and the ARM CPU.
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    if (!__atomic_load_n(&state->running, __ATOMIC_ACQUIRE))
+      break;
     uint64 start = svcGetSystemTick();
     ZeldaDrawPpuLines(&state->ppu, state->height,
                       state->first_line, state->last_line,
                       state->irq_state);
     state->duration_ticks = svcGetSystemTick() - start;
-    completed_job = job;
     LightEvent_Signal(&state->done);
   }
 }
 
 static bool ZeldaCreatePpuWorker(PpuWorkerState *state,
                                  int core, s32 priority) {
+  LightEvent_Init(&state->start, RESET_ONESHOT);
   LightEvent_Init(&state->done, RESET_ONESHOT);
   state->running = true;
   state->thread = threadCreate(
@@ -642,18 +795,31 @@ void ZeldaShutdownPpuWorker(void) {
     if (!state->thread)
       continue;
     __atomic_store_n(&state->running, false, __ATOMIC_RELEASE);
-    Result join_result = threadJoin(state->thread, 2000000000ull);
+    LightEvent_Signal(&state->start);
+    Result join_result = threadJoin(state->thread, UINT64_MAX);
     if (R_FAILED(join_result))
       Platform3DS_LogRuntime("WARNING: PPU worker join timeout: 0x%08lx",
                              (unsigned long)join_result);
     threadFree(state->thread);
     state->thread = NULL;
   }
+  g_ppu_worker_initialized = false;
+  g_ppu_split_line = g_ppu_last_split_line = 112;
+  g_ppu_old3ds_worker_lines = g_ppu_old3ds_last_worker_lines = 56;
+  g_ppu_main_duration_ticks = 0;
+  g_ppu_join_us = 0;
+  g_ppu_system_worker.duration_ticks = g_ppu_new_worker.duration_ticks = 0;
 }
 
 bool ZeldaGetPpuWorkerStats(int *split_line,
                             uint32 *main_time_us,
                             uint32 *worker_time_us) {
+  if (PpuGpuOutputActive()) {
+    if (split_line) *split_line=0;
+    if (main_time_us) *main_time_us=0;
+    if (worker_time_us) *worker_time_us=0;
+    return false;
+  }
   if (!g_ppu_system_worker.thread && !g_ppu_new_worker.thread)
     return false;
   if (split_line)
@@ -710,6 +876,7 @@ static int ZeldaOld3DSChooseWorkerLines(int height) {
   return worker_lines;
 }
 #else
+uint32 ZeldaGetPpuJoinTimeUs(void) { return 0; }
 void ZeldaShutdownPpuWorker(void) {
 }
 
@@ -723,10 +890,30 @@ bool ZeldaGetPpuWorkerStats(int *split_line,
 }
 #endif
 
+#ifdef __3DS__
+static PpuPhaseProfile g_ppu_phase_main, g_ppu_phase_worker;
+static uint32 g_ppu_phase_scene;
+static int g_ppu_phase_split;
+#endif
+
 void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   SimpleHdma hdma_probe;
 
-  PpuBeginDrawing(g_zenv.ppu, pixel_buffer, pitch, render_flags);
+#ifdef __3DS__
+  BeginWideOverworldColumns(render_flags);
+  bool gpu_candidate = (render_flags & kPpuRenderFlags_Old3DS) && PpuGpuCanAttempt();
+  if (gpu_candidate) {
+    // The GPU consumes register/tile/OAM state; do not rasterize or rebuild
+    // E11's software background cache on a GPU frame.
+    g_zenv.ppu->renderFlags = render_flags;
+    g_zenv.ppu->renderPitch = pitch;
+    g_zenv.ppu->renderBuffer = pixel_buffer;
+    g_zenv.ppu->renderObjXOffset = 0;
+    g_zenv.ppu->renderObjYOffset = 0;
+    g_zenv.ppu->phase.active = false;
+  } else
+#endif
+    PpuBeginDrawing(g_zenv.ppu, pixel_buffer, pitch, render_flags);
 
   dma_startDma(g_zenv.dma, HDMAEN_copy, true);
   SimpleHdma_Init(&hdma_probe, &g_zenv.dma->channel[6]);
@@ -744,12 +931,16 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   }
 
   FixedCameraRenderState fixed_camera_state = BeginFixedCameraRender();
+  VerticalCameraRenderState vertical_camera_state = BeginVerticalCameraRender();
 
   if (g_zenv.ppu->extraLeftRight != 0 || render_flags & kPpuRenderFlags_Height240) {
     ConfigurePpuSideSpace(fixed_camera_state.visual_x,
                           fixed_camera_state.uses_visual_camera,
                           fixed_camera_state.horizontal_transition);
   }
+
+  if (vertical_camera_state.delta)
+    g_zenv.ppu->extraBottomCur = UintMin(16, g_zenv.ppu->extraBottomCur + vertical_camera_state.delta);
 
   PpuSetWindow1Ext(g_zenv.ppu, g_spotlight_ext_active ? g_spotlight_ext_left : NULL,
                    g_spotlight_ext_active ? g_spotlight_ext_right : NULL);
@@ -758,6 +949,18 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   uint8 irq_state = irq_flag;
 
 #ifdef __3DS__
+  if (gpu_candidate) {
+    if (ZeldaTryGpuPpu(g_zenv.ppu, height, irq_state)) {
+      g_ppu_join_us = 0;
+      goto rendering_complete;
+    }
+    int obj_offset = g_zenv.ppu->renderObjXOffset;
+    int obj_y_offset = g_zenv.ppu->renderObjYOffset;
+    PpuBeginDrawing(g_zenv.ppu, pixel_buffer, pitch, render_flags);
+    g_zenv.ppu->renderObjXOffset = obj_offset;
+    g_zenv.ppu->renderObjYOffset = obj_y_offset;
+  }
+  if (render_flags & kPpuRenderFlags_Old3DS) PpuGpuCpuFrame();
   if (ZeldaEnsurePpuWorkers()) {
     PpuWorkerState *system_worker = &g_ppu_system_worker;
     PpuWorkerState *new_worker = &g_ppu_new_worker;
@@ -789,32 +992,57 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
       PpuWorkerState *state = workers[i];
       if (!state->thread)
         continue;
-      memcpy(&state->ppu, g_zenv.ppu, sizeof(Ppu));
+      // The appended candidate/color caches are Old-only. New keeps the
+      // original snapshot span and does not copy unused Old frame data.
+      size_t snapshot_size = (render_flags & kPpuRenderFlags_Old3DS) ?
+        sizeof(Ppu) : offsetof(Ppu, spriteLines);
+      memcpy(&state->ppu, g_zenv.ppu, snapshot_size);
       state->ppu.tileCache = &state->tile_cache;
       state->height = height;
       state->irq_state = irq_state;
-      uint32 job = state->job_id + 1;
-      __atomic_store_n(&state->job_id, job, __ATOMIC_RELEASE);
+      __atomic_thread_fence(__ATOMIC_RELEASE);
+      LightEvent_Signal(&state->start);
     }
 
     uint64 main_start = svcGetSystemTick();
     ZeldaDrawPpuLines(g_zenv.ppu, height,
                       main_first, main_last, irq_state);
     g_ppu_main_duration_ticks = svcGetSystemTick() - main_start;
+    uint64 join_start = svcGetSystemTick();
     for (size_t i = 0; i < countof(workers); i++) {
       if (workers[i]->thread)
         LightEvent_Wait(&workers[i]->done);
     }
+    g_ppu_join_us = (uint32)((svcGetSystemTick() - join_start) * 1000000ull / SYSCLOCK_ARM11);
   } else
 #endif
   {
     ZeldaDrawPpuLines(g_zenv.ppu, height, 1, height, irq_state);
   }
 
+#ifdef __3DS__
+rendering_complete:
+#endif
   if (irq_state & 0x80) {
     irq_flag = 0;
     zelda_snes_dummy_write(NMITIMEN, 0x81);
   }
+#ifdef __3DS__
+  if ((render_flags & kPpuRenderFlags_Old3DS) && g_zenv.ppu->phase.active) {
+    // Workers are joined; these snapshots are read only by the game thread.
+    g_ppu_phase_main = g_zenv.ppu->phase;
+    memset(&g_ppu_phase_worker, 0, sizeof(g_ppu_phase_worker));
+    if (g_ppu_system_worker.thread)
+      g_ppu_phase_worker = g_ppu_system_worker.ppu.phase;
+    g_ppu_phase_split = g_ppu_system_worker.thread ? g_ppu_last_split_line : height;
+    g_ppu_phase_scene = (main_module_index << 24) | (player_is_indoors << 23) |
+      (player_is_indoors ? dungeon_room_index : overworld_area_index);
+  }
+#endif
+#ifdef __3DS__
+  EndWideOverworldColumns();
+#endif
+  EndVerticalCameraRender(&vertical_camera_state);
   EndFixedCameraRender(&fixed_camera_state);
 }
 
@@ -866,6 +1094,10 @@ static void ZeldaRunGameLoop() {
 }
 
 void ZeldaInitialize() {
+  // ROM reselection re-enters here in the same process. Reset volatile RAM
+  // with the new PPU/APU so the first frame runs the normal boot sequence.
+  // Saved SRAM is loaded separately by ZeldaReadSram after initialization.
+  memset(g_ram, 0, sizeof(g_ram));
   g_zenv.dma = dma_init(NULL);
   g_zenv.ppu = ppu_init(NULL);
   g_zenv.ram = g_ram;
@@ -1194,6 +1426,112 @@ void StateRecorder_Save(StateRecorder* sr, SDL_RWops* rwops) {
   SDL_RWwrite(rwops, arr.data, arr.size, 1);
 
   ByteArray_Destroy(&arr);
+}
+
+typedef struct ZeldaDumpPayloadHeader {
+  uint32 version;
+  uint32 total_frames;
+  uint32 last_inputs;
+  uint32 frames_since_last;
+  uint32 snapshot_size;
+} ZeldaDumpPayloadHeader;
+
+enum { kZeldaDumpPayloadVersion = 1 };
+
+bool ZeldaWriteDumpState(const char *dump_directory) {
+#ifdef __3DS__
+  if (!dump_directory || !dump_directory[0])
+    return false;
+
+  ByteArray snapshot = {0};
+  SaveSnesState(&saveFunc, &snapshot);
+  if (snapshot.size == 0 || snapshot.size > UINT32_MAX) {
+    ByteArray_Destroy(&snapshot);
+    return false;
+  }
+
+  ZeldaDumpPayloadHeader header = {
+    .version = kZeldaDumpPayloadVersion,
+    .total_frames = state_recorder.total_frames,
+    .last_inputs = state_recorder.last_inputs,
+    .frames_since_last = state_recorder.frames_since_last,
+    .snapshot_size = (uint32)snapshot.size,
+  };
+  ByteArray payload = {0};
+  ByteArray_AppendData(&payload, (const uint8 *)&header, sizeof(header));
+  ByteArray_AppendData(&payload, snapshot.data, snapshot.size);
+
+  char path[512];
+  int length = snprintf(path, sizeof(path), "%s/%s", dump_directory,
+                        ZELDA_DUMP_LOAD_STATE_FILENAME);
+  bool ok = length >= 0 && length < (int)sizeof(path) &&
+            DumpState_WriteFile(path, Platform3DS_GetActiveProfileId(),
+                                payload.data, payload.size);
+  ByteArray_Destroy(&payload);
+  ByteArray_Destroy(&snapshot);
+  return ok;
+#else
+  (void)dump_directory;
+  return false;
+#endif
+}
+
+ZeldaDumpStateResult ZeldaLoadLatestDumpState(void) {
+#ifdef __3DS__
+  uint8 *payload = NULL;
+  size_t payload_size = 0;
+  ZeldaDumpStateResult result =
+    DumpState_ReadLatest("dumps", Platform3DS_GetActiveProfileId(),
+                         &payload, &payload_size);
+  if (result != kZeldaDumpStateLoaded)
+    return result;
+
+  if (payload_size < sizeof(ZeldaDumpPayloadHeader)) {
+    free(payload);
+    return kZeldaDumpStateInvalid;
+  }
+  ZeldaDumpPayloadHeader header;
+  memcpy(&header, payload, sizeof(header));
+  size_t snapshot_size = payload_size - sizeof(header);
+  if (header.version != kZeldaDumpPayloadVersion ||
+      header.snapshot_size != snapshot_size ||
+      header.last_inputs > 0x0fff) {
+    free(payload);
+    return kZeldaDumpStateInvalid;
+  }
+
+  /* InternalSaveLoad has a fixed serialized size. Compare the checkpoint with
+   * a capture from this exact engine build before giving the data to its
+   * assert-oriented loader, so truncated or foreign states cannot overrun it. */
+  ByteArray current = {0};
+  SaveSnesState(&saveFunc, &current);
+  bool compatible = current.size == snapshot_size;
+  ByteArray_Destroy(&current);
+  if (!compatible) {
+    free(payload);
+    return kZeldaDumpStateInvalid;
+  }
+
+  LoadFuncState load = {
+    payload + sizeof(header),
+    payload + payload_size,
+  };
+  LoadSnesState(&loadFunc, &load);
+  bool fully_consumed = load.p == load.pend;
+  free(payload);
+  if (!fully_consumed)
+    return kZeldaDumpStateInvalid;
+
+  ByteArray_Destroy(&state_recorder.log);
+  ByteArray_Destroy(&state_recorder.base_snapshot);
+  memset(&state_recorder, 0, sizeof(state_recorder));
+  state_recorder.total_frames = header.total_frames;
+  state_recorder.last_inputs = (uint16)header.last_inputs;
+  state_recorder.frames_since_last = header.frames_since_last;
+  return kZeldaDumpStateLoaded;
+#else
+  return kZeldaDumpStateIoError;
+#endif
 }
 
 void StateRecorder_ClearKeyLog(StateRecorder *sr) {
@@ -1672,4 +2010,43 @@ void ZeldaWriteSram() {
 }
 #ifdef __3DS__
 #include "platform_3ds.h"
+#include "ppu_gpu.h"
 #endif
+
+void ZeldaWriteGameDiagnostics(FILE *file) {
+#ifdef __3DS__
+  if (g_zenv.ppu && (g_zenv.ppu->renderFlags & kPpuRenderFlags_Old3DS) && PpuGpuOutputActive()) {
+    fputs("PPU CPU phase sample unavailable for current GPU frame; see PICA history in ppu.txt.\n", file);
+  } else if (g_zenv.ppu && (g_zenv.ppu->renderFlags & kPpuRenderFlags_Old3DS)) {
+    fputs("PPU sample frame and age count CPU-rendered frames only.\n", file);
+    fprintf(file, "PPU phase schema=1 interval=64 frames sample_frame=%lu age=%lu scene=0x%08lx split=%d\n",
+      (unsigned long)g_ppu_phase_main.frame,
+      (unsigned long)(g_zenv.ppu->phase.frame - g_ppu_phase_main.frame),
+      (unsigned long)g_ppu_phase_scene, g_ppu_phase_split);
+    fputs("Phase times are sampled wall spans, including preemption. Main and worker overlap; do not add them. Prepare runs once on main.\n", file);
+    const PpuPhaseProfile *phases[] = {&g_ppu_phase_main, &g_ppu_phase_worker};
+    for (unsigned i=0; i<2; i++) {
+      const PpuPhaseProfile *p=phases[i];
+      fprintf(file, "PPU %s lines=%lu prepare_us=%llu sprites_us=%llu main_bg_us=%llu sub_bg_us=%llu compose_us=%llu mode7_hq_us=%llu retained_rows=%lu rebuilt_tiles=%lu\n",
+        i ? "worker" : "main", (unsigned long)p->lines,
+        (unsigned long long)(i ? 0 : p->prepare * 1000000ull / SYSCLOCK_ARM11),
+        (unsigned long long)(p->sprites * 1000000ull / SYSCLOCK_ARM11),
+        (unsigned long long)(p->main * 1000000ull / SYSCLOCK_ARM11),
+        (unsigned long long)(p->sub * 1000000ull / SYSCLOCK_ARM11),
+        (unsigned long long)(p->compose * 1000000ull / SYSCLOCK_ARM11),
+        (unsigned long long)(p->mode7 * 1000000ull / SYSCLOCK_ARM11),
+        (unsigned long)p->retainedRows, (unsigned long)(i ? 0 : p->rebuiltTiles));
+    }
+  }
+#endif
+  fprintf(file, "Scene: module=%u submodule=%u room=%u area=%u indoors=%u Link=(%u,%u)\nHDMA enable copy=%02x\n",
+          main_module_index, submodule_index, dungeon_room_index, overworld_screen_index,
+          player_is_indoors, link_x_coord, link_y_coord, HDMAEN_copy);
+  for (unsigned i = 0; i < 8; i++) {
+    const DmaChannel *d = &g_zenv.dma->channel[i];
+    fprintf(file, "DMA%u source=%02x:%04x B-bus=%02x mode=%u indirect=%u bank=%02x size=%u table=%04x repeat=%u active=%u\n", i,
+            d->aBank, d->aAdr, d->bAdr, d->mode, d->indirect, d->indBank,
+            d->size, d->tableAdr, d->repCount, d->hdmaActive);
+  }
+
+}

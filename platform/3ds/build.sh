@@ -14,7 +14,7 @@ if [[ "${BOTTOM_SCREEN_CN:-}" == "1" ]]; then
   BSCN_FLAG=ON
 fi
 GAME_BUILD="${ROOT}/build-3ds${SUFFIX}/game"
-OUT_BASE="zelda3-3ds-v3.0-E3${SUFFIX}"
+OUT_BASE="zelda3-3ds-v3.2-E1${SUFFIX}"
 TOOLS_ROOT="${ZELDA3_TOOLS_ROOT:-${ROOT}/../../Tools/bin}"
 
 export DEVKITPRO DEVKITARM
@@ -40,13 +40,15 @@ cmake \
   -DCMAKE_TOOLCHAIN_FILE="${DEVKITPRO}/cmake/3DS.cmake" \
   -DCMAKE_BUILD_TYPE=Release \
   -DSDL2_ROOT="${SDL_PREFIX}" \
+  -DSDL2_DIR="${SDL_PREFIX}/lib/cmake/SDL2" \
+  -DUPDATE_DEPS_ROOT="${UPDATE_DEPS_ROOT:-${DEVKITPRO}/portlibs/3ds}" \
   -DBOTTOM_SCREEN_CN="${BSCN_FLAG}"
 cmake --build "${GAME_BUILD}" --parallel
 
-# CMake pegs the .3dsx name at zelda3-3ds-v3.0-E3.3dsx; rename it so the
+# CMake pegs the .3dsx name at zelda3-3ds-v3.2-E1.3dsx; rename it so the
 # bottom-screen-CN build doesn't collide with the standard build in the release.
-if [[ "${SUFFIX}" != "" && -f "${GAME_BUILD}/zelda3-3ds-v3.0-E3.3dsx" ]]; then
-  mv "${GAME_BUILD}/zelda3-3ds-v3.0-E3.3dsx" "${GAME_BUILD}/${OUT_BASE}.3dsx"
+if [[ "${SUFFIX}" != "" && -f "${GAME_BUILD}/zelda3-3ds-v3.2-E1.3dsx" ]]; then
+  mv "${GAME_BUILD}/zelda3-3ds-v3.2-E1.3dsx" "${GAME_BUILD}/${OUT_BASE}.3dsx"
 fi
 
 MAKEROM="${MAKEROM:-${TOOLS_ROOT}/makerom}"
@@ -57,8 +59,8 @@ if [[ ! -x "${MAKEROM}" || ! -x "${BANNERTOOL}" ]]; then
 fi
 
 "${BANNERTOOL}" makesmdh \
-  -s "Zelda 3DS EXP 3" \
-  -l "A Link to the Past 3DS experimental 3" \
+  -s "The Legend of Zelda" \
+  -l "A Link to the Past 3DS port" \
   -p "EstebanPdN" \
   -i "${ROOT}/platform/3ds/assets/icon.png" \
   -f visible,nosavebackups \

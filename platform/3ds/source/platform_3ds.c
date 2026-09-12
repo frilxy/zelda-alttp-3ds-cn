@@ -1,4 +1,12 @@
 #include "platform_3ds.h"
+#include "updater.h"
+#include "update_view.h"
+extern bool SS_RenderLetterSheet(uint32_t *pixels);
+extern bool SS_RenderGlyphSheet(uint32_t *pixels);
+static bool g_update_fonts_ready, g_update_view_valid;
+static uint32_t *g_update_pixels;
+#include "ppu_gpu.h"
+#include "present_image.h"
 
 #include <3ds.h>
 #include <citro2d.h>
@@ -18,8 +26,10 @@
 #include "features.h"
 #include "setup_selector_assets.h"
 #include "types.h"
+#include "second_screen_tables.h"
 #include "util.h"
 #include "zelda_rtl.h"
+#include "snes/ppu.h"
 
 extern void SecondScreenSDL_OpenDeveloperOverlay(void);
 
@@ -43,6 +53,9 @@ static bool g_display_mode_legacy_stretch;
 static bool g_runtime_wide_edge_seen;
 static enum Platform3DSCStickMode g_cstick_mode = kPlatform3DSCStickTurbo;
 static int g_turbo_multiplier = 5;
+static bool g_show_fps;
+static unsigned g_current_fps;
+static uint64_t g_dump_saved_overlay_until_ms;
 static bool g_quick_dump_requested;
 static bool g_rom_selection_requested;
 static aptHookCookie g_apt_hook_cookie;
@@ -50,11 +63,55 @@ static bool g_apt_hook_registered;
 static volatile bool g_system_exit_requested;
 static volatile bool g_system_suspended;
 static char g_active_save_directory[512] = "saves";
+static uint32_t g_active_profile_id;
 static bool g_is_new_3ds;
+const Platform3DSHardwareProfile *Platform3DS_GetHardwareProfile(void) {
+  return Platform3DS_ProfileForModel(g_is_new_3ds);
+}
 static bool g_model_detected;
 static bool g_irrst_initialized;
 static bool g_core1_time_enabled;
 static int g_core1_time_limit_percent;
+// Last 120 presented-frame samples: scene-local evidence, without old menu,
+// loading or diagnostic-I/O outliers dominating a session-wide average.
+enum { kRecentFrameCount = 120 };
+typedef struct RecentFrameTiming {
+  uint32_t ppu, work, interval;
+  uint32_t logic, present, bottom, scheduled, executed;
+  uint32_t ppu_main, ppu_worker, ppu_join, split;
+  uint32_t gpu_begin, top_transfer, gpu_end;
+} RecentFrameTiming;
+static uint32_t g_last_gpu_begin_us, g_last_top_transfer_us, g_last_gpu_end_us;
+static RecentFrameTiming g_recent_frames[kRecentFrameCount];
+static uint32_t g_recent_count, g_recent_next, g_recent_over_budget;
+static uint64_t g_recent_ppu_us, g_recent_work_us, g_recent_interval_us;
+
+static void RecordRecentFrame(uint32_t ppu, uint32_t work, uint32_t interval,
+                              uint32_t logic, uint32_t present, uint32_t bottom,
+                              int scheduled, int executed) {
+  if (interval == 0) return;
+  RecentFrameTiming *old = &g_recent_frames[g_recent_next];
+  g_recent_ppu_us -= old->ppu;
+  g_recent_work_us -= old->work;
+  g_recent_interval_us -= old->interval;
+  g_recent_over_budget -= old->work > 16667;
+  *old = (RecentFrameTiming){.ppu = ppu, .work = work, .interval = interval,
+    .logic = logic, .present = present, .bottom = bottom,
+    .scheduled = scheduled, .executed = executed,
+    .gpu_begin = g_last_gpu_begin_us, .top_transfer = g_last_top_transfer_us,
+    .gpu_end = g_last_gpu_end_us};
+  int split = 0;
+  ZeldaGetPpuWorkerStats(&split, &old->ppu_main, &old->ppu_worker);
+  old->split = split;
+  old->ppu_join = ZeldaGetPpuJoinTimeUs();
+  g_recent_ppu_us += ppu;
+  g_recent_work_us += work;
+  g_recent_interval_us += interval;
+  g_recent_over_budget += work > 16667;
+  if (g_recent_count < kRecentFrameCount) g_recent_count++;
+  g_recent_next = (g_recent_next + 1) % kRecentFrameCount;
+}
+
 static uint64_t g_frame_timing_samples;
 static uint64_t g_top_work_total_us;
 static uint64_t g_total_work_total_us;
@@ -81,15 +138,23 @@ static uint64_t g_timed_scheduled_logic_frames;
 static uint64_t g_executed_logic_frames;
 static uint64_t g_catchup_presentations;
 static uint32_t g_max_scheduled_logic_frames;
+static bool g_ignore_next_frame_timing;
+static bool g_dump_audio_pause_active;
+static bool g_dump_audio_was_paused;
 static bool g_gpu_presenter_initialized;
 static bool g_gpu_frame_active;
 static bool g_setup_console_active;
 static C3D_RenderTarget *g_top_target;
 static C3D_RenderTarget *g_bottom_target;
 static C3D_Tex g_top_texture;
+static const uint8_t *g_last_top_source;
+static int g_last_top_source_pitch, g_last_top_source_width, g_last_top_source_height;
 static C3D_Tex g_bottom_texture;
 static Tex3DS_SubTexture g_top_subtexture;
 static Tex3DS_SubTexture g_bottom_subtexture;
+static void *g_c2d_flush_base;
+static size_t g_c2d_flush_size;
+static int g_cache_clean_mode; /* 0 unprobed, 1 direct SVC, 2 GX fallback */
 static uint16_t g_setup_top_pixels[400 * 240];
 static uint16_t g_setup_bottom_pixels[320 * 240];
 static bool g_setup_audio_initialized;
@@ -101,13 +166,55 @@ static ndspWaveBuf g_setup_move_wavebuf;
 enum {
   kTopTextureWidth = 512,
   kTopTextureHeight = 256,
+  kC2DMaxObjects = 256,
+  kC2DFlushWindowSize = 64 * 1024,
 };
+
+extern u32 __ctru_linear_heap;
+extern u32 __ctru_linear_heap_size;
 
 static bool WriteBlob(const char *path, const void *data, size_t size);
 static bool EnsureDirectory(const char *path);
+static bool CopyFileReplacing(const char *source, const char *destination);
 static void MakeTimestamp(char *stamp, size_t stamp_size);
 static bool RomFileShouldBeIgnored(const char *name);
 static uint32 ReadU32LE(const uint8 *data);
+
+/* GSPGPU_FlushDataCache blocks on service IPC. The direct SVC performs the
+ * same clean operation on this process without waking GSP on core 1. Some
+ * launch environments may not grant the SVC, so retain a queued GX fallback. */
+static bool Platform3DS_CleanDataCache(const void *address, size_t size) {
+  if (!address || size == 0)
+    return true;
+
+  if (g_cache_clean_mode != 2) {
+    Result result = svcStoreProcessDataCache(
+      CUR_PROCESS_HANDLE, (u32)(uintptr_t)address, (u32)size);
+    if (R_SUCCEEDED(result)) {
+      g_cache_clean_mode = 1;
+      return true;
+    }
+    g_cache_clean_mode = 2;
+    Platform3DS_LogRuntime(
+      "Direct cache clean unavailable (0x%08lx); using queued GX fallback",
+      (unsigned long)result);
+  }
+
+  return R_SUCCEEDED(GX_FlushCacheRegions(
+    (u32 *)(uintptr_t)address, (u32)size, NULL, 0, NULL, 0));
+}
+
+/* Passing GX_CMDLIST_FLUSH tells Citro3D that all GPU-visible linear-memory
+ * ranges were cleaned explicitly. This avoids its default full-linear-heap
+ * synchronous flush at the end of every frame. */
+static void Platform3DS_EndGpuFrame(void) {
+  C2D_Flush();
+  bool clean = g_c2d_flush_base && g_c2d_flush_size &&
+    Platform3DS_CleanDataCache(g_c2d_flush_base, g_c2d_flush_size);
+  uint64_t end_start = svcGetSystemTick();
+  C3D_FrameEnd(clean ? GX_CMDLIST_FLUSH : 0);
+  g_last_gpu_end_us = (uint32_t)((svcGetSystemTick() - end_start) * 1000000ull / SYSCLOCK_ARM11);
+}
 
 static void Platform3DS_DetectModel(void) {
   if (g_model_detected)
@@ -126,11 +233,9 @@ static void Platform3DS_ApplyAutoDisplayDefaults(void) {
     g_wide_edge_mode_auto = true;
   }
   if (g_display_mode_auto)
-    g_display_mode = g_is_new_3ds ? kPlatform3DSDisplayUltraWideMod :
-                                    kPlatform3DSDisplayOriginal;
+    g_display_mode = kPlatform3DSDisplayUltraWideMod;
   if (g_wide_edge_mode_auto)
-    g_wide_edge_mode = g_is_new_3ds ? kPlatform3DSWideEdgeFixedCamera :
-                                      kPlatform3DSWideEdgeStandard;
+    g_wide_edge_mode = kPlatform3DSWideEdgeFixedCamera;
 }
 
 static void LogSetup(const char *format, ...) {
@@ -196,28 +301,46 @@ static bool CStickIsHeld(u32 keys) {
   return false;
 }
 
+// libctru gfxInit unmasks the LCD immediately after allocating uninitialized
+// buffers. Keep it black across selector teardown, SDL format changes and
+// renderer probes; reveal only initialized setup/game frames.
+static bool g_startup_lcd_black = true;
+Result __real_GSPGPU_SetLcdForceBlack(u8 flags);
+Result __wrap_GSPGPU_SetLcdForceBlack(u8 flags) {
+  if (!flags && g_startup_lcd_black) return 0;
+  return __real_GSPGPU_SetLcdForceBlack(flags);
+}
+static void RevealInitializedScreens(void) {
+  gspWaitForVBlank();
+  g_startup_lcd_black = false;
+  GSPGPU_SetLcdForceBlack(0);
+}
+
 uint16_t Platform3DS_ReadInput(bool *turbo_held, int *turbo_multiplier) {
   hidScanInput();
   u32 keys = hidKeysHeld();
-  u32 keys_up = hidKeysUp();
   static uint64_t old_3ds_x_hold_start_ms;
+  static bool old_3ds_x_was_held;
   static bool old_3ds_x_turbo_was_active;
   bool old_3ds_x_turbo = false;
   bool old_3ds_x_tap = false;
-  if (!g_is_new_3ds && (keys & KEY_X)) {
+  bool delayed_x = !g_is_new_3ds && g_turbo_multiplier > 0;
+  if (delayed_x && (keys & KEY_X)) {
     uint64_t now_ms = osGetTime();
-    if (old_3ds_x_hold_start_ms == 0)
+    if (!old_3ds_x_was_held)
       old_3ds_x_hold_start_ms = now_ms;
+    old_3ds_x_was_held = true;
     old_3ds_x_turbo = now_ms - old_3ds_x_hold_start_ms >= 1000;
     if (old_3ds_x_turbo)
       old_3ds_x_turbo_was_active = true;
   } else {
-    if (!g_is_new_3ds && (keys_up & KEY_X) &&
-        old_3ds_x_hold_start_ms != 0 &&
+    // SDL pumps HID before us, so a second scan can erase hidKeysUp().
+    // Track our own held transition; ReadInput runs only before logic steps.
+    if (delayed_x && old_3ds_x_was_held &&
         !old_3ds_x_turbo_was_active &&
         osGetTime() - old_3ds_x_hold_start_ms < 1000)
       old_3ds_x_tap = true;
-    old_3ds_x_hold_start_ms = 0;
+    old_3ds_x_was_held = false;
     old_3ds_x_turbo_was_active = false;
   }
   static bool quick_dump_combo_was_held;
@@ -246,7 +369,7 @@ uint16_t Platform3DS_ReadInput(bool *turbo_held, int *turbo_multiplier) {
   if (keys & KEY_START) input |= 1u << 3;
   if ((keys & KEY_A) && !quick_dump_combo) input |= 1u << 8;
   if ((keys & KEY_B) && !version_combo) input |= 1u << 0;
-  if (g_is_new_3ds ? (keys & KEY_X) : old_3ds_x_tap)
+  if (delayed_x ? old_3ds_x_tap : (keys & KEY_X))
     input |= 1u << 9;
   if (keys & KEY_Y) input |= 1u << 1;
   if ((keys & KEY_L) && !version_combo) input |= 1u << 10;
@@ -330,6 +453,10 @@ static void LoadRuntimeSetting(const char *key, const char *value) {
     if (multiplier > 5)
       multiplier = 5;
     g_turbo_multiplier = multiplier;
+  } else if (strcasecmp(key, "ShowFps") == 0) {
+    bool show = false;
+    if (ParseBool(value, &show))
+      g_show_fps = show;
   }
 }
 
@@ -338,6 +465,7 @@ void Platform3DS_LoadRuntimeSettings(void) {
   g_wide_edge_mode_auto = true;
   g_display_mode_legacy_stretch = false;
   g_runtime_wide_edge_seen = false;
+  g_show_fps = false;
   FILE *file = fopen("zelda3.ini", "rb");
   if (!file) {
     Platform3DS_ApplyAutoDisplayDefaults();
@@ -471,17 +599,17 @@ void Platform3DS_BlankScreens(void) {
   if (!g_gpu_presenter_initialized)
     return;
   if (g_gpu_frame_active) {
-    C3D_FrameEnd(0);
+    Platform3DS_EndGpuFrame();
     g_gpu_frame_active = false;
   }
   for (int i = 0; i < 3; i++) {
     if (!C3D_FrameBegin(0))
       return;
-    C2D_TargetClear(g_top_target, C2D_Color32(0, 0, 0, 255));
+    Platform3DS_ClearBlackTarget(g_top_target);
     C2D_SceneBegin(g_top_target);
-    C2D_TargetClear(g_bottom_target, C2D_Color32(0, 0, 0, 255));
+    Platform3DS_ClearBlackTarget(g_bottom_target);
     C2D_SceneBegin(g_bottom_target);
-    C3D_FrameEnd(0);
+    Platform3DS_EndGpuFrame();
     gspWaitForVBlank();
   }
 }
@@ -514,9 +642,76 @@ void Platform3DS_SetTurboMultiplier(int multiplier) {
   Platform3DS_LogRuntime("Turbo multiplier set: %d", g_turbo_multiplier);
 }
 
+bool Platform3DS_GetShowFps(void) {
+  return g_show_fps;
+}
+
+void Platform3DS_SetShowFps(bool show) {
+  g_show_fps = show;
+}
+
+void Platform3DS_SetCurrentFps(int fps) {
+  if (fps < 0)
+    fps = 0;
+  if (fps > 999)
+    fps = 999;
+  g_current_fps = (unsigned)fps;
+}
+
+void Platform3DS_PersistRuntimeSettings(void) {
+  const char *leaf = strrchr(g_active_save_directory, '/');
+  leaf = leaf ? leaf + 1 : g_active_save_directory;
+  char path[512];
+  int length = snprintf(path, sizeof(path), "%s/%s/zelda3.ini",
+                        kProfilesDirectory, leaf);
+  bool ok = length >= 0 && length < (int)sizeof(path) &&
+            CopyFileReplacing("zelda3.ini", path);
+  Platform3DS_LogRuntime("Runtime settings persist: %s", ok ? "OK" : "FAILED");
+}
+
+void Platform3DS_ShowDumpSavedOverlay(void) {
+  // Keep this non-blocking. E4 drew a single frame and then slept the game
+  // thread for 600 ms, which both inflated dump timing outliers and made the
+  // notice depend on one successful Citro2D batch. A deadline lets normal
+  // frames keep flowing while the confirmation remains visible.
+  g_dump_saved_overlay_until_ms = osGetTime() + 1200;
+}
+
+void Platform3DS_SetAudioPausedForDump(bool paused) {
+  // SDL's pause flag stops producing new samples, but the N3DS audio backend
+  // keeps several NDSP wave buffers queued. Pausing channel 0 freezes those
+  // already-queued samples immediately and resumes at the same position.
+  if (paused) {
+    if (!g_dump_audio_pause_active) {
+      g_dump_audio_was_paused = ndspChnIsPaused(0);
+      g_dump_audio_pause_active = true;
+    }
+    ndspChnSetPaused(0, true);
+  } else if (g_dump_audio_pause_active) {
+    ndspChnSetPaused(0, g_dump_audio_was_paused);
+    g_dump_audio_pause_active = false;
+  }
+}
+
+void Platform3DS_MarkDumpTimingDiscontinuity(void) {
+  // The synchronous SD transaction is deliberately outside normal gameplay
+  // timing. Ignore the frame that contains it so the next dump does not
+  // report this diagnostic pause as a PPU or presentation regression.
+  g_ignore_next_frame_timing = true;
+}
+
+uint32_t Platform3DS_GetActiveProfileId(void) {
+  return g_active_profile_id;
+}
+
 bool Platform3DS_InitTopPresenter(void) {
   Platform3DS_RegisterAptHook();
   Platform3DS_DetectModel();
+  extern int Platform3DS_GetAptEventPriority(void);
+  Platform3DS_LogRuntime("APT notification thread priority: 0x%x", Platform3DS_GetAptEventPriority());
+  g_c2d_flush_base = NULL;
+  g_c2d_flush_size = 0;
+  g_cache_clean_mode = 0;
 
   // This is a no-op on Old 3DS and enables 804 MHz operation for 3DSX builds
   // on New 3DS. CIA builds also request the faster clock in their exheader.
@@ -556,8 +751,6 @@ bool Platform3DS_InitTopPresenter(void) {
       "Core 1 PPU budget unavailable; disabling Core 1 worker");
   }
 
-  // Zelda's source image is derived from the SNES 15-bit palette. RGB565 keeps
-  // that detail while halving the top framebuffer bandwidth versus RGBA8.
   gfxSetScreenFormat(GFX_TOP, GSP_RGB565_OES);
   gfxSetScreenFormat(GFX_BOTTOM, GSP_RGB565_OES);
   gfxSetDoubleBuffering(GFX_TOP, true);
@@ -567,12 +760,39 @@ bool Platform3DS_InitTopPresenter(void) {
     Platform3DS_LogRuntime("ERROR: unable to initialize Citro2D presenter");
     return false;
   }
-  if (!C2D_Init(64)) {
+  // The 5x7 status font emits one solid rectangle per horizontal glyph run.
+  // FPS plus "DUMP SAVED" can exceed E4's 64-object batch and silently drop
+  // the tail of the message, so reserve enough objects for both overlays.
+  if (!C2D_Init(kC2DMaxObjects)) {
     C3D_Fini();
     Platform3DS_LogRuntime("ERROR: unable to initialize Citro2D presenter");
     return false;
   }
   C2D_Prepare();
+  C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
+
+  /* Citro2D allocates its streaming vertex and index buffers in linear
+   * memory. Bound the dirty range around that allocation instead of flushing
+   * the complete linear heap (which also contains the top and bottom upload
+   * buffers) on every C3D_FrameEnd. */
+  C3D_BufInfo *c2d_buffers = C3D_GetBufInfo();
+  if (c2d_buffers && c2d_buffers->bufCount > 0) {
+    u32 heap_physical = osConvertVirtToPhys((void *)__ctru_linear_heap);
+    u32 vertex_physical =
+      c2d_buffers->base_paddr + c2d_buffers->buffers[0].offset;
+    uintptr_t heap_start = (uintptr_t)__ctru_linear_heap;
+    uintptr_t heap_end = heap_start + __ctru_linear_heap_size;
+    uintptr_t vertex_address =
+      heap_start + (u32)(vertex_physical - heap_physical);
+    uintptr_t flush_start = vertex_address & ~(uintptr_t)0x7f;
+    uintptr_t flush_end = flush_start + kC2DFlushWindowSize;
+    if (flush_end > heap_end)
+      flush_end = heap_end;
+    if (flush_start >= heap_start && flush_start < flush_end) {
+      g_c2d_flush_base = (void *)flush_start;
+      g_c2d_flush_size = flush_end - flush_start;
+    }
+  }
   if (!C3D_TexInitVRAM(&g_top_texture, kTopTextureWidth,
                        kTopTextureHeight, GPU_RGBA8)) {
     C2D_Fini();
@@ -597,7 +817,7 @@ bool Platform3DS_InitTopPresenter(void) {
 
   g_top_target = C3D_RenderTargetCreate(
     GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_TOP,
-    GPU_RB_RGBA8, GPU_RB_DEPTH16);
+    GPU_RB_RGB565, -1);
   if (!g_top_target) {
     C3D_TexDelete(&g_bottom_texture);
     C3D_TexDelete(&g_top_texture);
@@ -611,12 +831,12 @@ bool Platform3DS_InitTopPresenter(void) {
     GX_TRANSFER_FLIP_VERT(0) |
       GX_TRANSFER_OUT_TILED(0) |
       GX_TRANSFER_RAW_COPY(0) |
-      GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) |
+      GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGB565) |
       GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB565) |
       GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO));
   g_bottom_target = C3D_RenderTargetCreate(
     GSP_SCREEN_WIDTH, GSP_SCREEN_HEIGHT_BOTTOM,
-    GPU_RB_RGBA8, GPU_RB_DEPTH16);
+    GPU_RB_RGB565, -1);
   if (!g_bottom_target) {
     C3D_RenderTargetDelete(g_top_target);
     g_top_target = NULL;
@@ -632,11 +852,14 @@ bool Platform3DS_InitTopPresenter(void) {
     GX_TRANSFER_FLIP_VERT(0) |
       GX_TRANSFER_OUT_TILED(0) |
       GX_TRANSFER_RAW_COPY(0) |
-      GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) |
+      GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGB565) |
       GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB565) |
       GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO));
   g_gpu_presenter_initialized = true;
 
+  memset(g_recent_frames, 0, sizeof(g_recent_frames));
+  g_recent_count = g_recent_next = g_recent_over_budget = 0;
+  g_recent_ppu_us = g_recent_work_us = g_recent_interval_us = 0;
   g_frame_timing_samples = 0;
   g_top_work_total_us = 0;
   g_total_work_total_us = 0;
@@ -665,19 +888,26 @@ bool Platform3DS_InitTopPresenter(void) {
   g_max_scheduled_logic_frames = 0;
   Platform3DS_LogRuntime(
     "Top presenter: PICA200 RGB565, 60 Hz timer pacing, New 3DS=%s, "
-    "Core 1 PPU budget=%s%d%%",
+    "Core 1 PPU budget=%s%d%%, bounded C2D flush=%lu bytes",
     g_is_new_3ds ? "yes" : "no",
     Platform3DS_CanUseCore1PpuWorker() ? "" : "unavailable/",
-    g_core1_time_limit_percent);
+    g_core1_time_limit_percent,
+    (unsigned long)g_c2d_flush_size);
+  if (!g_is_new_3ds) PpuGpuInit();
+  Platform3DS_BlankScreens();
   return gfxGetScreenFormat(GFX_TOP) == GSP_RGB565_OES;
 }
 
 void Platform3DS_ShutdownTopPresenter(void) {
+  linearFree(g_update_pixels); g_update_pixels = NULL;
+  g_update_fonts_ready = g_update_view_valid = false;
+  g_last_top_source = NULL;
   if (!g_gpu_presenter_initialized)
     return;
   Platform3DS_EndFrame();
   if (!Platform3DS_IsSystemClosing())
     C3D_FrameSync();
+  PpuGpuShutdown();
   C3D_RenderTargetDelete(g_bottom_target);
   g_bottom_target = NULL;
   C3D_RenderTargetDelete(g_top_target);
@@ -686,6 +916,8 @@ void Platform3DS_ShutdownTopPresenter(void) {
   C3D_TexDelete(&g_top_texture);
   C2D_Fini();
   C3D_Fini();
+  g_c2d_flush_base = NULL;
+  g_c2d_flush_size = 0;
   g_gpu_presenter_initialized = false;
   if (g_apt_hook_registered) {
     aptUnhook(&g_apt_hook_cookie);
@@ -697,60 +929,147 @@ void Platform3DS_ShutdownTopPresenter(void) {
   }
 }
 
-static void ConfigureArgbTextureEnv(void) {
-  C3D_TexEnv *env = C3D_GetTexEnv(0);
-  C3D_TexEnvInit(env);
-  C3D_TexEnvSrc(env, C3D_RGB, GPU_TEXTURE0, GPU_CONSTANT, GPU_PREVIOUS);
-  C3D_TexEnvOpRgb(env, GPU_TEVOP_RGB_SRC_G,
-                  GPU_TEVOP_RGB_SRC_COLOR,
-                  GPU_TEVOP_RGB_SRC_COLOR);
-  C3D_TexEnvFunc(env, C3D_RGB, GPU_MODULATE);
-  C3D_TexEnvSrc(env, C3D_Alpha, GPU_CONSTANT, GPU_CONSTANT, GPU_CONSTANT);
-  C3D_TexEnvFunc(env, C3D_Alpha, GPU_REPLACE);
-  C3D_TexEnvColor(env, C2D_Color32(255, 0, 0, 255));
-
-  env = C3D_GetTexEnv(1);
-  C3D_TexEnvInit(env);
-  C3D_TexEnvSrc(env, C3D_RGB, GPU_TEXTURE0, GPU_CONSTANT, GPU_PREVIOUS);
-  C3D_TexEnvOpRgb(env, GPU_TEVOP_RGB_SRC_B,
-                  GPU_TEVOP_RGB_SRC_COLOR,
-                  GPU_TEVOP_RGB_SRC_COLOR);
-  C3D_TexEnvFunc(env, C3D_RGB, GPU_MULTIPLY_ADD);
-  C3D_TexEnvColor(env, C2D_Color32(0, 255, 0, 255));
-
-  env = C3D_GetTexEnv(2);
-  C3D_TexEnvInit(env);
-  C3D_TexEnvSrc(env, C3D_RGB, GPU_TEXTURE0, GPU_CONSTANT, GPU_PREVIOUS);
-  C3D_TexEnvOpRgb(env, GPU_TEVOP_RGB_SRC_ALPHA,
-                  GPU_TEVOP_RGB_SRC_COLOR,
-                  GPU_TEVOP_RGB_SRC_COLOR);
-  C3D_TexEnvFunc(env, C3D_RGB, GPU_MULTIPLY_ADD);
-  C3D_TexEnvColor(env, C2D_Color32(0, 0, 255, 255));
+static const uint8_t *StatusGlyph(char c) {
+  static const uint8_t digits[10][7] = {
+    {14, 17, 19, 21, 25, 17, 14}, {4, 12, 4, 4, 4, 4, 14},
+    {14, 17, 1, 2, 4, 8, 31},     {30, 1, 1, 14, 1, 1, 30},
+    {2, 6, 10, 18, 31, 2, 2},     {31, 16, 16, 30, 1, 1, 30},
+    {14, 16, 16, 30, 17, 17, 14}, {31, 1, 2, 4, 8, 8, 8},
+    {14, 17, 17, 14, 17, 17, 14}, {14, 17, 17, 15, 1, 1, 14},
+  };
+  static const uint8_t letters[11][7] = {
+    {14, 17, 17, 31, 17, 17, 17}, /* A */
+    {30, 17, 17, 17, 17, 17, 30}, /* D */
+    {31, 16, 16, 30, 16, 16, 31}, /* E */
+    {31, 16, 16, 30, 16, 16, 16}, /* F */
+    {17, 27, 21, 21, 17, 17, 17}, /* M */
+    {30, 17, 17, 30, 16, 16, 16}, /* P */
+    {15, 16, 16, 14, 1, 1, 30},   /* S */
+    {17, 17, 17, 17, 17, 17, 14}, /* U */
+    {17, 17, 17, 17, 17, 10, 4},  /* V */
+    {14, 17, 16, 16, 16, 17, 14}, /* C */
+    {14, 17, 16, 23, 17, 17, 15}, /* G */
+  };
+  static const uint8_t letter_ids[26] = {
+    0, 255, 9, 1, 2, 3, 10, 255, 255, 255, 255, 255, 4,
+    255, 255, 5, 255, 255, 6, 255, 7, 8, 255, 255, 255, 255,
+  };
+  if (c >= '0' && c <= '9')
+    return digits[c - '0'];
+  if (c >= 'A' && c <= 'Z') {
+    uint8_t id = letter_ids[c - 'A'];
+    if (id != 255)
+      return letters[id];
+  }
+  return NULL;
 }
 
-static void ConfigureRgb565TextureEnv(void) {
-  C3D_TexEnv *env = C3D_GetTexEnv(0);
-  C3D_TexEnvInit(env);
-  C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, 0, 0);
-  C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
-  for (int i = 1; i < 3; i++)
-    C3D_TexEnvInit(C3D_GetTexEnv(i));
+static void DrawStatusText(float x, float y, float scale,
+                           const char *text) {
+  const uint32_t color = C2D_Color32(255, 255, 255, 255);
+  for (; *text; text++, x += 6.0f * scale) {
+    const uint8_t *glyph = StatusGlyph(*text);
+    if (!glyph)
+      continue;
+    for (int row = 0; row < 7; row++) {
+      for (int col = 0; col < 5;) {
+        if ((glyph[row] & (1u << (4 - col))) == 0) {
+          col++;
+          continue;
+        }
+        int end = col + 1;
+        while (end < 5 && (glyph[row] & (1u << (4 - end))) != 0)
+          end++;
+        C2D_DrawRectSolid(x + col * scale, y + row * scale, 0.8f,
+                          (end - col) * scale, scale, color);
+        col = end;
+      }
+    }
+  }
+}
+
+static float StatusTextWidth(const char *text, float scale) {
+  size_t length = strlen(text);
+  return length ? ((float)length * 6.0f - 1.0f) * scale : 0.0f;
+}
+
+static unsigned g_update_note_pages = 1;
+unsigned Platform3DS_UpdateNotesPages(void) { return g_update_note_pages; }
+void Platform3DS_PresentUpdatePage(bool show_notes, unsigned page) {
+  if (!g_gpu_presenter_initialized) return;
+  if (!g_update_pixels) g_update_pixels = linearMemAlign(512*256*4, 64);
+  if (!g_update_pixels) return;
+  static uint32_t letters[128*16], glyphs[kGlyphCols*8*((kGlyphCount+kGlyphCols-1)/kGlyphCols)*8];
+  if (!g_update_fonts_ready) {
+    if (!SS_RenderLetterSheet(letters) || !SS_RenderGlyphSheet(glyphs)) return;
+    g_update_fonts_ready = true;
+  }
+  static char notes[12289], lines[384][43];
+  UpdateStatus state; Updater_GetStatus(&state);
+  static unsigned last_revision, last_page;
+  static bool last_show_notes;
+  if (!g_update_view_valid || last_revision != state.revision ||
+      last_page != page || last_show_notes != show_notes) {
+    unsigned count;
+    if (show_notes && state.version[0]) {
+      Updater_GetNotes(notes, sizeof(notes));
+      count = Update_FormatNotes(notes, lines, 384);
+    } else {
+      strcpy(lines[0], "Select a release on the touch screen");
+      strcpy(lines[1], "to read its changelog here.");
+      count = 2;
+    }
+    g_update_note_pages = (count + 13) / 14;
+    if (page >= g_update_note_pages) page = g_update_note_pages - 1;
+    UpdateView_Draw(g_update_pixels, letters, glyphs,
+                    show_notes ? state.version : "", lines, count, page);
+    last_revision = state.revision; last_page = page; last_show_notes = show_notes;
+    g_update_view_valid = true;
+  }
+  if (!C3D_FrameBegin(0)) return;
+  g_gpu_frame_active = true;
+  Platform3DS_CleanDataCache(g_update_pixels, 512*256*4);
+  C3D_SyncDisplayTransfer(g_update_pixels, GX_BUFFER_DIM(512,256),
+    g_top_texture.data, GX_BUFFER_DIM(512,256), GX_TRANSFER_OUT_TILED(1) |
+    GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGBA8));
+  g_top_subtexture = (Tex3DS_SubTexture){.width=400,.height=240,.left=0,.right=400.0f/512,.top=1,.bottom=1-240.0f/256};
+  C2D_Image image = {.tex=&g_top_texture,.subtex=&g_top_subtexture};
+  C2D_DrawParams params = {.pos={.x=0,.y=0,.w=400,.h=240},.depth=0};
+  Platform3DS_ClearBlackTarget(g_top_target); C2D_SceneBegin(g_top_target);
+  Platform3DS_DrawMappedImage(image, &params, ConfigureArgbTextureEnv);
 }
 
 void Platform3DS_PresentTopFrame(const uint8_t *pixels, int pitch,
                                  int width, int height,
                                  int focus_x, int focus_y) {
   if (!g_gpu_presenter_initialized || !pixels ||
-      pitch != kTopTextureWidth * 4 ||
+      pitch != kTopTextureWidth * (int)sizeof(uint32_t) ||
       width <= 0 || width > kTopTextureWidth ||
       height <= 0 || height > kTopTextureHeight)
     return;
 
-  if (!C3D_FrameBegin(0))
-    return;
+  g_last_top_transfer_us = g_last_gpu_end_us = 0;
+  uint64_t begin_start = svcGetSystemTick();
+  bool began = C3D_FrameBegin(0);
+  g_last_gpu_begin_us = (uint32_t)((svcGetSystemTick() - begin_start) * 1000000ull / SYSCLOCK_ARM11);
+  if (!began) return;
+  bool gpu_image = !g_is_new_3ds && PpuGpuOutputActive();
   g_gpu_frame_active = true;
-  GSPGPU_FlushDataCache(pixels,
-                        kTopTextureWidth * kTopTextureHeight * 4);
+  if (gpu_image) {
+    if (PpuGpuPrepared() && !PpuGpuDraw()) {
+      Platform3DS_LogRuntime("PICA200 submission failed; software resumes next frame");
+      return;
+    }
+    g_last_top_source = NULL;
+  } else {
+  g_last_top_source = pixels;
+  g_last_top_source_pitch = pitch;
+  g_last_top_source_width = width;
+  g_last_top_source_height = height;
+  uint64_t transfer_start = svcGetSystemTick();
+  g_gpu_frame_active = true;
+  Platform3DS_CleanDataCache(
+    pixels, kTopTextureWidth * kTopTextureHeight * sizeof(uint32_t));
   C3D_SyncDisplayTransfer(
     (u32 *)pixels, GX_BUFFER_DIM(kTopTextureWidth, kTopTextureHeight),
     (u32 *)g_top_texture.data,
@@ -762,6 +1081,8 @@ void Platform3DS_PresentTopFrame(const uint8_t *pixels, int pitch,
       GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGBA8) |
       GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO));
 
+  g_last_top_transfer_us = (uint32_t)((svcGetSystemTick() - transfer_start) * 1000000ull / SYSCLOCK_ARM11);
+  }
   const bool stretch = g_display_mode == kPlatform3DSDisplayStretch;
   const bool wide = g_display_mode == kPlatform3DSDisplayUltraWideMod;
   static const float zoom_values[5] = { 1.0f, 1.2f, 1.5f, 2.0f, 2.5f };
@@ -790,7 +1111,7 @@ void Platform3DS_PresentTopFrame(const uint8_t *pixels, int pitch,
   }
   const float draw_width = stretch ? (float)GSP_SCREEN_HEIGHT_TOP :
                                      (float)width;
-  const float draw_height = (stretch || wide) ? (float)GSP_SCREEN_WIDTH :
+  const float draw_height = (stretch) ? (float)GSP_SCREEN_WIDTH :
     (height < GSP_SCREEN_WIDTH ? (float)height : (float)GSP_SCREEN_WIDTH);
   g_top_subtexture = (Tex3DS_SubTexture){
     .width = (u16)source_width,
@@ -801,7 +1122,7 @@ void Platform3DS_PresentTopFrame(const uint8_t *pixels, int pitch,
     .bottom = 1.0f - (source_top + source_height) / kTopTextureHeight,
   };
   C2D_Image image = {
-    .tex = &g_top_texture,
+    .tex = gpu_image ? (C3D_Tex*)PpuGpuOutput() : &g_top_texture,
     .subtex = &g_top_subtexture,
   };
   C2D_DrawParams params = {
@@ -816,23 +1137,42 @@ void Platform3DS_PresentTopFrame(const uint8_t *pixels, int pitch,
     .angle = 0.0f,
   };
 
-  C2D_TargetClear(g_top_target, C2D_Color32(0, 0, 0, 255));
+  Platform3DS_ClearBlackTarget(g_top_target);
   C2D_SceneBegin(g_top_target);
-  C2D_DrawImage(image, &params, NULL);
-  ConfigureArgbTextureEnv();
+  Platform3DS_DrawMappedImage(image, &params, gpu_image ? ConfigureRgb565TextureEnv : ConfigureArgbTextureEnv);
+  if (g_show_fps) {
+    char label[28];
+    snprintf(label, sizeof(label), "FPS %u", g_current_fps);
+    float box_width = StatusTextWidth(label, 2.0f) + 10.0f;
+    C2D_DrawRectSolid(5.0f, 216.0f, 0.7f, box_width, 20.0f,
+                      C2D_Color32(0, 0, 0, 210));
+    DrawStatusText(10.0f, 219.0f, 2.0f, label);
+  }
+  uint64_t now_ms = osGetTime();
+  if (now_ms < g_dump_saved_overlay_until_ms) {
+    static const char kDumpSavedText[] = "DUMP SAVED";
+    float text_width = StatusTextWidth(kDumpSavedText, 2.0f);
+    float box_width = text_width + 18.0f;
+    float box_x = (400.0f - box_width) * 0.5f;
+    C2D_DrawRectSolid(box_x, 12.0f, 0.7f, box_width, 24.0f,
+                      C2D_Color32(0, 0, 0, 220));
+    DrawStatusText(box_x + 9.0f, 17.0f, 2.0f, kDumpSavedText);
+  } else {
+    g_dump_saved_overlay_until_ms = 0;
+  }
 }
 
-void Platform3DS_PresentBottomFrame(const uint8_t *pixels, int pitch,
+bool Platform3DS_PresentBottomFrame(const uint8_t *pixels, int pitch,
                                     int width, int height) {
   int bytes_per_pixel = g_is_new_3ds ? 4 : 2;
   if (!g_gpu_frame_active || !pixels ||
       pitch != kTopTextureWidth * bytes_per_pixel ||
       width <= 0 || width > kTopTextureWidth ||
       height <= 0 || height > kTopTextureHeight)
-    return;
+    return false;
 
-  GSPGPU_FlushDataCache(pixels,
-                        kTopTextureWidth * kTopTextureHeight * bytes_per_pixel);
+  Platform3DS_CleanDataCache(
+    pixels, kTopTextureWidth * kTopTextureHeight * bytes_per_pixel);
   GX_TRANSFER_FORMAT bottom_transfer_format =
     g_is_new_3ds ? GX_TRANSFER_FMT_RGBA8 : GX_TRANSFER_FMT_RGB565;
   C3D_SyncDisplayTransfer(
@@ -869,20 +1209,19 @@ void Platform3DS_PresentBottomFrame(const uint8_t *pixels, int pitch,
     .depth = 0.0f,
     .angle = 0.0f,
   };
-  C2D_TargetClear(g_bottom_target, C2D_Color32(0, 0, 0, 255));
+  Platform3DS_ClearBlackTarget(g_bottom_target);
   C2D_SceneBegin(g_bottom_target);
-  C2D_DrawImage(image, &params, NULL);
-  if (g_is_new_3ds)
-    ConfigureArgbTextureEnv();
-  else
-    ConfigureRgb565TextureEnv();
+  Platform3DS_DrawMappedImage(image, &params,
+    g_is_new_3ds ? ConfigureArgbTextureEnv : ConfigureRgb565TextureEnv);
+  return true;
 }
 
 void Platform3DS_EndFrame(void) {
   if (!g_gpu_frame_active)
     return;
-  C3D_FrameEnd(0);
+  Platform3DS_EndGpuFrame();
   g_gpu_frame_active = false;
+  if (g_startup_lcd_black) RevealInitializedScreens();
 }
 
 uint32_t Platform3DS_WaitForVBlank(void) {
@@ -906,6 +1245,14 @@ void Platform3DS_RecordFrameTiming(uint32_t logic_work_us,
                                    uint32_t render_interval_us,
                                    int scheduled_logic_frames,
                                    int executed_logic_frames) {
+  if (g_ignore_next_frame_timing) {
+    g_ignore_next_frame_timing = false;
+    return;
+  }
+  if (!g_is_new_3ds)
+    RecordRecentFrame(ppu_draw_us, total_work_us, render_interval_us,
+                      logic_work_us, present_us, bottom_work_us,
+                      scheduled_logic_frames, executed_logic_frames);
   g_frame_timing_samples++;
   g_logic_work_total_us += logic_work_us;
   g_top_draw_total_us += top_draw_us;
@@ -1203,6 +1550,14 @@ static void SetupAudioStop(void) {
 }
 
 static void SetupAudioStart(void) {
+  static bool exit_cleanup_registered;
+  if (!exit_cleanup_registered) {
+    if (atexit(SetupAudioStop) != 0) {
+      LogSetup("Setup audio exit cleanup registration failed");
+      return;
+    }
+    exit_cleanup_registered = true;
+  }
   if (g_setup_audio_initialized)
     return;
   if (R_FAILED(ndspInit())) {
@@ -1261,6 +1616,7 @@ static void PresentSetupConsole(void);
 static void BeginSetupConsole(void) {
   if (g_setup_console_active)
     return;
+  g_startup_lcd_black = true;
   gfxInitDefault();
   gfxSetScreenFormat(GFX_TOP, GSP_RGB565_OES);
   gfxSetScreenFormat(GFX_BOTTOM, GSP_RGB565_OES);
@@ -1273,6 +1629,7 @@ static void BeginSetupConsole(void) {
   g_setup_console_active = true;
   PresentSetupConsole();
   PresentSetupConsole();
+  RevealInitializedScreens();
 }
 
 static void PresentSetupConsole(void) {
@@ -1310,6 +1667,8 @@ static void EndSetupConsole(void) {
     return;
   PresentSetupConsole();
   SetupAudioStop();
+  g_startup_lcd_black = true;
+  GSPGPU_SetLcdForceBlack(1);
   gfxExit();
   g_setup_console_active = false;
 }
@@ -2500,6 +2859,15 @@ static bool TryBuildBaseAssetsFromInstalledUsRom(const uint8 *patch,
   return success;
 }
 
+static const char *g_profile_prepare_status = "ROM preparation failed";
+
+static bool ProfileSetupFailure(const char *status, const char *path) {
+  int error = errno;
+  g_profile_prepare_status = status;
+  LogSetup("%s: %s (errno=%d)", status, path, error);
+  return false;
+}
+
 static bool ExtractAssetsFromRom(const char *rom_path) {
   LogSetup("Extraction requested");
   LogSetup("ROM found: %s", rom_path);
@@ -2522,6 +2890,7 @@ static bool ExtractAssetsFromRom(const char *rom_path) {
       patch ? "OK" : "FAILED", (unsigned long)patch_size);
     free(rom);
     free(patch);
+    ProfileSetupFailure("SD read error", rom_path);
     ShowFatalSetupError(error);
     return false;
   }
@@ -2564,6 +2933,7 @@ static bool ExtractAssetsFromRom(const char *rom_path) {
   free(rom);
   free(patch);
   if (!assets) {
+    g_profile_prepare_status = "Incompatible ROM";
     LogSetup("ROM not compatible with available extraction paths");
     return false;
   }
@@ -2572,6 +2942,7 @@ static bool ExtractAssetsFromRom(const char *rom_path) {
   LogSetup("Assets write: %s", written ? "OK" : "FAIL");
   free(assets);
   if (!written || !AssetsFileLooksValid(kAssetsFilename)) {
+    ProfileSetupFailure("SD assets write error", kAssetsFilename);
     ShowFatalSetupError(
       "Error saving zelda3_assets.dat.\n"
       "Check free space and the SD card.");
@@ -2623,11 +2994,22 @@ static const char *ProfileLeaf(const char *profile) {
   return slash ? slash + 1 : profile;
 }
 
+static uint32_t ProfileId(const char *profile) {
+  const uint8_t *text = (const uint8_t *)ProfileLeaf(profile);
+  uint32_t hash = 2166136261u;
+  while (*text) {
+    hash ^= *text++;
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
 static bool PrepareSaveDirectory(const RomEntry *rom, bool copy_legacy) {
   if (!EnsureDirectory("saves"))
     return false;
   snprintf(g_active_save_directory, sizeof(g_active_save_directory),
            "saves/%s", ProfileLeaf(rom->profile));
+  g_active_profile_id = ProfileId(rom->profile);
   if (!EnsureDirectory(g_active_save_directory))
     return false;
 
@@ -2656,6 +3038,7 @@ static bool PrepareSaveDirectoryForProfile(const char *profile) {
     return false;
   snprintf(g_active_save_directory, sizeof(g_active_save_directory),
            "saves/%s", ProfileLeaf(profile));
+  g_active_profile_id = ProfileId(profile);
   return EnsureDirectory(g_active_save_directory);
 }
 
@@ -2888,15 +3271,90 @@ static int SelectRom(RomEntry *roms, int rom_count, const char *status) {
   return -1;
 }
 
+// One migration per ROM profile, including pre-E16 profiles. A separate marker
+// is intentional: a new profile may inherit another profile's INI, but must
+// not inherit its "already migrated" state. Later menu writes leave it alone.
+static bool MigrateWideDefaults(const char *ini) {
+  char marker[640], temporary[640], marker_temporary[660], backup[640];
+  if (snprintf(marker,sizeof(marker),"%s.wide-defaults-v1",ini)>=(int)sizeof(marker) ||
+      snprintf(temporary,sizeof(temporary),"%s.wide-defaults.tmp",ini)>=(int)sizeof(temporary) ||
+      snprintf(marker_temporary,sizeof(marker_temporary),"%s.tmp",marker)>=(int)sizeof(marker_temporary) ||
+      snprintf(backup,sizeof(backup),"%s.wide-defaults.bak",ini)>=(int)sizeof(backup))
+    return ProfileSetupFailure("Settings path too long", ini);
+  // Recover a stopped replacement before creating any default INI. Never
+  // rename over an existing destination: SD FS and host POSIX differ here.
+  if (!IsRegularFile(ini) && IsRegularFile(backup) && rename(backup,ini)!=0)
+    return ProfileSetupFailure("Settings recovery failed", backup);
+  if (!CopyFileIfMissing(kBundledConfig,ini))
+    return ProfileSetupFailure("Settings create failed", ini);
+  if (IsRegularFile(marker)) return true;
+  FILE *input=fopen(ini,"rb");
+  if(!input)return ProfileSetupFailure("Settings read failed", ini);
+  FILE *output=fopen(temporary,"wb");
+  if(!output){fclose(input);return ProfileSetupFailure("Settings write failed", temporary);}
+  char line[1024], parsed[1024];bool general=false,inserted=false,ok=true;
+  while(fgets(line,sizeof(line),input)) {
+    strcpy(parsed,line);char *text=Trim(parsed);
+    if(text[0]=='[') {
+      general=strcasecmp(text,"[General]")==0;
+      if(general && !inserted) {
+        if(fputs("[General]\nDisplayMode = Wide\nWideEdgeMode = FixedCamera\n",output)<0)ok=false;
+        inserted=true;continue;
+      }
+    }
+    char *equals=strchr(text,'=');
+    if(general && equals) {
+      *equals=0;char *key=Trim(text);
+      if(!strcasecmp(key,"DisplayMode") || !strcasecmp(key,"WideEdgeMode"))continue;
+    }
+    if(fputs(line,output)<0)ok=false;
+  }
+  if(!inserted && fputs("\n[General]\nDisplayMode = Wide\nWideEdgeMode = FixedCamera\n",output)<0)ok=false;
+  if(ferror(input))ok=false;
+  if(fclose(input)!=0)ok=false;
+  if(fclose(output)!=0)ok=false;
+  if(!ok){remove(temporary);return ProfileSetupFailure("Settings write failed", ini);}
+  // Keep a complete old INI until the new file and migration marker are closed.
+  // A restart can recover the backup if promotion was interrupted.
+  if(IsRegularFile(backup) && remove(backup)!=0)
+    return ProfileSetupFailure("Settings backup failed", backup);
+  if(rename(ini,backup)!=0)
+    return ProfileSetupFailure("Settings backup failed", ini);
+  if(rename(temporary,ini)!=0) {
+    ProfileSetupFailure("Settings install failed", ini);
+    if(rename(backup,ini)!=0)
+      LogSetup("Settings rollback deferred to next boot: %s (errno=%d)",backup,errno);
+    return false;
+  }
+  output=fopen(marker_temporary,"wb");
+  if(!output)return ProfileSetupFailure("Settings marker failed", marker_temporary);
+  ok=fputs("1\n",output)>=0;
+  if(fclose(output)!=0)ok=false;
+  if(!ok || rename(marker_temporary,marker)!=0) {
+    remove(marker_temporary);
+    return ProfileSetupFailure("Settings marker failed", marker);
+  }
+  if(remove(backup)!=0)
+    LogSetup("Settings migrated; backup retained: %s (errno=%d)",backup,errno);
+  LogSetup("Applied one-time WIDE/FixedCamera defaults: %s",ini);
+  return true;
+}
+
 static bool EnsureProfileReady(RomEntry *rom, bool force_extract) {
+  g_profile_prepare_status = "ROM preparation failed";
+  LogSetup("Preparing profile: %s, ROM: %s", rom->profile, rom->filename);
   if (!EnsureDirectory(kProfilesDirectory) || !EnsureDirectory(rom->profile))
+    return ProfileSetupFailure("SD profile folder error", rom->profile);
+  char profile_assets[512], profile_ini[512];
+  snprintf(profile_assets,sizeof(profile_assets),"%s/%s",rom->profile,kAssetsFilename);
+  snprintf(profile_ini,sizeof(profile_ini),"%s/zelda3.ini",rom->profile);
+  if (!MigrateWideDefaults(profile_ini))
     return false;
   char cwd[512];
   if (!getcwd(cwd, sizeof(cwd)))
-    return false;
+    return ProfileSetupFailure("SD directory error", rom->profile);
   if (chdir(rom->profile) != 0)
-    return false;
-  CopyFileIfMissing(kBundledConfig, "zelda3.ini");
+    return ProfileSetupFailure("SD directory error", rom->profile);
   bool ready = !force_extract && AssetsFileLooksValid(kAssetsFilename);
   if (!ready) {
     // Prefer the pre-baked assets (already include Chinese).  Unlike the
@@ -2914,20 +3372,20 @@ static bool EnsureProfileReady(RomEntry *rom, bool force_extract) {
       snprintf(rom_path, sizeof(rom_path), "../../%s", rom->filename);
       ready = ExtractAssetsFromRom(rom_path);
     }
+  } else {
+    LogSetup("Reusing validated profile assets");
   }
-  chdir(cwd);
-  if (ready) {
-    char profile_assets[512];
-    char profile_ini[512];
-    snprintf(profile_assets, sizeof(profile_assets), "%s/%s",
-             rom->profile, kAssetsFilename);
-    snprintf(profile_ini, sizeof(profile_ini), "%s/zelda3.ini", rom->profile);
-    ready = CopyFileReplacing(profile_assets, kAssetsFilename) &&
-            CopyFileReplacing(profile_ini, "zelda3.ini") &&
-            PrepareSaveDirectory(rom, false);
-    WriteSelectedRom(rom);
-  }
-  return ready;
+  if (chdir(cwd)!=0)
+    return ProfileSetupFailure("SD directory error", cwd);
+  if (!ready) return false;
+  if (!CopyFileReplacing(profile_assets, kAssetsFilename))
+    return ProfileSetupFailure("SD assets copy error", profile_assets);
+  if (!CopyFileReplacing(profile_ini, "zelda3.ini"))
+    return ProfileSetupFailure("SD settings copy error", profile_ini);
+  if (!PrepareSaveDirectory(rom, false))
+    return ProfileSetupFailure("SD save folder error", rom->profile);
+  WriteSelectedRom(rom);
+  return true;
 }
 
 static bool ResolveActiveProfile(char *profile, size_t profile_size) {
@@ -2945,17 +3403,12 @@ static bool ResolveActiveProfile(char *profile, size_t profile_size) {
       ReadSelectedRomInfo(&selected_info) &&
       FindSelectedRomEntry(&selected_info, roms, rom_count, &selected_rom) &&
       ProfileAssetsValid(selected_rom.profile)) {
-    char profile_assets[512];
-    char profile_ini[512];
-    snprintf(profile_assets, sizeof(profile_assets), "%s/%s",
-             selected_rom.profile, kAssetsFilename);
-    snprintf(profile_ini, sizeof(profile_ini), "%s/zelda3.ini",
-             selected_rom.profile);
-    if (!CopyFileReplacing(profile_assets, kAssetsFilename) ||
-        !CopyFileReplacing(profile_ini, "zelda3.ini"))
+    if (!EnsureProfileReady(&selected_rom, false)) {
+      ShowFatalSetupError(g_profile_prepare_status);
       return false;
+    }
     snprintf(profile, profile_size, "%s", selected_rom.profile);
-    return PrepareSaveDirectory(&selected_rom, false);
+    return true;
   }
 
   int legacy_choice = -1;
@@ -2968,20 +3421,19 @@ static bool ResolveActiveProfile(char *profile, size_t profile_size) {
       if (!MigrateLegacyStorage(&roms[legacy_choice]))
         return false;
       snprintf(profile, profile_size, "%s", roms[legacy_choice].profile);
-      return ProfileAssetsValid(profile) &&
-             PrepareSaveDirectoryForProfile(profile);
+      return EnsureProfileReady(&roms[legacy_choice], false);
     }
     if (EnsureProfileReady(&roms[legacy_choice], true)) {
       snprintf(profile, profile_size, "%s", roms[legacy_choice].profile);
       return true;
     }
-    SelectRom(roms, rom_count, "Incompatible ROM");
+    SelectRom(roms, rom_count, g_profile_prepare_status);
     return false;
   }
 
   const char *status = NULL;
   while (aptMainLoop()) {
-    int choice = rom_count == 1 && !status ? 0 : SelectRom(roms, rom_count, status);
+    int choice = rom_count == 1 && !force_selector && !status ? 0 : SelectRom(roms, rom_count, status);
     if (choice < 0)
       return false;
     PresentRomSelector(roms, rom_count, choice, "Preparing selected ROM...");
@@ -2989,7 +3441,7 @@ static bool ResolveActiveProfile(char *profile, size_t profile_size) {
       snprintf(profile, profile_size, "%s", roms[choice].profile);
       return true;
     }
-    status = "Incompatible ROM";
+    status = g_profile_prepare_status;
     if (rom_count <= 1)
       SelectRom(roms, rom_count, status);
   }
@@ -3056,7 +3508,8 @@ void Platform3DS_ApplyConfig(struct Config *config) {
   config->enhanced_mode7 = false;
   config->new_renderer = true;
   config->no_sprite_limits = false;
-  config->extend_y = false;
+  // PR #31: render 16 extra lines in WIDE instead of stretching 224 lines.
+  config->extend_y = g_display_mode == kPlatform3DSDisplayUltraWideMod;
   config->extended_aspect_ratio =
     g_display_mode == kPlatform3DSDisplayUltraWideMod ? 72 : 0;
   config->features0 &= ~(kFeatures0_ExtendScreen64 |
@@ -3108,85 +3561,79 @@ static void MakeTimestamp(char *stamp, size_t stamp_size) {
 }
 
 bool Platform3DS_CreateDumpDirectory(char *out, size_t out_size) {
-  if (!out || out_size == 0)
-    return false;
-  if (!EnsureDirectory("dumps")) {
-    Platform3DS_LogRuntime("Dump directory create failed: dumps");
-    return false;
-  }
-  char stamp[32];
-  MakeTimestamp(stamp, sizeof(stamp));
-  for (int attempt = 0; attempt < 100; attempt++) {
-    if (attempt == 0)
-      snprintf(out, out_size, "dumps/dump-%s", stamp);
-    else
-      snprintf(out, out_size, "dumps/dump-%s-%02d", stamp, attempt);
-    if (mkdir(out, 0777) == 0) {
-      Platform3DS_LogRuntime("Dump session directory: %s", out);
-      return true;
-    }
-    if (errno != EEXIST)
-      break;
-  }
-  Platform3DS_LogRuntime("Dump session directory create failed");
-  out[0] = 0;
-  return false;
-}
-
-bool Platform3DS_SaveARGB8888Bmp(const char *path, const uint8_t *pixels,
-                                 int pitch, int width, int height) {
-  if (!path || !pixels || pitch <= 0 || width <= 0 || height <= 0)
-    return false;
-  FILE *file = fopen(path, "wb");
-  if (!file)
-    return false;
-
-  int row_size = (width * 3 + 3) & ~3;
-  uint32_t file_size = 54u + (uint32_t)row_size * (uint32_t)height;
-  uint8_t header[54] = {
-    'B', 'M',
-    (uint8_t)file_size, (uint8_t)(file_size >> 8),
-    (uint8_t)(file_size >> 16), (uint8_t)(file_size >> 24),
-    0, 0, 0, 0, 54, 0, 0, 0,
-    40, 0, 0, 0,
-    (uint8_t)width, (uint8_t)(width >> 8),
-    (uint8_t)(width >> 16), (uint8_t)(width >> 24),
-    (uint8_t)height, (uint8_t)(height >> 8),
-    (uint8_t)(height >> 16), (uint8_t)(height >> 24),
-    1, 0, 24, 0,
-  };
-  bool ok = fwrite(header, 1, sizeof(header), file) == sizeof(header);
-  uint8_t *row = malloc((size_t)row_size);
-  if (!row)
-    ok = false;
-  for (int y = height - 1; ok && y >= 0; y--) {
-    memset(row, 0, (size_t)row_size);
-    const uint32_t *src = (const uint32_t *)(pixels + (size_t)y * pitch);
-    for (int x = 0; x < width; x++) {
-      uint32_t c = src[x];
-      row[x * 3 + 0] = (uint8_t)c;
-      row[x * 3 + 1] = (uint8_t)(c >> 8);
-      row[x * 3 + 2] = (uint8_t)(c >> 16);
-    }
-    ok = fwrite(row, 1, (size_t)row_size, file) == (size_t)row_size;
-  }
-  free(row);
-  if (fclose(file) != 0)
-    ok = false;
-  if (!ok)
-    remove(path);
-  Platform3DS_LogRuntime("Screenshot %s: %s", path, ok ? "OK" : "FAILED");
+  bool ok = DumpState_CreateDirectory("dumps", out, out_size);
+  Platform3DS_LogRuntime("Dump session directory: %s", ok ? out : "FAILED");
   return ok;
 }
 
-bool Platform3DS_SaveRGB565Bmp(const char *path, const uint8_t *pixels,
-                               int pitch, int width, int height) {
-  if (!path || !pixels || pitch <= 0 || width <= 0 || height <= 0)
+static void ReadDisplayedPixel(const uint8_t *pixel,
+                               GSPGPU_FramebufferFormat format,
+                               uint8_t *red, uint8_t *green,
+                               uint8_t *blue) {
+  switch (format) {
+  case GSP_RGB565_OES: {
+    uint16_t color;
+    memcpy(&color, pixel, sizeof(color));
+    *red = (uint8_t)(((color >> 11) & 31u) * 255u / 31u);
+    *green = (uint8_t)(((color >> 5) & 63u) * 255u / 63u);
+    *blue = (uint8_t)((color & 31u) * 255u / 31u);
+    break;
+  }
+  case GSP_BGR8_OES:
+    *blue = pixel[0];
+    *green = pixel[1];
+    *red = pixel[2];
+    break;
+  case GSP_RGBA8_OES:
+    *red = pixel[0];
+    *green = pixel[1];
+    *blue = pixel[2];
+    break;
+  case GSP_RGB5_A1_OES: {
+    uint16_t color;
+    memcpy(&color, pixel, sizeof(color));
+    *red = (uint8_t)(((color >> 11) & 31u) * 255u / 31u);
+    *green = (uint8_t)(((color >> 6) & 31u) * 255u / 31u);
+    *blue = (uint8_t)(((color >> 1) & 31u) * 255u / 31u);
+    break;
+  }
+  case GSP_RGBA4_OES: {
+    uint16_t color;
+    memcpy(&color, pixel, sizeof(color));
+    *red = (uint8_t)(((color >> 12) & 15u) * 17u);
+    *green = (uint8_t)(((color >> 8) & 15u) * 17u);
+    *blue = (uint8_t)(((color >> 4) & 15u) * 17u);
+    break;
+  }
+  default:
+    *red = 0;
+    *green = 0;
+    *blue = 0;
+    break;
+  }
+}
+
+static bool SaveDisplayedFramebufferBmp(
+    const char *path, const GSPGPU_CaptureInfoEntry *capture,
+    int width, int height) {
+  if (!path || !capture || !capture->framebuf0_vaddr)
     return false;
+  GSPGPU_FramebufferFormat format =
+    (GSPGPU_FramebufferFormat)(capture->format & 7u);
+  unsigned bytes_per_pixel = gspGetBytesPerPixel(format);
+  if (bytes_per_pixel < 2 || bytes_per_pixel > 4 ||
+      capture->framebuf_widthbytesize == 0)
+    return false;
+
+  const uint8_t *framebuffer =
+    (const uint8_t *)capture->framebuf0_vaddr;
+  size_t framebuffer_size =
+    (size_t)capture->framebuf_widthbytesize * (size_t)width;
+  GSPGPU_InvalidateDataCache(framebuffer, framebuffer_size);
+
   FILE *file = fopen(path, "wb");
   if (!file)
     return false;
-
   int row_size = (width * 3 + 3) & ~3;
   uint32_t file_size = 54u + (uint32_t)row_size * (uint32_t)height;
   uint8_t header[54] = {
@@ -3207,13 +3654,17 @@ bool Platform3DS_SaveRGB565Bmp(const char *path, const uint8_t *pixels,
     ok = false;
   for (int y = height - 1; ok && y >= 0; y--) {
     memset(row, 0, (size_t)row_size);
-    const uint16_t *source =
-      (const uint16_t *)(pixels + (size_t)y * pitch);
     for (int x = 0; x < width; x++) {
-      uint16_t color = source[x];
-      row[x * 3 + 0] = (uint8_t)((color & 31) * 255 / 31);
-      row[x * 3 + 1] = (uint8_t)(((color >> 5) & 63) * 255 / 63);
-      row[x * 3 + 2] = (uint8_t)(((color >> 11) & 31) * 255 / 31);
+      // 3DS display framebuffers are rotated: each physical X coordinate is
+      // one memory row and Y runs in reverse inside that row.
+      const uint8_t *pixel =
+        framebuffer + (size_t)x * capture->framebuf_widthbytesize +
+        (size_t)(height - 1 - y) * bytes_per_pixel;
+      uint8_t red, green, blue;
+      ReadDisplayedPixel(pixel, format, &red, &green, &blue);
+      row[x * 3 + 0] = blue;
+      row[x * 3 + 1] = green;
+      row[x * 3 + 2] = red;
     }
     ok = fwrite(row, 1, (size_t)row_size, file) == (size_t)row_size;
   }
@@ -3222,14 +3673,228 @@ bool Platform3DS_SaveRGB565Bmp(const char *path, const uint8_t *pixels,
     ok = false;
   if (!ok)
     remove(path);
-  Platform3DS_LogRuntime("Screenshot %s: %s", path, ok ? "OK" : "FAILED");
+  return ok;
+}
+
+static bool SaveDisplayedFramebufferRaw(
+    const char *path, const GSPGPU_CaptureInfoEntry *capture, int width) {
+  if (!path)
+    return true;
+  if (!capture || !capture->framebuf0_vaddr ||
+      capture->framebuf_widthbytesize == 0)
+    return false;
+  size_t size = (size_t)capture->framebuf_widthbytesize * (size_t)width;
+  GSPGPU_InvalidateDataCache(capture->framebuf0_vaddr, size);
+  return WriteBlob(path, capture->framebuf0_vaddr, size);
+}
+
+bool Platform3DS_SaveDisplayedScreensDetailed(
+    const char *top_path, const char *bottom_path,
+    const char *top_raw_path, const char *bottom_raw_path,
+    Platform3DSCaptureStats *stats) {
+  if (stats)
+    memset(stats, 0, sizeof(*stats));
+
+  GSPGPU_CaptureInfo capture;
+  memset(&capture, 0, sizeof(capture));
+  Result result = GSPGPU_ImportDisplayCaptureInfo(&capture);
+  if (R_FAILED(result)) {
+    Platform3DS_LogRuntime(
+      "Physical display capture import failed: 0x%08lx",
+      (unsigned long)result);
+    return false;
+  }
+
+  const GSPGPU_CaptureInfoEntry *top =
+    &capture.screencapture[GSP_SCREEN_TOP];
+  const GSPGPU_CaptureInfoEntry *bottom =
+    &capture.screencapture[GSP_SCREEN_BOTTOM];
+  if (stats) {
+    stats->top_format = top->format & 7u;
+    stats->top_stride = top->framebuf_widthbytesize;
+    stats->bottom_format = bottom->format & 7u;
+    stats->bottom_stride = bottom->framebuf_widthbytesize;
+    stats->top_address = (uintptr_t)top->framebuf0_vaddr;
+    stats->bottom_address = (uintptr_t)bottom->framebuf0_vaddr;
+  }
+
+  bool top_ok = SaveDisplayedFramebufferBmp(top_path, top, 400, 240);
+  bool bottom_ok =
+    SaveDisplayedFramebufferBmp(bottom_path, bottom, 320, 240);
+  bool top_raw_ok = SaveDisplayedFramebufferRaw(top_raw_path, top, 400);
+  bool bottom_raw_ok =
+    SaveDisplayedFramebufferRaw(bottom_raw_path, bottom, 320);
+  bool ok = top_ok && bottom_ok && top_raw_ok && bottom_raw_ok;
+  Platform3DS_LogRuntime(
+    "Physical screen capture: top=%s bottom=%s top-raw=%s bottom-raw=%s",
+    top_ok ? "OK" : "FAILED", bottom_ok ? "OK" : "FAILED",
+    top_raw_ok ? "OK" : "FAILED", bottom_raw_ok ? "OK" : "FAILED");
+  return ok;
+}
+
+static const char *DisplayedFramebufferFormatName(uint32_t format) {
+  switch ((GSPGPU_FramebufferFormat)(format & 7u)) {
+  case GSP_RGBA8_OES: return "RGBA8";
+  case GSP_BGR8_OES: return "BGR8";
+  case GSP_RGB565_OES: return "RGB565";
+  case GSP_RGB5_A1_OES: return "RGB5A1";
+  case GSP_RGBA4_OES: return "RGBA4";
+  default: return "unknown";
+  }
+}
+
+extern void Zelda3_N3DSAudioGetStats(uint32_t values[16]);
+extern bool SecondScreenSDL_WriteDiagnostics(const char *directory);
+
+static bool CloseDiagnosticFile(FILE *file) {
+  bool ok = !ferror(file);
+  return fclose(file) == 0 && ok;
+}
+
+static bool WriteExtendedDiagnostics(const char *directory) {
+  char path[256];
+  uint32_t audio[16];
+  Zelda3_N3DSAudioGetStats(audio);
+  snprintf(path, sizeof(path), "%s/audio.txt", directory);
+  FILE *f = fopen(path, "wb");
+  bool ok = f != NULL;
+  if (f) {
+    fprintf(f, "Audio diagnostic schema: 1\nActive: %lu\n", (unsigned long)audio[0]);
+    fprintf(f, "Rate: %lu Hz; samples/buffer: %lu; channels: %lu; buffers: %lu; SDL format: 0x%04lx\n",
+            (unsigned long)audio[1], (unsigned long)audio[2], (unsigned long)audio[3],
+            (unsigned long)audio[4], (unsigned long)audio[15]);
+    fprintf(f, "Queue at capture: queued=%lu playing=%lu free=%lu\n",
+            (unsigned long)audio[5], (unsigned long)audio[6], (unsigned long)audio[7]);
+    fprintf(f, "Refill samples: %lu; average/last/max wall span: %lu/%lu/%lu us\n",
+            (unsigned long)audio[8], (unsigned long)audio[9], (unsigned long)audio[10], (unsigned long)audio[11]);
+    fprintf(f, "Empty queue transitions while unpaused: %lu\nWorker priority: 0x%02lx\nCache mode: %lu (1=SVC, 2=DSP fallback)\n",
+            (unsigned long)audio[12], (unsigned long)audio[13], (unsigned long)audio[14]);
+    fprintf(f, "Refill wall span includes callback work and thread preemption; it is not CPU-only time.\n"
+               "Refill instrumentation is Old 3DS only. Queue paused for dump: %d; previously paused: %d. Empty-queue transitions are observations, not an audible-glitch count.\n",
+            g_dump_audio_pause_active, g_dump_audio_was_paused);
+    ok = CloseDiagnosticFile(f) && ok;
+  }
+
+  snprintf(path, sizeof(path), "%s/frame-times.csv", directory);
+  f = fopen(path, "wb");
+  if (!f) ok = false;
+  else {
+    fputs("sample,logic_us,ppu_us,present_us,bottom_submit_us,total_work_us,interval_us,logic_scheduled,logic_executed,ppu_main_us,ppu_worker_us,ppu_join_us,split_line,gpu_begin_us,top_clean_transfer_us,gpu_end_us\n", f);
+    unsigned first = (g_recent_next + kRecentFrameCount - g_recent_count) % kRecentFrameCount;
+    for (unsigned i = 0; i < g_recent_count; i++) {
+      const RecentFrameTiming *v = &g_recent_frames[(first + i) % kRecentFrameCount];
+      fprintf(f, "%u,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\n", i + 1,
+              (unsigned long)v->logic, (unsigned long)v->ppu, (unsigned long)v->present,
+              (unsigned long)v->bottom, (unsigned long)v->work, (unsigned long)v->interval,
+              (unsigned long)v->scheduled, (unsigned long)v->executed,
+              (unsigned long)v->ppu_main, (unsigned long)v->ppu_worker, (unsigned long)v->ppu_join,
+              (unsigned long)v->split, (unsigned long)v->gpu_begin,
+              (unsigned long)v->top_transfer, (unsigned long)v->gpu_end);
+    }
+    ok = CloseDiagnosticFile(f) && ok;
+  }
+
+  Ppu *p = g_zenv.ppu;
+  snprintf(path, sizeof(path), "%s/ppu.txt", directory);
+  f = fopen(path, "wb");
+  if (!f || !p) { if (f) fclose(f); ok = false; }
+  else {
+    fputs("PPU diagnostic schema: 1\nPhase: current post-render registers; not a per-scanline HDMA trace.\n"
+          "Binary data: little-endian u16 CGRAM/OAM/priority buffers. RAM and VRAM are in ram.bin/vram.bin.\n"
+          "Priority buffers describe the final main-thread scanline, not a complete frame.\n", f);
+    if (!g_is_new_3ds && PpuGpuOutputActive())
+      fputs("Current output is PICA200: CPU priority/sprite caches below are retained diagnostic memory, NOT current rendered pixels.\n", f);
+    fprintf(f, "mode=%u brightness=%u forced_blank=%u render_flags=0x%02x pitch=%lu\n",
+            p->mode, p->brightness, p->forcedBlank, p->renderFlags, (unsigned long)p->renderPitch);
+    fprintf(f, "side_space configured/left/right/bottom=%u/%u/%u/%u obj_x_offset=%d\n",
+            p->extraLeftRight, p->extraLeftCur, p->extraRightCur, p->extraBottomCur, p->renderObjXOffset);
+    fprintf(f, "wide_visible_column_words=%lu (render-only; raw VRAM retains original streamer data)\n",
+            (unsigned long)ZeldaGetWideColumnRepairCount());
+    fprintf(f, "TM=%02x TS=%02x TMW=%02x TSW=%02x mosaic_size=%u mosaic_enabled=%02x\n",
+            p->screenEnabled[0], p->screenEnabled[1], p->screenWindowed[0], p->screenWindowed[1],
+            p->mosaicSize, p->mosaicEnabled);
+    fprintf(f, "math_enabled=%02x clip=%u prevent=%u subscreen=%u subtract=%u half=%u fixed_rgb5=%u,%u,%u\n",
+            p->mathEnabled, p->clipMode, p->preventMathMode, p->addSubscreen, p->subtractColor,
+            p->halfColor, p->fixedColorR, p->fixedColorG, p->fixedColorB);
+    fprintf(f, "windowsel=%06lx W1=%u,%u W2=%u,%u extended_window=%u current_ext=%d,%d\n",
+            (unsigned long)p->windowsel, p->window1left, p->window1right, p->window2left,
+            p->window2right, p->windowExtLeft != NULL, p->windowExtLeftCur, p->windowExtRightCur);
+    fprintf(f, "OBJ bases=%04x,%04x size=%u\n", p->objTileAdr1, p->objTileAdr2, p->objSize);
+    for (unsigned i = 0; i < 4; i++) {
+      const BgLayer *b = &p->bgLayer[i];
+      fprintf(f, "BG%u scroll=%u,%u map=%04x tiles=%04x wider=%u higher=%u\n",
+              i + 1, b->hScroll, b->vScroll, b->tilemapAdr, b->tileAdr, b->tilemapWider, b->tilemapHigher);
+    }
+    if ((p->renderFlags & kPpuRenderFlags_Old3DS) && p->spriteLinesValid) {
+      unsigned candidates = 0;
+      unsigned height = (p->renderFlags & kPpuRenderFlags_Height240) ? 240 : 224;
+      for (unsigned line = 0; line < height; line++)
+        for (unsigned word = 0; word < 4; word++)
+          candidates += __builtin_popcount(p->spriteLines[line][word]);
+      fprintf(f, "Old sprite candidates=%u baseline_entries=%u (before X/OBJ limits); backdrop_math_cache=%d\n",
+              candidates, height * 128, p->backdropMathValid);
+    }
+    fputs("Mode7 matrix:", f);
+    for (unsigned i = 0; i < 8; i++) fprintf(f, " %d", p->m7matrix[i]);
+    fputc('\n', f);
+    ZeldaWriteGameDiagnostics(f);
+    if (!g_is_new_3ds) PpuGpuWriteDiagnostics(f);
+    ok = CloseDiagnosticFile(f) && ok;
+    const struct { const char *name; const void *data; size_t size; } blobs[] = {
+      {"cgram.bin", p->cgram, sizeof(p->cgram)}, {"oam.bin", p->oam, sizeof(p->oam)},
+      {"ppu-main-priority.bin", &p->bgBuffers[0], sizeof(p->bgBuffers[0])},
+      {"ppu-sub-priority.bin", &p->bgBuffers[1], sizeof(p->bgBuffers[1])},
+    };
+    for (unsigned i = 0; i < sizeof(blobs) / sizeof(blobs[0]); i++) {
+      snprintf(path, sizeof(path), "%s/%s", directory, blobs[i].name);
+      ok = WriteBlob(path, blobs[i].data, blobs[i].size) && ok;
+    }
+  }
+  if (!g_is_new_3ds && PpuGpuOutputActive()) {
+    const uint32_t *gpu_pixels = PpuGpuReadback();
+    if (gpu_pixels) {
+      snprintf(path, sizeof(path), "%s/pica-source.raw", directory);
+      ok = WriteBlob(path, gpu_pixels, 512*256*4) && ok;
+      snprintf(path, sizeof(path), "%s/pica-source.txt", directory);
+      FILE *gpu_info=fopen(path,"wb");
+      if(gpu_info) {
+        fputs("PICA200 resolved image: 512x256, row 0 at top, little-endian u32 00RRGGBB.\nActive width/height and backend history are in ppu.txt.\nCPU priority buffers/top-source.raw do not describe a GPU frame.\n",gpu_info);
+        fclose(gpu_info);
+      } else ok=false;
+    } else ok = false;
+  }
+  // The frame source remains owned by the presenter until the next BeginDraw.
+  // Dumps run on the game thread before that point, with PPU workers joined.
+  if (g_last_top_source) {
+    snprintf(path, sizeof(path), "%s/top-source.raw", directory);
+    ok = WriteBlob(path, g_last_top_source,
+      (size_t)g_last_top_source_pitch * g_last_top_source_height) && ok;
+    snprintf(path, sizeof(path), "%s/top-source.txt", directory);
+    f = fopen(path, "wb");
+    if (!f) ok = false;
+    else {
+      fprintf(f, "CPU source of the last submitted top frame; linear BGRX8888 (little-endian 0x00RRGGBB).\n"
+                 "width=%d height=%d pitch=%d bytes\nPhysical capture may differ by one presentation.\n",
+              g_last_top_source_width, g_last_top_source_height, g_last_top_source_pitch);
+      ok = CloseDiagnosticFile(f) && ok;
+    }
+  }
+  ok = SecondScreenSDL_WriteDiagnostics(directory) && ok;
+  // Snapshot optional context only when present; no ROM/assets are copied.
+  const char *context[] = {"runtime.log", "zelda3.ini", "pica-color-probe.raw", "pica-geometry-probe.raw"};
+  for (unsigned i = 0; i < countof(context); i++) if ((i < 2 || !g_is_new_3ds) && IsRegularFile(context[i])) {
+    snprintf(path, sizeof(path), "%s/%s", directory, context[i]);
+    ok = CopyFileReplacing(context[i], path) && ok;
+  }
   return ok;
 }
 
 bool Platform3DS_DumpMemory(const char *directory,
                             const uint8_t *ram, size_t ram_size,
                             const uint8_t *sram, size_t sram_size,
-                            const uint16_t *vram, size_t vram_words) {
+                            const uint16_t *vram, size_t vram_words,
+                            const Platform3DSCaptureStats *capture_stats,
+                            bool screens_ok) {
   char local_directory[128];
   if (!directory || !directory[0]) {
     if (!Platform3DS_CreateDumpDirectory(local_directory, sizeof(local_directory)))
@@ -3244,23 +3909,85 @@ bool Platform3DS_DumpMemory(const char *directory,
   ok = WriteBlob(path, sram, sram_size) && ok;
   snprintf(path, sizeof(path), "%s/vram.bin", directory);
   ok = WriteBlob(path, vram, vram_words * sizeof(*vram)) && ok;
+  ok = screens_ok && ok;
+
+  char load_state_path[192];
+  snprintf(load_state_path, sizeof(load_state_path), "%s/%s", directory,
+           ZELDA_DUMP_LOAD_STATE_FILENAME);
+  bool load_state_ok = IsRegularFile(load_state_path);
 
   snprintf(path, sizeof(path), "%s/info.txt", directory);
   FILE *info = fopen(path, "wb");
   if (info) {
+    char captured_at[32]; MakeTimestamp(captured_at, sizeof(captured_at));
     fprintf(info, "Zelda 3DS v%s memory dump\n", ZELDA3_3DS_VERSION);
+    fprintf(info, "Dump schema: 2; captured at: %s; session: %s\n", captured_at, directory);
+    fprintf(info, "Active ROM profile ID: %08lx\n", (unsigned long)g_active_profile_id);
+    ZeldaWriteGameDiagnostics(info);
+    fprintf(info, "Display/camera/zoom/FPS overlay: %d/%d/%d/%d\n",
+            g_display_mode, g_wide_edge_mode, g_wide_zoom_index, g_show_fps);
+    fprintf(info, "Linear heap free: %lu bytes; VRAM free: %lu bytes\n",
+            (unsigned long)linearSpaceFree(), (unsigned long)vramSpaceFree());
+    fprintf(info, "Cache clean mode: %d (1=direct SVC, 2=GX fallback); C2D range: %lu bytes\n",
+            g_cache_clean_mode, (unsigned long)g_c2d_flush_size);
+    fprintf(info, "Citro3D last completed GPU draw: %.3f ms; CPU processing: %.3f ms; command usage: %.3f\n",
+            C3D_GetDrawingTime(), C3D_GetProcessingTime(), C3D_GetCmdBufUsage());
     fprintf(info, "RAM bytes: %lu\n", (unsigned long)ram_size);
     fprintf(info, "SRAM bytes: %lu\n", (unsigned long)sram_size);
     fprintf(info, "VRAM words: %lu\n", (unsigned long)vram_words);
+    fprintf(info, "Physical screen capture: %s\n",
+            screens_ok ? "complete" : "failed or incomplete");
+    fprintf(info, "Top screen capture: 400x240 BMP plus raw framebuffer\n");
+    fprintf(info, "Bottom screen capture: 320x240 BMP plus raw framebuffer\n");
+    if (capture_stats && capture_stats->top_stride != 0 &&
+        capture_stats->bottom_stride != 0) {
+      fprintf(info, "Top framebuffer format: %s (%lu)\n",
+              DisplayedFramebufferFormatName(capture_stats->top_format),
+              (unsigned long)capture_stats->top_format);
+      fprintf(info, "Top framebuffer stride: %lu bytes\n",
+              (unsigned long)capture_stats->top_stride);
+      fprintf(info, "Top framebuffer address: 0x%08lx\n",
+              (unsigned long)capture_stats->top_address);
+      fprintf(info, "Bottom framebuffer format: %s (%lu)\n",
+              DisplayedFramebufferFormatName(capture_stats->bottom_format),
+              (unsigned long)capture_stats->bottom_format);
+      fprintf(info, "Bottom framebuffer stride: %lu bytes\n",
+              (unsigned long)capture_stats->bottom_stride);
+      fprintf(info, "Bottom framebuffer address: 0x%08lx\n",
+              (unsigned long)capture_stats->bottom_address);
+    } else {
+      fprintf(info, "Physical framebuffer metadata: unavailable\n");
+    }
+    fprintf(info, "Load State checkpoint: %s\n",
+            load_state_ok ? "load-state.bin (validated)" : "unavailable");
     fprintf(info, "Display mode: %d\n", (int)g_display_mode);
     fprintf(info, "Top presenter: PICA200 RGB565\n");
+    if (!g_is_new_3ds) {
+      fprintf(info, "Old 3DS PPU: E9 sprite-line masks; backdrop/subscreen palette; packed half-add; ARMv6 opaque spans\n");
+      fprintf(info, "Old 3DS opaque UI textures: preconverted RGB565\n");
+      fprintf(info, "Recent frame samples: %lu (maximum 120)\n", (unsigned long)g_recent_count);
+      if (g_recent_count) {
+        fprintf(info, "Recent average PPU draw: %lu us\n", (unsigned long)(g_recent_ppu_us / g_recent_count));
+        fprintf(info, "Recent average total frame work: %lu us\n", (unsigned long)(g_recent_work_us / g_recent_count));
+        fprintf(info, "Recent work frames over 16.67 ms: %lu/%lu\n",
+                (unsigned long)g_recent_over_budget, (unsigned long)g_recent_count);
+        fprintf(info, "Recent presentation rate: %.2f Hz\n",
+                g_recent_interval_us ? 1000000.0 * g_recent_count / g_recent_interval_us : 0.0);
+      }
+    }
+    fprintf(info, "Hardware policy: %s\n", Platform3DS_GetHardwareProfile()->name);
+    fprintf(info, "Top software pixel path: BGRX8888\n");
     fprintf(info, "Frame pacing: 60 Hz high-resolution timer\n");
     fprintf(info, "New 3DS speedup requested: %s\n",
             g_is_new_3ds ? "yes" : "no");
     fprintf(info, "Bottom pixel path: %s\n",
             g_is_new_3ds ? "ARGB8888" : "RGB565");
-    fprintf(info, "Bottom periodic cadence: %d FPS\n",
-            g_is_new_3ds ? 30 : 10);
+    fprintf(info, "Bottom periodic cadence: %s\n",
+            g_is_new_3ds ? "30 FPS" :
+            "event/state driven; 0.33 FPS idle fallback");
+    fprintf(info, "Bottom developer overlay refresh: %s\n",
+            g_is_new_3ds ? "30 FPS" :
+            "on diagnostic change; at most 2.5 FPS");
     if (Platform3DS_CanUseCore1PpuWorker())
       fprintf(info, "Core 1 PPU budget: %d%%\n",
               g_core1_time_limit_percent);
@@ -3392,11 +4119,13 @@ bool Platform3DS_DumpMemory(const char *directory,
       fprintf(info, "Turbo speed: x%d\n", g_turbo_multiplier);
     else
       fprintf(info, "Turbo speed: off\n");
-    if (fclose(info) != 0)
+    if (!CloseDiagnosticFile(info))
       ok = false;
   } else {
     ok = false;
   }
+
+  ok = WriteExtendedDiagnostics(directory) && ok;
 
   Platform3DS_LogRuntime("Memory dump %s: %s", directory,
                          ok ? "OK" : "FAILED");

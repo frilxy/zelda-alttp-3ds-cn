@@ -20,6 +20,8 @@
 #ifdef __3DS__
 #include <3ds.h>
 #include "platform_3ds.h"
+#include "updater.h"
+#include "native_touch.h"
 #else
 enum Platform3DSDisplayMode {
   kPlatform3DSDisplayOriginal,
@@ -40,10 +42,14 @@ enum Platform3DSCStickMode {
 #endif
 
 #include "../../types.h"                 // uint8/uint16 for the tables header
+#include "../../dump_state.h"
 #include "../../second_screen_tables.h"  // kIconCount/kIconCols/kGlyphCount/kGlyphCols
 #include "ss_sheets.h"             // generated cell indices for icons/glyphs/letters
+#include "second_screen_texture.h"
+#include "second_screen_shapes.h"
 #include "ss_textures.h"           // baked theme background tiles (menu/parchment/stone)
 #include "ss_cjk_data.h"           // bottom-screen Simplified-Chinese glyph atlas
+#include "ss_tex_triforce.h"       // baked AA triangle mask for the cinema-screen triforce
 
 #ifdef BOTTOM_SCREEN_CN
 #define SS_STR(en, zh) zh
@@ -73,6 +79,8 @@ bool SS_RenderLetterSheet(uint32_t *px);
 bool SS_RenderCjkSheet(uint32_t *px);
 #endif
 bool SS_RenderWorldMap(uint32_t *px, bool dark);
+bool SS_GetMirrorPortal(int *out);
+void SS_ResetRomCaches(void);
 bool SS_RenderLinkFace(uint32_t *px, int chunk);
 int  SS_GetDungeonLayout(int palace, uint8_t *out, int cap);
 bool SS_RenderDungeonFloor(int palace, int floorIdx, uint32_t *px);
@@ -85,6 +93,8 @@ void SS_Set3DSWideEdgeMode(int mode);
 void SS_SetHudHidden(bool hide);
 bool SS_IsHudHidden(void);
 void SS_RequestMemoryDump(const char *dump_dir);
+void SS_RequestLoadLatestDumpState(void);
+int  SS_TakeLoadDumpStateResult(void);
 void SS_RequestRestart(void);
 void SS_ArmButtonCapture(bool arm);
 int  SS_GetCapturedButton(void);
@@ -179,6 +189,17 @@ static SDL_Texture *tex_cjk;
 #endif
 static SDL_Texture *tex_floor, *tex_mapicons;
 static SDL_Texture *tex_bg_menu, *tex_bg_parch, *tex_bg_stone;
+#ifdef __3DS__
+#include "bottom_hearts.h"
+static BottomHearts ss_worker_hearts[2], ss_display_hearts;
+static uint8_t *ss_old_display_pixels;
+static bool ss_old_display_valid;
+static void capture_bottom_hearts(int count, int size, int columns, int step,
+                                 int x, int y);
+#endif
+
+static SDL_Texture *tex_triforce;
+static bool ss_is_new_3ds;  // Model is set before drawing the cinema card.
 static bool art_ready;
 
 typedef struct {
@@ -207,28 +228,42 @@ static bool ss_needs_rebuild;
 
 // touch rects recomputed every draw, used by the tap handler
 static RectFS map_area_r, tab_items_r, tab_gear_r, tab_map_r, tab_settings_r, y_ring_r;
-static RectFS settings_row_r[6], remap_row_r[6], remap_back_r;
+static bool update_mode, update_confirm, update_show_notes;
+static unsigned update_page;
+static RectFS update_release_r, update_prev_r, update_next_r;
+static RectFS update_back_r, update_channel_r, update_action_r;
+static RectFS settings_row_r[5], remap_row_r[6], remap_back_r;
 static RectFS remap_page_r;
 static RectFS screen_row_r[4], screen_back_r;
 static RectFS cinema_back_r;
-static RectFS developer_row_r[2], developer_back_r;
+static RectFS developer_row_r[4], developer_back_r;
+static RectFS load_cancel_r, load_confirm_r;
 
 // settings / remap state
 static bool remap_mode;
 static bool screen_mode;
 static bool developer_mode;
 static bool developer_overlay_mode;
+static bool load_confirm_mode;
+#ifndef __3DS__
+static bool developer_show_fps;
+#endif
 static int  remap_first_row;
 static int  remap_arm = -1;         // row currently waiting for a button press
 static uint32_t remap_arm_at;
 static int  pad_controls[12];
 static bool hud_pref_applied;
 static uint32_t dump_flash_until;
+static uint32_t load_flash_until;
+static int load_result = -1;
 static RectFS plaque_r[16];
 static int    plaque_floor[16], plaque_count;
 static float  grid_x, grid_y, grid_cell;
 static int    ss_diag_current_fps;
 static int    ss_diag_average_fps;
+#ifdef __3DS__
+static uint32_t ss_diag_last_redraw_ms;
+#endif
 
 // live values snapshot for the current frame
 static int cur_room, cur_floor_now, cur_palace;
@@ -284,6 +319,13 @@ static void draw_frame(float x, float y, float w, float h, float t, uint32_t c) 
 }
 // rounded-rect fill; nested insets give rounded borders
 static void fill_round(float x, float y, float w, float h, float rad, uint32_t c) {
+#if defined(__3DS__) || defined(ZELDA3_TEST_3DS_UI)
+  if (Platform3DS_GetHardwareProfile()->integer_ui_rounding) {
+    set_color(c);
+    SecondScreenFillRound(ss_r, x, y, w, h, rad);
+    return;
+  }
+#endif
   if (rad > w / 2) rad = w / 2;
   if (rad > h / 2) rad = h / 2;
   set_color(c);
@@ -327,15 +369,6 @@ static void draw_x_mark(float cx, float cy, float r, float t, uint32_t c) {
     SDL_RenderFillRectF(ss_r, &b);
   }
 }
-static void tri_up(float cx, float top, float size, uint32_t c) {
-  set_color(c);
-  for (int i = 0; i <= (int)size; i++) {
-    float half = size * (i / size) * 0.5773f * 2.0f;  // ~equilateral
-    SDL_FRect seg = {cx - half / 2, top + i, half, 1};
-    SDL_RenderFillRectF(ss_r, &seg);
-  }
-}
-
 // blit one cell from a sheet texture
 static void draw_cell(SDL_Texture *tex, int cell, int cellpx, int cols, float x, float y, float s) {
   if (cell < 0 || !tex) return;
@@ -407,9 +440,12 @@ static void draw_text(const char *s, float x, float y, float sc) {
     }
 #endif
     char ch = *s;
+    if (ch >= 'a' && ch <= 'z') ch -= 'a' - 'A';
     if (ch == ' ') { cx += 5 * sc; s++; continue; }
     if (ch >= '0' && ch <= '9') draw_glyph(kDigitGlyph[ch - '0'], cx, y, sc);
     else if (ch >= 'A' && ch <= 'Z') draw_cell(tex_letters, kSS_LetterCell[ch - 'A'], 8, SS_LETTER_COLS, cx, y, sc);
+    else if (ch == '.') fill_rect(cx + 3 * sc, y + 6 * sc, 2 * sc, 2 * sc, COL(255, 255, 255));
+    else if (ch == '-') fill_rect(cx + sc, y + 3 * sc, 6 * sc, sc, COL(255, 255, 255));
     cx += 8 * sc;
     s++;
   }
@@ -531,12 +567,11 @@ static void slot_bg(float x, float y, float size) {
 
 // textures from second_screen.c buffers
 static SDL_Texture *make_tex(int w, int h, const void *px, bool blend) {
-  SDL_Texture *t = SDL_CreateTexture(ss_r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, w, h);
-  if (!t) return NULL;
-  SDL_UpdateTexture(t, NULL, px, w * 4);
-  SDL_SetTextureScaleMode(t, SDL_ScaleModeNearest);
-  if (blend) SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
-  return t;
+  bool prefer_rgb565 = false;
+#ifdef __3DS__
+  prefer_rgb565 = Platform3DS_GetHardwareProfile()->rgb565_ui_textures;
+#endif
+  return SecondScreenCreateTexture(ss_r, w, h, px, blend, prefer_rgb565);
 }
 
 // Tile a theme texture across r at 2x, clipped
@@ -561,6 +596,11 @@ static bool try_load_art(void) {
   if (!tex_bg_menu)  tex_bg_menu  = make_tex(kSSTexMenu_W, kSSTexMenu_H, kSSTexMenu, false);
   if (!tex_bg_parch) tex_bg_parch = make_tex(kSSTexParch_W, kSSTexParch_H, kSSTexParch, false);
   if (!tex_bg_stone) tex_bg_stone = make_tex(kSSTexStone_W, kSSTexStone_H, kSSTexStone, false);
+  if (!tex_triforce) {
+    tex_triforce = make_tex(kSSTexTriforce_W, kSSTexTriforce_H, kSSTexTriforce, true);
+    // baked as a smooth AA silhouette, not pixel art -- scale it smoothly.
+    if (tex_triforce) SDL_SetTextureScaleMode(tex_triforce, SDL_ScaleModeLinear);
+  }
 
   // cheap probe: the engine hasn't parsed zelda3_assets.dat yet
   if (SS_GetDungeonLayout(0, lay, sizeof(lay)) < 0) return false;
@@ -572,6 +612,12 @@ static bool try_load_art(void) {
   SS_RenderIconSheet(buf);
   tex_icons = make_tex(SS_ICON_COLS * 16, ((kIconCount + kIconCols - 1) / kIconCols) * 16, buf, true);
   SS_RenderGlyphSheet(buf);
+#ifdef __3DS__
+  if (!ss_is_new_3ds) {
+    const int cells[] = {SS_GLYPH_HEART_EMPTY, SS_GLYPH_HEART_HALF, SS_GLYPH_HEART_FULL};
+    BottomHearts_LoadGlyphs(buf, SS_GLYPH_COLS * 8, cells, SS_GLYPH_COLS);
+  }
+#endif
   tex_glyphs = make_tex(SS_GLYPH_COLS * 8, ((kGlyphCount + kGlyphCols - 1) / kGlyphCols) * 8, buf, true);
   SS_RenderLetterSheet(buf);
   tex_letters = make_tex(16 * 8, 2 * 8, buf, true);
@@ -607,15 +653,58 @@ static bool try_load_art(void) {
 static void draw_cinema(void) {
   fill_rect(0, 0, W, H, COL_BOX & 0xff000000u);  // black
   draw_frame(12 * u, 12 * u, W - 24 * u, H - 24 * u, 2 * u, COL_GOLD_DARK);
-  float t = SDL_GetTicks() / 1000.0f;
-  float pulse = sinf(t * 1.5f) * 0.5f + 0.5f;
-  uint8_t g = (uint8_t)(150 + 100 * pulse);
-  uint32_t c = COL(g, (uint8_t)(g * 0.83f), (uint8_t)(g * 0.41f));
+  if (!tex_triforce) return;
+
+  uint8_t r, g, b;
+  if (ss_is_new_3ds) {
+    float t = SDL_GetTicks() / 1000.0f;
+    float pulse = sinf(t * 1.5f) * 0.5f + 0.5f;
+    uint8_t v = (uint8_t)(150 + 100 * pulse);
+    r = v; g = (uint8_t)(v * 0.83f); b = (uint8_t)(v * 0.41f);
+  } else {
+    // Old 3DS only redraws this screen every ~180 frames (see
+    // bottom_needs_periodic_redraw's divisor), so a moving pulse just reads
+    // as an occasional jump rather than real animation. Use one fixed,
+    // pleasant gold tone instead of computing it every redraw.
+    r = 214; g = 178; b = 88;
+  }
+  SDL_SetTextureColorMod(tex_triforce, r, g, b);
+
+  // kSSTexTriforce is ~tight to the triangle's bounding box, so a dest rect
+  // of {s, s} reproduces the same triangle "row height" the old per-scanline
+  // tri_up(cx, top, size, ...) used, keeping the overall triforce the same
+  // size and layout as before.
   float s = (W < H ? W : H) * 0.06f;
   float cx = W / 2.0f, cy = H / 2.0f;
-  tri_up(cx, cy - s, s, c);            // top
-  tri_up(cx - s * 0.58f, cy, s, c);    // bottom-left
-  tri_up(cx + s * 0.58f, cy, s, c);    // bottom-right
+  SDL_FRect top_r = {cx - s / 2, cy - s + 1, s, s};
+  SDL_FRect bl_r  = {cx - s * 0.58f - s / 2, cy, s, s};
+  // Baked-texture rounding leaves the bottom-right triangle ~1px further
+  // from center than bottom-left (measured on real output: bottom-left sits
+  // 32px from the top triangle's center, bottom-right sits 36px) -- nudge
+  // it in by 1px so the center notch is symmetric instead of lopsided.
+  SDL_FRect br_r  = {cx + s * 0.58f - s / 2 - 1, cy, s, s};
+  SDL_RenderCopyF(ss_r, tex_triforce, NULL, &top_r);
+  SDL_RenderCopyF(ss_r, tex_triforce, NULL, &bl_r);
+  SDL_RenderCopyF(ss_r, tex_triforce, NULL, &br_r);
+}
+
+// Snap the button and both strokes to one pixel grid. Matching size parity
+// keeps the glyph exactly centered, including on the 28px-wide 3DS button.
+static void draw_map_zoom_button(RectFS r) {
+  int size = (int)lroundf(56 * u);
+  int bx = (int)lroundf(r.x + 14 * u), by = (int)lroundf(r.y + 14 * u);
+  fill_round(bx, by, size, size, 8 * u, COL_BOX);
+  fill_round(bx + 3 * u, by + 3 * u, size - 6 * u, size - 6 * u, 6 * u, COL_BOX_BORDER2);
+  fill_round(bx + 6 * u, by + 6 * u, size - 12 * u, size - 12 * u, 5 * u, COL_BOX);
+  int length = (int)lroundf(28 * u), thickness = (int)lroundf(5 * u);
+  if ((size - length) & 1) length--;
+  if ((size - thickness) & 1) thickness--;
+  if (thickness < 1) thickness = (size & 1) ? 1 : 2;
+  SDL_Rect horizontal = {bx + (size - length) / 2, by + (size - thickness) / 2, length, thickness};
+  SDL_Rect vertical = {bx + (size - thickness) / 2, by + (size - length) / 2, thickness, length};
+  set_color(COL(255, 255, 255));
+  SDL_RenderFillRect(ss_r, &horizontal);
+  if (whole_map) SDL_RenderFillRect(ss_r, &vertical);
 }
 
 static void draw_overworld(RectFS r, int link_x, int link_y, int area) {
@@ -662,6 +751,16 @@ static void draw_overworld(RectFS r, int link_x, int link_y, int area) {
     draw_x_mark(mx, my, 8 * u, 4.5f * u, COL(224, 40, 32));
   }
 
+  // The mirror return point uses the same projection and clipping as Link.
+  int portal[2];
+  if (!dark && SS_GetMirrorPortal(portal)) {
+    float mx = ox + (128.0f + portal[0] / 4096.0f * 256.0f) * scale;
+    float my = oy + (128.0f + portal[1] / 4096.0f * 256.0f) * scale;
+    fill_round(mx - 9*u, my - 9*u, 18*u, 18*u, 9*u, COL_OUTLINE);
+    fill_round(mx - 7*u, my - 7*u, 14*u, 14*u, 7*u, COL(240, 192, 255));
+    fill_round(mx - 3*u, my - 3*u, 6*u, 6*u, 3*u, COL(80, 48, 176));
+  }
+
   // Link's bobbing head
   float fx = ox + px * scale, fy = oy + py * scale;
   float bob = sinf(SDL_GetTicks() / 300.0f) * 2 * u;
@@ -670,14 +769,7 @@ static void draw_overworld(RectFS r, int link_x, int link_y, int area) {
   SDL_RenderCopyF(ss_r, tex_face, NULL, &fdst);
   SDL_RenderSetClipRect(ss_r, NULL);
 
-  // zoom toggle button
-  float bs2 = 56 * u, bx = r.x + 14 * u, by = r.y + 14 * u;
-  fill_round(bx, by, bs2, bs2, 8 * u, COL_BOX);
-  fill_round(bx + 3 * u, by + 3 * u, bs2 - 6 * u, bs2 - 6 * u, 6 * u, COL_BOX_BORDER2);
-  fill_round(bx + 6 * u, by + 6 * u, bs2 - 12 * u, bs2 - 12 * u, 5 * u, COL_BOX);
-  float cxb = bx + bs2 / 2, cyb = by + bs2 / 2, arm = 14 * u, th = 5 * u;
-  fill_rect(cxb - arm, cyb - th / 2, arm * 2, th, COL(255, 255, 255));
-  if (whole_map) fill_rect(cxb - th / 2, cyb - arm, th, arm * 2, COL(255, 255, 255));
+  draw_map_zoom_button(r);
 }
 
 static void draw_dungeon(RectFS r, int link_x, int link_y, int room, int dungeon_info) {
@@ -978,6 +1070,9 @@ static void draw_sidebar(float x, float y, float w, float h, bool dungeon_mode) 
 
   // hearts (live health)
   float hx0 = floorf(x + (w - (heart_cols - 1) * hs - heart_px) / 2 + 0.5f);
+#if defined(__3DS__) || defined(ZELDA3_TEST_BOTTOM_HEARTS)
+  capture_bottom_hearts(cap, (int)heart_px, heart_cols, (int)hs, (int)hx0, (int)hy);
+#endif
   for (int i = 0; i < cap; i++) {
     int g = i < (cur >> 3) ? SS_GLYPH_HEART_FULL
           : (i == (cur >> 3) && (cur & 7) >= 4 ? SS_GLYPH_HEART_HALF : SS_GLYPH_HEART_EMPTY);
@@ -1048,7 +1143,18 @@ static void update_ini(const char *section, const char *key, const char *value) 
   if (!done)
     olen += sprintf(out + olen, "%s\n%s = %s\n", section, key, value);
   f = fopen("zelda3.ini", "wb");
-  if (f) { fwrite(out, 1, olen, f); fclose(f); }
+  bool saved = false;
+  if (f) {
+    saved = fwrite(out, 1, olen, f) == olen;
+    if (fclose(f) != 0) saved = false;
+  }
+#ifdef __3DS__
+  // The launcher restores this ROM's profile INI over the working copy on
+  // every boot. Persist ALL successful menu writes, not only ShowFps.
+  if (saved) Platform3DS_PersistRuntimeSettings();
+#else
+  (void)saved;
+#endif
   free(out);
   free(buf);
 }
@@ -1073,9 +1179,12 @@ static void leave_remap(void) {
 
 static void leave_settings_submenu(void) {
   leave_remap();
+  update_mode = update_confirm = update_show_notes = false;
+  update_page = 0;
   screen_mode = false;
   developer_mode = false;
   developer_overlay_mode = false;
+  load_confirm_mode = false;
 }
 
 static void draw_cog(float cx, float cy, float r) {
@@ -1234,14 +1343,28 @@ static void draw_developer_panel(RectFS r) {
   draw_text(SS_STR("BACK","返回"), developer_back_r.x + developer_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2.2f * u) / 2,
             developer_back_r.y + developer_back_r.h / 2 - 9 * u, 2.2f * u);
 
-  const char *labels[2] = {SS_STR("MEM DUMP","内存转存"), SS_STR("OVERLAY","叠加层")};
-  const char *values[2] = {
-    SDL_GetTicks() < dump_flash_until ? "DONE" : "WRITE",
-    "OPEN",
+  bool show_fps = false;
+#ifdef __3DS__
+  show_fps = Platform3DS_GetShowFps();
+#else
+  show_fps = developer_show_fps;
+#endif
+  const char *load_value = load_result == -2 ? "WAIT" :
+    (load_result >= 0 && SDL_GetTicks() < load_flash_until ?
+      DumpState_ResultLabel((ZeldaDumpStateResult)load_result) : "LOAD");
+  const char *labels[4] = {
+    SS_STR("MEM DUMP","内存转存"), SS_STR("LOAD STATE","读取存档"),
+    SS_STR("SHOW FPS","显示帧率"), SS_STR("OVERLAY","叠加层"),
+  };
+  const char *values[4] = {
+    SDL_GetTicks() < dump_flash_until ? SS_STR("DONE","完成") : SS_STR("WRITE","写入"),
+    load_value,
+    show_fps ? SS_STR("ON","开启") : SS_STR("OFF","关闭"),
+    SS_STR("OPEN","打开"),
   };
   float row_h = 58 * u, gap = 14 * u;
   float y0 = r.y + 82 * u;
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 4; i++) {
     RectFS *row = &developer_row_r[i];
     *row = (RectFS){r.x + 28 * u, y0 + i * (row_h + gap), r.w - 56 * u, row_h};
     draw_settings_row(row, false);
@@ -1250,6 +1373,37 @@ static void draw_developer_panel(RectFS r) {
     draw_text(values[i], row->x + row->w - 16 * u - text_width(values[i], 2 * u),
               ty, 2 * u);
   }
+}
+
+static void draw_load_confirmation(RectFS r) {
+  draw_text("LOAD STATE",
+            r.x + r.w / 2 - text_width("LOAD STATE", 3 * u) / 2,
+            r.y + 24 * u, 3 * u);
+  const char *lines[] = {
+    "LOAD THE LATEST DUMP",
+    "FOR THIS ROM PROFILE",
+    "UNSAVED PROGRESS IS LOST",
+  };
+  for (int i = 0; i < 3; i++)
+    draw_text(lines[i],
+              r.x + r.w / 2 - text_width(lines[i], 2 * u) / 2,
+              r.y + (82 + i * 34) * u, 2 * u);
+
+  float button_w = 220 * u;
+  float button_y = r.y + r.h - 62 * u;
+  load_cancel_r = (RectFS){r.x + 28 * u, button_y, button_w, 46 * u};
+  load_confirm_r = (RectFS){r.x + r.w - 28 * u - button_w,
+                            button_y, button_w, 46 * u};
+  draw_settings_row(&load_cancel_r, false);
+  draw_settings_row(&load_confirm_r, false);
+  draw_text("CANCEL",
+            load_cancel_r.x + load_cancel_r.w / 2 -
+              text_width("CANCEL", 2 * u) / 2,
+            load_cancel_r.y + 14 * u, 2 * u);
+  draw_text("LOAD",
+            load_confirm_r.x + load_confirm_r.w / 2 -
+              text_width("LOAD", 2 * u) / 2,
+            load_confirm_r.y + 14 * u, 2 * u);
 }
 
 static void draw_developer_overlay_panel(RectFS r) {
@@ -1317,8 +1471,68 @@ static void draw_developer_overlay_panel(RectFS r) {
   }
 }
 
+static void draw_update_panel(RectFS r) {
+  draw_text("UPDATE", r.x + r.w / 2 - text_width("UPDATE", 3 * u) / 2,
+            r.y + 18 * u, 3 * u);
+  update_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
+  draw_settings_row(&update_back_r, false);
+  draw_text("BACK", update_back_r.x + 16 * u, update_back_r.y + 10 * u, 2 * u);
+#ifdef __3DS__
+  UpdateStatus st; Updater_GetStatus(&st);
+  update_channel_r = (RectFS){r.x + 28 * u, r.y + 62 * u, r.w - 56 * u, 44 * u};
+  draw_settings_row(&update_channel_r, false);
+  const char *channel = st.prerelease ? "PRE-RELEASE" : "STABLE";
+  draw_text("CHANNEL", update_channel_r.x + 16 * u, update_channel_r.y + 16 * u, 2 * u);
+  draw_text(channel, update_channel_r.x + update_channel_r.w - 16 * u - text_width(channel, 2 * u),
+            update_channel_r.y + 16 * u, 2 * u);
+  update_release_r = (RectFS){r.x + 28 * u, r.y + 119 * u, r.w - 56 * u, 44 * u};
+  draw_settings_row(&update_release_r, update_show_notes);
+  const char *release_name = st.version[0] ? st.version : "NO RELEASE SELECTED";
+  draw_text(release_name, r.x + r.w / 2 - text_width(release_name, 2 * u) / 2,
+            update_release_r.y + 14 * u, 2 * u);
+  const char *message = update_confirm ? "DOWNLOAD AND INSTALL" : st.message;
+  if (!message[0]) message = "CHECK FOR UPDATE";
+  draw_text(message, r.x + r.w / 2 - text_width(message, 2 * u) / 2,
+            r.y + 184 * u, 2 * u);
+  const char *hint = update_confirm ? "UNSAVED PROGRESS IS LOST" :
+    update_show_notes ? "CHANGELOG ON TOP SCREEN" : "TAP THE RELEASE FOR CHANGELOG";
+  draw_text(hint, r.x + r.w / 2 - text_width(hint, 2 * u) / 2,
+            r.y + 216 * u, 2 * u);
+  update_prev_r = (RectFS){r.x + 28 * u, r.y + 246 * u, 100 * u, 34 * u};
+  update_next_r = (RectFS){r.x + r.w - 128 * u, r.y + 246 * u, 100 * u, 34 * u};
+  if (update_show_notes && !update_confirm) {
+    draw_settings_row(&update_prev_r, false); draw_settings_row(&update_next_r, false);
+    draw_text("PREV", update_prev_r.x + 22 * u, update_prev_r.y + 10 * u, 2 * u);
+    draw_text("NEXT", update_next_r.x + 22 * u, update_next_r.y + 10 * u, 2 * u);
+  }
+  const char *action = update_confirm ? "INSTALL UPDATE" :
+    st.state == UPDATE_AVAILABLE ? "DOWNLOAD UPDATE" :
+    (st.state == UPDATE_CHECKING || st.state == UPDATE_DOWNLOADING || st.state == UPDATE_VERIFYING) ? "CANCEL" :
+    st.state == UPDATE_INSTALLING ? "PLEASE WAIT" : st.state == UPDATE_DONE ? "UPDATE INSTALLED" : "CHECK FOR UPDATE";
+  update_action_r = (RectFS){r.x + 28 * u, r.y + r.h - 68 * u, r.w - 56 * u, 48 * u};
+  if (st.state == UPDATE_DOWNLOADING || st.state == UPDATE_INSTALLING) {
+    float by = update_action_r.y - 36 * u;
+    fill_round(r.x + 28 * u, by, r.w - 56 * u, 12 * u, 4 * u, COL_GOLD_DARK);
+    fill_rect(r.x + 30 * u, by + 2 * u, (r.w - 60 * u) * st.progress / 100.0f, 8 * u, COL_GOLD);
+  }
+  draw_settings_row(&update_action_r, update_confirm);
+  draw_text(action, r.x + r.w / 2 - text_width(action, 2 * u) / 2,
+            update_action_r.y + 16 * u, 2 * u);
+#else
+  draw_text("3DS UPDATES", r.x + 28 * u, r.y + 90 * u, 2 * u);
+#endif
+}
+
+bool SecondScreenSDL_UpdateIsOpen(void) { return update_mode; }
+bool SecondScreenSDL_UpdateNotesPage(unsigned *page) { *page = update_page; return update_show_notes; }
+
 static void draw_settings(RectFS r) {
   menu_box(r, COL_BOX_BORDER);
+  if (update_mode) { draw_update_panel(r); return; }
+  if (load_confirm_mode) {
+    draw_load_confirmation(r);
+    return;
+  }
   if (remap_mode) {
     draw_remap_panel(r);
     return;
@@ -1346,16 +1560,15 @@ static void draw_settings(RectFS r) {
 #else
   snprintf(turbo_value, sizeof(turbo_value), "X5");
 #endif
-  static const char *const labels[6] = {
-    SS_STR("SCREEN","画面"), SS_STR("TURBO SPEED","加速倍率"), SS_STR("REMAP BUTTONS","按键设置"),
-    SS_STR("DEVELOPER","开发者选项"), SS_STR("RESTART","重启"), SS_STR("SELECT ROM","选择游戏"),
+  static const char *const labels[5] = {
+    SS_STR("SCREEN","画面"), SS_STR("TURBO SPEED","加速倍率"), SS_STR("DEVELOPER","开发者选项"),
+    SS_STR("UPDATE","更新"), SS_STR("RESTART","重启"),
   };
-  const char *values[6] = {
-    "", turbo_value, "", "", NULL, NULL,
-  };
-  float row_h = 44 * u, gap = 8 * u;
+  const char *values[5] = {"", turbo_value, "", "", NULL};
+  float gap = 8 * u;
   float y0 = r.y + 55 * u;
-  for (int i = 0; i < 6; i++) {
+  float row_h = (r.h - 55 * u - 20 * u - 4 * gap) / 5;
+  for (int i = 0; i < 5; i++) {
     RectFS *row = &settings_row_r[i];
     *row = (RectFS){r.x + 28 * u, y0 + i * (row_h + gap), r.w - 56 * u, row_h};
     draw_settings_row(row, false);
@@ -1380,7 +1593,7 @@ static void draw_settings(RectFS r) {
 static void draw_cinema_settings_overlay(void) {
   RectFS r = {10 * u, 10 * u, W - 20 * u, H - 20 * u};
   draw_settings(r);
-  if (!screen_mode && !remap_mode && !developer_mode) {
+  if (!screen_mode && !remap_mode && !developer_mode && !update_mode) {
     cinema_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
     draw_settings_row(&cinema_back_r, false);
     draw_text("BACK",
@@ -1426,15 +1639,25 @@ static void draw_tab_bar(float tab_h) {
 
 static SDL_Window *main_win;
 static bool ss_enabled;
+#if defined(__3DS__) || defined(ZELDA3_TEST_3DS_UI)
+typedef struct BottomTouchTrace {
+  uint32_t timestamp;
+  uint16_t x, y;
+  uint8_t before_tab, after_tab, update, contact;
+} BottomTouchTrace;
+static BottomTouchTrace ss_touch_trace[32];
+static unsigned ss_touch_trace_count;
+#endif
 #ifdef __3DS__
 static uint8_t *ss_present_pixels[2];
-static bool ss_is_new_3ds;
 static int ss_front_buffer = -1;
 static int ss_worker_buffer;
 static bool ss_worker_busy;
 static bool ss_frame_ready;
+static bool ss_present_retry;
 static uint32_t ss_redraw_requests;
 static bool ss_worker_sidebar_patch;
+static bool ss_worker_map_patch;
 static bool ss_worker_running;
 static Thread ss_worker_thread;
 static LightEvent ss_worker_start;
@@ -1442,6 +1665,8 @@ static LightEvent ss_worker_done;
 static int ss_worker_logic_frames;
 static s32 ss_worker_idle_priority;
 static s32 ss_worker_interactive_priority;
+static s32 ss_worker_scene_priority;
+static bool ss_worker_door_transition;
 static bool ss_worker_interactive;
 static uint64_t ss_full_redraw_count;
 static uint64_t ss_full_redraw_total_ticks;
@@ -1450,6 +1675,7 @@ static uint64_t ss_patch_redraw_count;
 static uint64_t ss_patch_redraw_total_ticks;
 static uint64_t ss_patch_redraw_max_ticks;
 static bool ss_touch_redraw_pending;
+static bool ss_scene_redraw_pending;
 static uint64_t ss_touch_request_ticks;
 static uint64_t ss_worker_touch_request_ticks;
 static uint64_t ss_touch_redraw_count;
@@ -1469,6 +1695,13 @@ static int bottom_buffer_pitch(void) {
   return k3DSBottomTextureWidth * bottom_bytes_per_pixel();
 }
 
+static void capture_bottom_hearts(int count, int size, int columns, int step,
+                                 int x, int y) {
+  if (!ss_is_new_3ds && ss_old_display_pixels)
+    BottomHearts_Capture(&ss_worker_hearts[ss_worker_buffer], ss_r,
+      count, size, columns, step, x, y, sram8(0x6d), sram8(0x6c), sram8(0x7b) >= 1);
+}
+
 static uint32_t bottom_sdl_pixel_format(void) {
   return ss_is_new_3ds ? SDL_PIXELFORMAT_ARGB8888 : SDL_PIXELFORMAT_RGB565;
 }
@@ -1476,10 +1709,18 @@ static uint32_t bottom_sdl_pixel_format(void) {
 enum {
   kBottomRedrawHud = 1 << 0,
   kBottomRedrawFull = 1 << 1,
+  kBottomRedrawMap = 1 << 2,
 };
 
 static void request_bottom_redraw(uint32_t request) {
   __atomic_fetch_or(&ss_redraw_requests, request, __ATOMIC_RELEASE);
+}
+
+// Automatic scene work shares the main thread's priority. Only real touch
+// requests may preempt gameplay; a full map redraw can otherwise block an iris.
+static void prioritize_bottom_scene(void) {
+  if (!ss_is_new_3ds && ss_worker_thread)
+    svcSetThreadPriority(threadGetHandle(ss_worker_thread), ss_worker_scene_priority);
 }
 
 static void prioritize_bottom_touch(void) {
@@ -1487,25 +1728,36 @@ static void prioritize_bottom_touch(void) {
     svcSetThreadPriority(threadGetHandle(ss_worker_thread),
                          ss_worker_interactive_priority);
 }
+// Automatic HUD work must not outrank gameplay. Only touch may preempt it.
+// Old health-only updates bypass the worker through the retained heart layer.
+static s32 bottom_worker_priority(void) {
+  if (ss_worker_touch_request_ticks)
+    return ss_worker_interactive_priority;
+  if (__atomic_load_n(&ss_worker_door_transition, __ATOMIC_ACQUIRE))
+    return ss_worker_idle_priority;
+  if (ss_worker_interactive || ss_worker_sidebar_patch ||
+      (__atomic_load_n(&ss_redraw_requests, __ATOMIC_ACQUIRE) & kBottomRedrawHud))
+    return ss_worker_scene_priority;
+  return ss_worker_idle_priority;
+}
+
+static void prioritize_bottom_hud(void) {
+  if (!ss_is_new_3ds && ss_worker_thread && ss_worker_busy &&
+      !ss_touch_redraw_pending && !ss_worker_touch_request_ticks)
+    svcSetThreadPriority(threadGetHandle(ss_worker_thread), bottom_worker_priority());
+}
+
 #endif
 
 static void request_dump_now(void) {
-  char dump_dir[160] = {0};
 #ifdef __3DS__
-  if (Platform3DS_CreateDumpDirectory(dump_dir, sizeof(dump_dir)) &&
-      ss_front_buffer >= 0 && ss_present_pixels[ss_front_buffer]) {
-    char path[192];
-    snprintf(path, sizeof(path), "%s/bottom-screen.bmp", dump_dir);
-    if (ss_is_new_3ds) {
-      Platform3DS_SaveARGB8888Bmp(
-        path, ss_present_pixels[ss_front_buffer], bottom_buffer_pitch(), W, H);
-    } else {
-      Platform3DS_SaveRGB565Bmp(
-        path, ss_present_pixels[ss_front_buffer], bottom_buffer_pitch(), W, H);
-    }
-  }
+  // Directory creation and all capture I/O happen together on the game
+  // thread while NDSP is paused. An empty path asks that handler to create a
+  // unique session directory.
+  SS_RequestMemoryDump(NULL);
+#else
+  SS_RequestMemoryDump("");
 #endif
-  SS_RequestMemoryDump(dump_dir);
   dump_flash_until = SDL_GetTicks() + 1200;
 }
 
@@ -1513,12 +1765,17 @@ bool SecondScreenSDL_Init(SDL_Window *main_window) {
 #ifdef __3DS__
   main_win = main_window;
   ss_is_new_3ds = Platform3DS_IsNew3DS();
+  if (!NativeTouch_Init()) {
+    Platform3DS_LogRuntime("ERROR registering native touch event: %s", SDL_GetError());
+    return false;
+  }
   ss_enabled = true;
   return true;
 #else
   const char *env = SDL_getenv("ZELDA3_SECOND_SCREEN");
   if (!env || env[0] != '1') return false;
   main_win = main_window;
+  ss_is_new_3ds = true; // Preserve the desktop pulse animation.
   ss_enabled = true;
   return true;
 #endif
@@ -1531,13 +1788,30 @@ void SecondScreenSDL_RequestDump(void) {
 }
 
 void SecondScreenSDL_SetDiagnostics(int current_fps, int average_fps) {
+#ifdef __3DS__
+  bool changed = current_fps != ss_diag_current_fps ||
+                 average_fps != ss_diag_average_fps;
+#endif
   ss_diag_current_fps = current_fps;
   ss_diag_average_fps = average_fps;
+#ifdef __3DS__
+  Platform3DS_SetCurrentFps(current_fps);
+  if (!ss_is_new_3ds && developer_overlay_mode && changed) {
+    uint32_t now_ms = SDL_GetTicks();
+    if (ss_diag_last_redraw_ms == 0 ||
+        now_ms - ss_diag_last_redraw_ms >= 400) {
+      ss_diag_last_redraw_ms = now_ms;
+      request_bottom_redraw(kBottomRedrawFull);
+    }
+  }
+#endif
 }
 
 void SecondScreenSDL_OpenDeveloperOverlay(void) {
   tab = TAB_SETTINGS;
   leave_remap();
+  update_mode = update_confirm = update_show_notes = false;
+  update_page = 0;
   screen_mode = false;
   developer_mode = true;
   developer_overlay_mode = true;
@@ -1631,6 +1905,13 @@ static bool ensure_window(void) {
     return false;
   }
 #endif
+#ifdef __3DS__
+  if (!ss_is_new_3ds) {
+    ss_old_display_pixels = linearMemAlign(k3DSBottomTextureWidth * k3DSBottomTextureHeight * 2, 64);
+    if (!ss_old_display_pixels)
+      Platform3DS_LogRuntime("Bottom hearts: retained buffer unavailable; using worker fallback");
+  }
+#endif
   u = unit_for_size(W, H);
   printf("second screen: display %d of %d, %dx%d (u=%.2f)\n", target, n, W, H, u);
 #ifdef __3DS__
@@ -1667,6 +1948,7 @@ typedef struct BottomCriticalState {
   uint8_t arrows;
   uint16_t rupees;
   uint32_t inventory_hash;
+  int portal_x, portal_y;
 } BottomCriticalState;
 
 static void request_bottom_redraw_on_state_change(void) {
@@ -1678,10 +1960,18 @@ static void request_bottom_redraw_on_state_change(void) {
   memset(&current, 0, sizeof(current));
   SS_ReadSram(local_sram, sizeof(local_sram));
   current.module = SS_GetModule() & 0xff;
+  // Keep the last map during door open/close; compare against that stable
+  // state after the iris, instead of rebuilding for each temporary module.
+  if (!ss_is_new_3ds && (current.module == 15 || current.module == 16))
+    return;
   current.area = SS_GetArea();
   current.dungeon = SS_GetDungeon();
   current.indoors = SS_IsIndoors() ? 1 : 0;
   current.equipped = SS_GetEquippedSlot();
+  int portal[2];
+  if (SS_GetMirrorPortal(portal)) {
+    current.portal_x = portal[0]; current.portal_y = portal[1];
+  }
   current.health_cap = local_sram[0x6c];
   current.health_cur = local_sram[0x6d];
   current.magic = local_sram[0x6e];
@@ -1707,22 +1997,47 @@ static void request_bottom_redraw_on_state_change(void) {
      current.dungeon != previous.dungeon ||
      current.indoors != previous.indoors ||
      current.equipped != previous.equipped ||
+     current.portal_x != previous.portal_x || current.portal_y != previous.portal_y ||
      (!ss_is_new_3ds &&
       current.inventory_hash != previous.inventory_hash));
+  if (!ss_is_new_3ds && initialized && tab == TAB_MAP &&
+      (current.module != previous.module || current.area != previous.area ||
+       current.dungeon != previous.dungeon || current.indoors != previous.indoors)) {
+    // Refresh the destination map without preempting the top renderer.
+    ss_scene_redraw_pending = true;
+    ss_worker_interactive = true;
+    if (!ss_touch_redraw_pending && !ss_worker_touch_request_ticks)
+      prioritize_bottom_scene();
+  }
   bool hud_changed = initialized &&
     (current.health_cap != previous.health_cap ||
-     current.health_cur != previous.health_cur ||
+     ((ss_is_new_3ds || !ss_old_display_pixels) &&
+      current.health_cur != previous.health_cur) ||
      current.magic != previous.magic ||
      current.keys != previous.keys ||
      current.bombs != previous.bombs ||
      current.arrows != previous.arrows ||
      current.rupees != previous.rupees);
+  // Movement must invalidate the Old map; the idle fallback is intentionally
+  // slow. Coalesce movement while a worker is busy, at most ten requests/sec.
+  static int map_x, map_y;
+  static uint32_t map_request_ms;
+  int x = SS_GetLinkX(), y = SS_GetLinkY();
+  uint32_t now = SDL_GetTicks();
+  if (!ss_is_new_3ds && tab == TAB_MAP &&
+      mode_for_module(current.module) == MODE_GAME &&
+      (x / 4 != map_x / 4 || y / 4 != map_y / 4) && now - map_request_ms >= 100) {
+    map_x = x; map_y = y; map_request_ms = now;
+    request_bottom_redraw(kBottomRedrawMap);
+  }
   previous = current;
   initialized = true;
   if (full_changed || (ss_is_new_3ds && hud_changed))
     request_bottom_redraw(kBottomRedrawFull);
-  else if (hud_changed)
+  if (!ss_is_new_3ds && hud_changed) {
     request_bottom_redraw(kBottomRedrawHud);
+    prioritize_bottom_hud();
+  }
 }
 
 static bool can_patch_bottom_sidebar(void) {
@@ -1732,11 +2047,35 @@ static bool can_patch_bottom_sidebar(void) {
          mode_for_module(module) == MODE_GAME;
 }
 
+static bool can_patch_bottom_map(void) {
+  return !ss_is_new_3ds && art_ready && ss_front_buffer >= 0 && tab == TAB_MAP &&
+    !SS_IsIndoors() && SS_GetArea() < 0x80 &&
+    ((SS_GetModule() & 0xff) == 9 || (SS_GetModule() & 0xff) == 11);
+}
+
+static void draw_bottom_map_patch(void) {
+  SS_ReadSram(sram, sizeof(sram));
+  SDL_Rect clip = {(int)floorf(map_area_r.x), (int)floorf(map_area_r.y),
+    (int)ceilf(map_area_r.x + map_area_r.w) - (int)floorf(map_area_r.x),
+    (int)ceilf(map_area_r.y + map_area_r.h) - (int)floorf(map_area_r.y)};
+  SDL_RenderSetClipRect(ss_r, &clip);
+  draw_overworld(map_area_r, SS_GetLinkX(), SS_GetLinkY(), SS_GetArea());
+  SDL_RenderSetClipRect(ss_r, NULL);
+  uint8_t *destination = ss_present_pixels[ss_worker_buffer] +
+    clip.y * bottom_buffer_pitch() + clip.x * bottom_bytes_per_pixel();
+  SDL_RenderReadPixels(ss_r, &clip, bottom_sdl_pixel_format(), destination, bottom_buffer_pitch());
+}
+
 static bool bottom_needs_periodic_redraw(void) {
-  if (ss_is_new_3ds || developer_overlay_mode)
+  if (ss_is_new_3ds)
     return true;
+  // Diagnostic values explicitly invalidate the overlay when their 500 ms
+  // sample changes. Redrawing this software-rendered panel continuously made
+  // the Old 3DS bottom worker consume Core 0 for seconds at a time.
+  if (developer_overlay_mode)
+    return false;
   if (mode_for_module(SS_GetModule() & 0xff) != MODE_GAME)
-    return true;
+    return tab == TAB_SETTINGS; // Keep settings timers alive; the Old cinema card is static.
   return tab == TAB_MAP || tab == TAB_ITEMS;
 }
 
@@ -1784,17 +2123,23 @@ static void draw_bottom_sidebar_patch(void) {
 }
 #endif
 
-static void handle_tap(float x, float y) {
+// Split the entire visible tab strip at gap midpoints. Borders, rounded
+// corners and spacing are valid touch targets, not dead pixels.
+static int tab_at_position(float x, float y) {
+  if (tab_gear_r.w <= 0 || tab_settings_r.w <= 0 || x < 0 || x >= W ||
+      y < tab_gear_r.y - 4 * u || y >= H)
+    return -1;
+  if (x < (tab_gear_r.x + tab_gear_r.w + tab_map_r.x) * 0.5f) return TAB_GEAR;
+  if (x < (tab_map_r.x + tab_map_r.w + tab_items_r.x) * 0.5f) return TAB_MAP;
+  if (x < (tab_items_r.x + tab_items_r.w + tab_settings_r.x) * 0.5f) return TAB_ITEMS;
+  return TAB_SETTINGS;
+}
+
+static void apply_tap(float x, float y) {
   int module = SS_GetModule() & 0xFF;
   int ui_mode = mode_for_module(module);
 #ifdef __3DS__
-  if (!ss_is_new_3ds) {
-    ss_touch_request_ticks = svcGetSystemTick();
-    ss_touch_redraw_pending = true;
-    ss_worker_interactive = true;
-    prioritize_bottom_touch();
-  }
-  request_bottom_redraw(kBottomRedrawFull);
+  if (update_mode && Updater_Busy()) goto settings_tap;
 #endif
   if (ui_mode != MODE_GAME) {
     if (tab != TAB_SETTINGS) {
@@ -1802,7 +2147,7 @@ static void handle_tap(float x, float y) {
       leave_settings_submenu();
       return;
     }
-    if (!screen_mode && !remap_mode && !developer_mode &&
+    if (!screen_mode && !remap_mode && !developer_mode && !update_mode &&
         in_rect(&cinema_back_r, x, y)) {
       tab = TAB_MAP;
       leave_settings_submenu();
@@ -1812,14 +2157,54 @@ static void handle_tap(float x, float y) {
   }
   if (!art_ready) return;
 
-  if (in_rect(&tab_items_r, x, y)) { tab = (tab == TAB_ITEMS) ? TAB_MAP : TAB_ITEMS; leave_settings_submenu(); return; }
-  if (in_rect(&tab_map_r, x, y))   { tab = TAB_MAP; leave_settings_submenu(); return; }
-  if (in_rect(&tab_gear_r, x, y))  { tab = (tab == TAB_GEAR) ? TAB_MAP : TAB_GEAR; leave_settings_submenu(); return; }
-  if (in_rect(&tab_settings_r, x, y)) { tab = (tab == TAB_SETTINGS) ? TAB_MAP : TAB_SETTINGS; leave_settings_submenu(); return; }
+  int requested_tab = tab_at_position(x, y);
+  if (requested_tab >= 0) {
+    // Content tabs select their view; contact bounce/repeated taps must not
+    // toggle Items or Gear back to Map. The settings cog retains its back action.
+    tab = requested_tab == TAB_SETTINGS && tab == TAB_SETTINGS ? TAB_MAP : requested_tab;
+    leave_settings_submenu();
+    return;
+  }
 
 settings_tap:
   if (tab == TAB_SETTINGS) {
-    if (remap_mode) {
+    if (update_mode) {
+#ifdef __3DS__
+      UpdateStatus st; Updater_GetStatus(&st);
+      if (st.state == UPDATE_INSTALLING || st.state == UPDATE_DONE) return;
+      if (in_rect(&update_back_r, x, y)) {
+        if (update_confirm) update_confirm = false;
+        else { Updater_Cancel(); update_mode = false; }
+      } else if (in_rect(&update_channel_r, x, y) && !Updater_Busy()) {
+        update_confirm = update_show_notes = false; update_page = 0;
+        Updater_SetChannel(!st.prerelease);
+      } else if (in_rect(&update_release_r, x, y) && st.version[0] && !Updater_Busy()) {
+        update_show_notes = true; update_page = 0;
+      } else if (update_show_notes && !update_confirm && in_rect(&update_prev_r, x, y)) {
+        if (update_page) update_page--;
+      } else if (update_show_notes && !update_confirm && in_rect(&update_next_r, x, y)) {
+        if (update_page + 1 < Platform3DS_UpdateNotesPages()) update_page++;
+      } else if (in_rect(&update_action_r, x, y)) {
+        if (update_confirm) { update_confirm = false; Updater_Download(); }
+        else if (Updater_Busy()) Updater_Cancel();
+        else if (st.state == UPDATE_AVAILABLE) update_confirm = true;
+        else Updater_Check();
+      }
+#else
+      if (in_rect(&update_back_r, x, y)) update_mode = false;
+#endif
+      return;
+    }
+    if (load_confirm_mode) {
+      if (in_rect(&load_cancel_r, x, y)) {
+        load_confirm_mode = false;
+      } else if (in_rect(&load_confirm_r, x, y)) {
+        load_confirm_mode = false;
+        load_result = -2;
+        SS_RequestLoadLatestDumpState();
+      }
+      return;
+    } else if (remap_mode) {
       if (in_rect(&remap_back_r, x, y)) { leave_remap(); return; }
       if (in_rect(&remap_page_r, x, y)) {
         remap_first_row = remap_first_row == 0 ? 6 : 0;
@@ -1906,6 +2291,17 @@ settings_tap:
       } else if (in_rect(&developer_row_r[0], x, y)) {
         request_dump_now();
       } else if (in_rect(&developer_row_r[1], x, y)) {
+        load_confirm_mode = true;
+      } else if (in_rect(&developer_row_r[2], x, y)) {
+#ifdef __3DS__
+        bool show = !Platform3DS_GetShowFps();
+        Platform3DS_SetShowFps(show);
+#else
+        bool show = !developer_show_fps;
+        developer_show_fps = show;
+#endif
+        update_ini("[General]", "ShowFps", show ? "1" : "0");
+      } else if (in_rect(&developer_row_r[3], x, y)) {
         developer_overlay_mode = true;
 #ifdef __3DS__
         request_bottom_redraw(kBottomRedrawFull);
@@ -1928,15 +2324,20 @@ settings_tap:
           snprintf(value, sizeof(value), "%d", multiplier);
         update_ini("[General]", "CStickTurboMultiplier", value);
       } else if (in_rect(&settings_row_r[2], x, y)) {
-        SS_GetGamepadControls(pad_controls);
-        remap_mode = true;
-      } else if (in_rect(&settings_row_r[3], x, y)) {
         developer_mode = true;
       } else if (in_rect(&settings_row_r[4], x, y)) {
-        SS_RequestRestart();
-      } else if (in_rect(&settings_row_r[5], x, y)) {
 #ifdef __3DS__
         Platform3DS_RequestRomSelection();
+#else
+        SS_RequestRestart();
+#endif
+      } else if (in_rect(&settings_row_r[3], x, y)) {
+        update_mode = true;
+        update_confirm = update_show_notes = false;
+        update_page = 0;
+#ifdef __3DS__
+        UpdateStatus st; Updater_GetStatus(&st);
+        if (st.state != UPDATE_AVAILABLE) Updater_Check();
 #endif
       }
     }
@@ -1977,18 +2378,54 @@ settings_tap:
   }
 }
 
+static void handle_tap(float x, float y) {
+  if (mode_for_module(SS_GetModule() & 0xff) == MODE_GAME &&
+      tab != TAB_SETTINGS && tab_at_position(x, y) == tab)
+    return; // Already selected: no additional software redraw or upload.
+  // Commit navigation before waking a worker that can preempt this thread.
+  // Publishing first could draw the old tab and consume the only redraw.
+  apply_tap(x, y);
+#ifdef __3DS__
+  if (!ss_is_new_3ds) {
+    ss_touch_request_ticks = svcGetSystemTick();
+    ss_touch_redraw_pending = true;
+    ss_worker_interactive = true;
+  }
+  request_bottom_redraw(kBottomRedrawFull);
+  prioritize_bottom_touch();
+#endif
+}
+
 bool SecondScreenSDL_HandleEvent(const SDL_Event *e) {
   if (!ss_win) return false;
+#ifdef __3DS__
+  float x, y;
+  if (NativeTouch_Decode(e, &x, &y)) {
+    unsigned before = tab;
+    handle_tap(x - (320.0f - W) * 0.5f, y - (240.0f - H) * 0.5f);
+    ss_touch_trace[ss_touch_trace_count++ % 32] = (BottomTouchTrace){
+      e->common.timestamp, (uint16_t)x, (uint16_t)y, before, tab,
+      update_mode, (hidKeysHeld() & KEY_TOUCH) != 0
+    };
+    return true;
+  }
+#endif
   switch (e->type) {
   case SDL_FINGERDOWN:
 #ifdef __3DS__
-    return e->tfinger.windowID == ss_winid;
+    // Native points arrive through the protected event above. Never reuse
+    // renderer-transformed FINGER coordinates or activate a touch twice.
+    return e->tfinger.touchId == 0;
 #else
     if (e->tfinger.windowID == ss_winid) { handle_tap(e->tfinger.x * W, e->tfinger.y * H); return true; }
     return false;
 #endif
   case SDL_FINGERUP: case SDL_FINGERMOTION:
+#ifdef __3DS__
+    return true;
+#else
     return e->tfinger.windowID == ss_winid;
+#endif
   case SDL_MOUSEBUTTONDOWN:
     if (e->button.windowID == ss_winid) {
       if (e->button.which != SDL_TOUCH_MOUSEID)  // real mouse (dev); touch already handled
@@ -2008,28 +2445,12 @@ bool SecondScreenSDL_HandleEvent(const SDL_Event *e) {
   }
 }
 
-void SecondScreenSDL_Handle3DSTouch(void) {
-#ifdef __3DS__
-  if (!ss_win)
-    return;
-  static bool was_touching;
-  u32 keys = hidKeysHeld();
-  bool touching = (keys & KEY_TOUCH) != 0;
-  if (touching && !was_touching) {
-    touchPosition pos;
-    hidTouchRead(&pos);
-    float draw_x = (320.0f - W) * 0.5f;
-    float draw_y = (240.0f - H) * 0.5f;
-    float x = (float)pos.px - draw_x;
-    float y = (float)pos.py - draw_y;
-    handle_tap(x, y);
-  }
-  was_touching = touching;
-#endif
-}
-
 static void draw_second_screen(int logic_frames) {
   if (!ss_enabled) return;
+#ifdef __3DS__
+  // A cinema/settings/gear frame must never inherit a previous heart layout.
+  if (!ss_is_new_3ds) ss_worker_hearts[ss_worker_buffer].valid = false;
+#endif
 #ifndef __3DS__
   static uint32_t frame_no;
   frame_no++;
@@ -2095,6 +2516,14 @@ static void draw_second_screen(int logic_frames) {
   if ((in_house || special) && !has_last_outdoor && !have_exit) ui_mode = MODE_CINEMA;
   if (ui_mode != MODE_GAME) {
     draw_cinema();
+#ifdef __3DS__
+    UpdateStatus update_status; Updater_GetStatus(&update_status);
+    if (update_status.state == UPDATE_AVAILABLE && tab != TAB_SETTINGS) {
+      fill_round(18 * u, H - 52 * u, W - 36 * u, 36 * u, 6 * u, COL_BOX);
+      const char *notice = "UPDATE AVAILABLE - OPEN SETTINGS";
+      draw_text(notice, W / 2 - text_width(notice, 1.6f * u) / 2, H - 40 * u, 1.6f * u);
+    }
+#endif
     if (tab == TAB_SETTINGS)
       draw_cinema_settings_overlay();
     present_second_screen();
@@ -2145,18 +2574,19 @@ static void second_screen_worker_main(void *unused) {
     if (!ss_worker_running)
       break;
     if (!ss_is_new_3ds) {
-      s32 priority = ss_worker_interactive ? ss_worker_interactive_priority :
-                                             ss_worker_idle_priority;
-      svcSetThreadPriority(CUR_THREAD_HANDLE, priority);
+      svcSetThreadPriority(CUR_THREAD_HANDLE, bottom_worker_priority());
     }
     uint64_t start = !ss_is_new_3ds ? svcGetSystemTick() : 0;
-    if (ss_worker_sidebar_patch)
+    if (ss_worker_map_patch) {
+      draw_bottom_map_patch();
+      if (ss_worker_sidebar_patch) draw_bottom_sidebar_patch();
+    } else if (ss_worker_sidebar_patch)
       draw_bottom_sidebar_patch();
     else
       draw_second_screen(ss_worker_logic_frames);
     if (!ss_is_new_3ds) {
       uint64_t elapsed = svcGetSystemTick() - start;
-      if (ss_worker_sidebar_patch) {
+      if (ss_worker_sidebar_patch || ss_worker_map_patch) {
         ss_patch_redraw_count++;
         ss_patch_redraw_total_ticks += elapsed;
         if (elapsed > ss_patch_redraw_max_ticks)
@@ -2189,6 +2619,7 @@ static bool ensure_second_screen_worker(void) {
   LightEvent_Init(&ss_worker_done, RESET_ONESHOT);
   s32 main_priority = 0x30;
   svcGetThreadPriority(&main_priority, CUR_THREAD_HANDLE);
+  ss_worker_scene_priority = main_priority;
   ss_worker_idle_priority = main_priority < 0x3f ? main_priority + 1 :
                                                    main_priority;
   ss_worker_interactive_priority = main_priority > 0 ? main_priority - 1 :
@@ -2213,11 +2644,47 @@ void SecondScreenSDL_BeginFrame(int logic_frames) {
     return;
   static uint32_t frame_no;
   frame_no++;
+  static unsigned update_revision;
+  static uint32_t update_last_redraw;
+  UpdateStatus update_status; Updater_GetStatus(&update_status);
+  if (update_revision != update_status.revision && SDL_GetTicks() - update_last_redraw >= 150) {
+    update_revision = update_status.revision;
+    update_last_redraw = SDL_GetTicks();
+    if (update_mode || mode_for_module(SS_GetModule() & 0xff) != MODE_GAME)
+      request_bottom_redraw(kBottomRedrawFull);
+  }
+  int completed_load = SS_TakeLoadDumpStateResult();
+  if (completed_load >= 0) {
+    load_result = completed_load;
+    load_flash_until = SDL_GetTicks() + 2400;
+    request_bottom_redraw(kBottomRedrawFull);
+  }
   if (!ss_win) {
     if (frame_no < 3 || !ensure_window())
       return;
   }
 
+  // Produce the initial Old frame before relying on the low-priority worker.
+  // Retry synchronously if game art was not available yet. No gameplay-frame
+  // wait is introduced after this first usable bottom image.
+  if (!ss_is_new_3ds && !ss_worker_thread &&
+      (ss_front_buffer < 0 || !art_ready)) {
+    __atomic_exchange_n(&ss_redraw_requests, 0, __ATOMIC_ACQ_REL);
+    ss_worker_buffer = 0;
+    draw_second_screen(logic_frames);
+    ss_front_buffer = ss_worker_buffer;
+    ss_frame_ready = true;
+    return;
+  }
+
+  // A queued map request, or a job already drawing, can outlive the scene
+  // invalidation guard. Keep automatic work below the iris until it completes.
+  int module = SS_GetModule() & 0xff;
+  bool door_transition = !ss_is_new_3ds && (module == 15 || module == 16);
+  bool was_door = __atomic_exchange_n(&ss_worker_door_transition, door_transition, __ATOMIC_ACQ_REL);
+  if (door_transition != was_door && !ss_is_new_3ds && ss_worker_busy &&
+      !ss_touch_redraw_pending && !ss_worker_touch_request_ticks)
+    svcSetThreadPriority(threadGetHandle(ss_worker_thread), bottom_worker_priority());
   request_bottom_redraw_on_state_change();
 
   if (!ensure_second_screen_worker()) {
@@ -2235,32 +2702,44 @@ void SecondScreenSDL_BeginFrame(int logic_frames) {
   }
 
   int divisor = ss_is_new_3ds ? (logic_frames <= 1 ? 2 : 6) : 180;
-  if (developer_overlay_mode)
-    request_bottom_redraw(kBottomRedrawFull);
 
   uint32_t requests =
     __atomic_load_n(&ss_redraw_requests, __ATOMIC_ACQUIRE);
   bool periodic_redraw = ss_front_buffer < 0 ||
     (bottom_needs_periodic_redraw() && frame_no % divisor == 0);
-  bool can_start_worker = ss_is_new_3ds || !ss_frame_ready;
+  bool can_start_worker = (ss_is_new_3ds || !ss_frame_ready) &&
+    (!door_transition || ss_touch_redraw_pending || ss_front_buffer < 0);
   if (!ss_worker_busy && can_start_worker &&
       (requests != 0 || periodic_redraw)) {
     requests = __atomic_exchange_n(&ss_redraw_requests, 0,
                                    __ATOMIC_ACQ_REL);
-    ss_worker_sidebar_patch = !periodic_redraw &&
-      (requests & kBottomRedrawFull) == 0 &&
-      (requests & kBottomRedrawHud) != 0 &&
-      can_patch_bottom_sidebar();
-    ss_worker_buffer = ss_worker_sidebar_patch ? ss_front_buffer :
+    // Serve health/magic/counters first using only the small existing sidebar.
+    // Leave map/full requests queued; a simultaneous scene change must not
+    // swallow this HUD update. Explicit touch navigation keeps precedence.
+    if (!ss_is_new_3ds && (requests & kBottomRedrawHud) &&
+        !ss_touch_redraw_pending && can_patch_bottom_sidebar()) {
+      uint32_t deferred = requests & ~kBottomRedrawHud;
+      if (periodic_redraw) deferred |= kBottomRedrawFull;
+      if (deferred) request_bottom_redraw(deferred);
+      requests = kBottomRedrawHud;
+      periodic_redraw = false;
+    }
+    bool patch_only = !periodic_redraw && (requests & kBottomRedrawFull) == 0 &&
+      (!(requests & kBottomRedrawMap) || can_patch_bottom_map()) &&
+      (!(requests & kBottomRedrawHud) || can_patch_bottom_sidebar());
+    ss_worker_map_patch = patch_only && (requests & kBottomRedrawMap);
+    ss_worker_sidebar_patch = patch_only && (requests & kBottomRedrawHud);
+    ss_worker_buffer = (ss_worker_sidebar_patch || ss_worker_map_patch) ? ss_front_buffer :
       (ss_front_buffer < 0 ? 0 : 1 - ss_front_buffer);
     ss_worker_touch_request_ticks = 0;
     ss_worker_interactive = false;
     if (!ss_worker_sidebar_patch && !ss_is_new_3ds &&
-        ss_touch_redraw_pending) {
-      ss_worker_touch_request_ticks = ss_touch_request_ticks;
-      ss_touch_redraw_pending = false;
+        (ss_touch_redraw_pending || ss_scene_redraw_pending)) {
+      ss_worker_touch_request_ticks = ss_touch_redraw_pending ? ss_touch_request_ticks : 0;
       ss_worker_interactive = true;
-      prioritize_bottom_touch();
+      if (ss_touch_redraw_pending) prioritize_bottom_touch();
+      else prioritize_bottom_scene();
+      ss_touch_redraw_pending = ss_scene_redraw_pending = false;
     }
     ss_worker_logic_frames = logic_frames;
     ss_worker_busy = true;
@@ -2270,12 +2749,103 @@ void SecondScreenSDL_BeginFrame(int logic_frames) {
 
 void SecondScreenSDL_Update(int logic_frames) {
   (void)logic_frames;
-  if (!ss_frame_ready || ss_front_buffer < 0)
-    return;
-  Platform3DS_PresentBottomFrame(
-    ss_present_pixels[ss_front_buffer],
-    bottom_buffer_pitch(), W, H);
-  ss_frame_ready = false;
+  // The worker often finishes while the top PPU renders. Harvest its ready
+  // event here as well as at BeginFrame, saving a frame without waiting or
+  // scheduling another redraw. A busy worker remains fully asynchronous.
+  if (ss_worker_busy && LightEvent_TryWait(&ss_worker_done)) {
+    ss_front_buffer = ss_worker_buffer;
+    ss_worker_busy = false;
+    ss_frame_ready = true;
+  }
+  if (ss_front_buffer < 0) return;
+  if (!ss_is_new_3ds && ss_old_display_pixels) {
+    bool changed = ss_frame_ready || ss_present_retry;
+    if (ss_frame_ready) {
+      // BeginFrame has consumed worker_done; no new Old job may start until
+      // this frame is presented. Copy into main-owned storage once per UI job.
+      memcpy(ss_old_display_pixels, ss_present_pixels[ss_front_buffer],
+             k3DSBottomTextureWidth * k3DSBottomTextureHeight * 2);
+      ss_display_hearts = ss_worker_hearts[ss_front_buffer];
+      ss_old_display_valid = true;
+    }
+    uint8_t live[0x80];
+    SS_ReadSram(live, sizeof(live));
+    if (ss_old_display_valid && ss_display_hearts.valid &&
+        (tab == TAB_MAP || tab == TAB_ITEMS) &&
+        mode_for_module(SS_GetModule() & 0xff) == MODE_GAME &&
+        ss_display_hearts.capacity == live[0x6c] &&
+        ss_display_hearts.half_magic == (live[0x7b] >= 1))
+      changed |= BottomHearts_Apply(&ss_display_hearts, ss_old_display_pixels,
+                                   bottom_buffer_pitch(), live[0x6d]) != 0;
+    if (changed && !Platform3DS_PresentBottomFrame(ss_old_display_pixels, bottom_buffer_pitch(), W, H)) {
+      // A skipped top GPU frame must not consume a bottom redraw. Preserve
+      // the main-owned image, including live hearts, for the next submission.
+      ss_present_retry = true;
+      ss_frame_ready = false;
+      return;
+    }
+  } else if (ss_frame_ready) {
+    if (!Platform3DS_PresentBottomFrame(ss_present_pixels[ss_front_buffer],
+                                       bottom_buffer_pitch(), W, H))
+      return;
+  }
+  ss_frame_ready = ss_present_retry = false;
+}
+
+// Called on the main thread during the paused dump transaction. Do not read
+// worker-owned geometry or pixels while a redraw is in flight.
+bool SecondScreenSDL_WriteDiagnostics(const char *directory) {
+  char path[256];
+  snprintf(path, sizeof(path), "%s/bottom-ui.txt", directory);
+  FILE *f = fopen(path, "wb");
+  if (!f) return false;
+  fprintf(f, "Bottom UI schema: 1\nsize=%dx%d scale=%.6f format=%s pitch=%d\n",
+          W, H, u, ss_is_new_3ds ? "ARGB8888" : "RGB565", bottom_buffer_pitch());
+  fprintf(f, "map_patch=%d scene_redraw_pending=%d redraw_requests=0x%lx\n",
+          ss_worker_map_patch, ss_scene_redraw_pending,
+          (unsigned long)__atomic_load_n(&ss_redraw_requests, __ATOMIC_ACQUIRE));
+  fprintf(f, "enabled=%d tab=%d settings_remap=%d screen=%d developer=%d overlay=%d load_confirm=%d\n",
+          ss_enabled, tab, remap_mode, screen_mode, developer_mode,
+          developer_overlay_mode, load_confirm_mode);
+  fprintf(f, "worker_busy=%d sidebar_patch=%d front=%d worker_buffer=%d frame_ready=%d pending_redraw=0x%lx\n",
+          ss_worker_busy, ss_worker_sidebar_patch, ss_front_buffer, ss_worker_buffer,
+          ss_frame_ready, (unsigned long)__atomic_load_n(&ss_redraw_requests, __ATOMIC_ACQUIRE));
+  fprintf(f, "worker_priority idle/interactive=0x%lx/0x%lx interactive=%d\n",
+          (unsigned long)ss_worker_idle_priority, (unsigned long)ss_worker_interactive_priority,
+          ss_worker_interactive);
+  const uint8_t *capture_pixels = !ss_is_new_3ds && ss_old_display_valid ?
+    ss_old_display_pixels : (!ss_worker_busy && ss_front_buffer >= 0 ? ss_present_pixels[ss_front_buffer] : NULL);
+  bool capture = capture_pixels != NULL;
+  fprintf(f, "retained_hearts=%d heart_layer_valid=%d displayed_health=%d\n",
+          ss_old_display_valid, ss_display_hearts.valid, ss_display_hearts.health);
+  fprintf(f, "Source pixel capture: %s\n", capture ? "bottom-ui.raw; linear little-endian, 512x256 including padding" : "omitted (no stable front buffer)");
+  if (!ss_worker_busy) {
+    fprintf(f, "grid_x/y/cell=%.6f,%.6f,%.6f room=%d floor=%d palace=%d\n",
+            grid_x, grid_y, grid_cell, cur_room, cur_floor_now, cur_palace);
+    const RectFS rects[] = {map_area_r, tab_items_r, tab_gear_r, tab_map_r, tab_settings_r, y_ring_r};
+    const char *names[] = {"map", "items_tab", "gear_tab", "map_tab", "settings_tab", "equipped_ring"};
+    for (unsigned i = 0; i < sizeof(rects) / sizeof(rects[0]); i++)
+      fprintf(f, "%s=%.6f,%.6f,%.6f,%.6f\n", names[i], rects[i].x, rects[i].y, rects[i].w, rects[i].h);
+  }
+  fprintf(f, "Touch input: KEY_TOUCH edges; protected physical coordinates\n");
+  unsigned first = ss_touch_trace_count > 32 ? ss_touch_trace_count - 32 : 0;
+  for (unsigned i = first; i < ss_touch_trace_count; ++i) {
+    const BottomTouchTrace *t = &ss_touch_trace[i % 32];
+    fprintf(f, "touch=%u ms=%lu point=%u,%u contact=%u tab=%u->%u update=%u\n",
+            i, (unsigned long)t->timestamp, t->x, t->y, t->contact,
+            t->before_tab, t->after_tab, t->update);
+  }
+  bool ok = !ferror(f);
+  ok = fclose(f) == 0 && ok;
+  if (capture) {
+    snprintf(path, sizeof(path), "%s/bottom-ui.raw", directory);
+    f = fopen(path, "wb");
+    if (!f) return false;
+    size_t size = (size_t)bottom_buffer_pitch() * k3DSBottomTextureHeight;
+    ok = fwrite(capture_pixels, 1, size, f) == size && ok;
+    ok = fclose(f) == 0 && ok;
+  }
+  return ok;
 }
 
 void SecondScreenSDL_GetOld3DSWorkerStats(
@@ -2319,7 +2889,8 @@ void SecondScreenSDL_Update(int logic_frames) {
 static void destroy_textures(void) {
   SDL_Texture **texes[] = {&tex_map[0], &tex_map[1], &tex_icons, &tex_glyphs,
                            &tex_letters, &tex_face, &tex_floor, &tex_mapicons,
-                           &tex_bg_menu, &tex_bg_parch, &tex_bg_stone};
+                           &tex_bg_menu, &tex_bg_parch, &tex_bg_stone,
+                           &tex_triforce};
   for (size_t i = 0; i < sizeof(texes) / sizeof(texes[0]); i++) {
     if (*texes[i]) SDL_DestroyTexture(*texes[i]);
     *texes[i] = NULL;
@@ -2346,12 +2917,18 @@ static void rebuild_renderer(int w2, int h2) {
 }
 
 void SecondScreenSDL_Shutdown(void) {
+#ifdef __3DS__
+  NativeTouch_Shutdown();
+  ss_touch_trace_count = 0;
+#endif
   ss_enabled = false;
+  leave_settings_submenu();
+  tab = TAB_MAP;
 #ifdef __3DS__
   if (ss_worker_thread) {
     ss_worker_running = false;
     LightEvent_Signal(&ss_worker_start);
-    Result join_result = threadJoin(ss_worker_thread, 2000000000ull);
+    Result join_result = threadJoin(ss_worker_thread, UINT64_MAX);
     if (R_FAILED(join_result))
       Platform3DS_LogRuntime("WARNING: second screen worker join timeout: 0x%08lx",
                              (unsigned long)join_result);
@@ -2363,8 +2940,34 @@ void SecondScreenSDL_Shutdown(void) {
     ss_present_pixels[i] = NULL;
   }
 #endif
-  if (!ss_win) return;
+#ifdef __3DS__
+  linearFree(ss_old_display_pixels);
+  ss_old_display_pixels = NULL;
+  ss_old_display_valid = false;
+  memset(ss_worker_hearts, 0, sizeof(ss_worker_hearts));
+  memset(&ss_display_hearts, 0, sizeof(ss_display_hearts));
+#endif
+  // A ROM restart reuses these statics. No job or completed frame from the
+  // old renderer may survive after its events/buffers have been destroyed.
+#ifdef __3DS__
+  ss_worker_busy = ss_frame_ready = false;
+  ss_front_buffer = -1;
+  ss_present_retry = false;
+  ss_worker_buffer = 0;
+  ss_redraw_requests = kBottomRedrawFull;
+  ss_worker_sidebar_patch = ss_worker_map_patch = ss_worker_interactive = false;
+  ss_touch_redraw_pending = ss_scene_redraw_pending = false;
+  ss_worker_touch_request_ticks = ss_touch_request_ticks = 0;
+  ss_full_redraw_count = ss_full_redraw_total_ticks = ss_full_redraw_max_ticks = 0;
+  ss_patch_redraw_count = ss_patch_redraw_total_ticks = ss_patch_redraw_max_ticks = 0;
+  ss_touch_redraw_count = ss_touch_redraw_total_ticks = ss_touch_redraw_max_ticks = 0;
+#endif
+  SS_ResetRomCaches();
+  has_last_outdoor = hud_pref_applied = ss_needs_rebuild = false;
+  view_floor_offset = 0;
+  view_floor_touched_at = 0;
   destroy_textures();
+  if (!ss_win) return;
   SDL_DestroyRenderer(ss_r); ss_r = NULL;
   SDL_DestroyWindow(ss_win); ss_win = NULL;
 }

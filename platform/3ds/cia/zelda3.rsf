@@ -1,5 +1,5 @@
 BasicInfo:
-  Title: "Zelda 3DS EXP 3"
+  Title: "Zelda ALttP 3DS"
   ProductCode: "CTR-P-Z3DE"
   Logo: Homebrew
 
@@ -57,6 +57,9 @@ AccessControlInfo:
     - 1f000000-1f5fffff:r
 
   SystemCallAccess:
+    InvalidateProcessDataCache: 82
+    StoreProcessDataCache: 83
+    FlushProcessDataCache: 84
     ControlMemory: 1
     QueryMemory: 2
     ExitProcess: 3
@@ -104,6 +107,9 @@ AccessControlInfo:
 
   ServiceAccessControl:
     - APT:U
+    - ac:u
+    - soc:U
+    - am:net
     - cfg:u
     - dsp::DSP
     - fs:USER
@@ -117,6 +123,9 @@ SystemControlInfo:
   StackSize: 0x40000
 
   Dependency:
+    am: 0x0004013000001502
+    ac: 0x0004013000002402
+    socket: 0x0004013000002e02
     cfg: 0x0004013000001702
     dsp: 0x0004013000001a02
     gsp: 0x0004013000001c02

@@ -47,8 +47,22 @@ enum {
   kPpuRenderFlags_Height240 = 4,
   // Disable sprite render limits
   kPpuRenderFlags_NoSpriteLimits = 8,
+  // Full-resolution, E6-equivalent Old 3DS composition fast paths.
+  kPpuRenderFlags_Old3DS = 16,
 };
 
+
+typedef struct PpuWindowSpans {
+  int16_t edges[6];
+  uint8_t nr, bits;
+} PpuWindowSpans;
+void PpuGetWindowSpans(Ppu *ppu, unsigned layer, bool enabled, PpuWindowSpans *out);
+
+typedef struct PpuPhaseProfile {
+  uint64_t prepare, sprites, main, sub, compose, mode7;
+  uint32_t frame, lines, retainedRows, rebuiltTiles;
+  bool active;
+} PpuPhaseProfile;
 
 struct Ppu {
   bool lineHasSprites;
@@ -60,6 +74,7 @@ struct Ppu {
   PpuTileCache *tileCache;
   uint8_t extraLeftCur, extraRightCur, extraLeftRight, extraBottomCur;
   int16_t renderObjXOffset;
+  int16_t renderObjYOffset;
   float mode7PerspectiveLow, mode7PerspectiveHigh;
 
   // TMW / TSW etc
@@ -100,6 +115,7 @@ struct Ppu {
   // cgram access
   uint8_t cgramPointer;
   bool cgramSecondWrite;
+  bool colorMapDirty;
   uint8_t cgramBuffer;
   // oam access
   uint16_t oamAdr;
@@ -134,11 +150,30 @@ struct Ppu {
   PpuPixelPrioBufs bgBuffers[2];
   PpuPixelPrioBufs objBuffer;
   uint16_t vram[0x8000];
+  // Derived colors only; never serialized. Each PPU worker owns its copy.
+  uint32_t colorMapRgb5Spaced[256];
+  uint32_t fixedMathRgb[256];
+  uint32_t fixedMathBlack;
+  uint32_t fixedMathKey;
+  bool fixedMathValid;
+  uint8_t subscreenMath[1024];
+  uint8_t subscreenMathKey;
+  uint32_t spriteLines[256][4];
+  bool spriteLinesValid;
+  uint32_t backdropMathRgb[256];
+  uint32_t backdropMathKey;
+  bool backdropMathValid;
+  struct PpuRetainedMaps *retained;
+  bool retainedAttempted, retainedUsable;
+  PpuPhaseProfile phase;
+  bool gpuRecording, gpuInvalidWrite;
+
 };
 
 Ppu* ppu_init();
 void ppu_free(Ppu* ppu);
 void ppu_reset(Ppu* ppu);
+void PpuUpdateCgram(Ppu *ppu, const uint16_t *colors);
 void ppu_handleVblank(Ppu* ppu);
 void ppu_runLine(Ppu* ppu, int line);
 uint8_t ppu_read(Ppu* ppu, uint8_t adr);

@@ -34,9 +34,36 @@
 
 static dspHookCookie dsp_hook;
 static SDL_AudioDevice *audio_device;
+static int cache_clean_mode; /* 0 unprobed, 1 direct SVC, 2 DSP fallback */
 
 static void FreePrivateData(_THIS);
 static int FindAudioFormat(_THIS);
+
+/* DSP_FlushDataCache is synchronous service IPC. On Old 3DS that round trip
+ * competes with audio, GSP and the application workers on core 1. Clean the
+ * CPU-written PCM lines locally when the launch environment permits it, while
+ * retaining the original DSP service call as a compatibility fallback. */
+static Result N3DSAUDIO_CleanDataCache(const void *address, size_t size)
+{
+    Result result;
+
+    if (address == NULL || size == 0) {
+        return 0;
+    }
+
+    if (cache_clean_mode != 2) {
+        result = svcStoreProcessDataCache(CUR_PROCESS_HANDLE,
+                                          (u32)(uintptr_t)address,
+                                          (u32)size);
+        if (R_SUCCEEDED(result)) {
+            cache_clean_mode = 1;
+            return result;
+        }
+        cache_clean_mode = 2;
+    }
+
+    return DSP_FlushDataCache(address, (u32)size);
+}
 
 static SDL_INLINE void contextLock(_THIS)
 {
@@ -72,7 +99,7 @@ static void N3DSAUD_DspHook(DSP_HookType hook)
 static void AudioFrameFinished(void *device)
 {
     bool shouldBroadcast = false;
-    unsigned i;
+    unsigned i, queued = 0;
     SDL_AudioDevice *this = (SDL_AudioDevice *)device;
 
     contextLock(this);
@@ -81,6 +108,18 @@ static void AudioFrameFinished(void *device)
         if (this->hidden->waveBuf[i].status == NDSP_WBUF_DONE) {
             this->hidden->waveBuf[i].status = NDSP_WBUF_FREE;
             shouldBroadcast = SDL_TRUE;
+        }
+    }
+
+    if (this->hidden->diagnosticsEnabled) {
+        for (i = 0; i < NUM_BUFFERS; i++)
+            queued += this->hidden->waveBuf[i].status == NDSP_WBUF_QUEUED ||
+                      this->hidden->waveBuf[i].status == NDSP_WBUF_PLAYING;
+        if (queued == 0 && this->hidden->refillCount && !ndspChnIsPaused(0)) {
+            if (!this->hidden->queueWasEmpty) this->hidden->emptyQueueEvents++;
+            this->hidden->queueWasEmpty = SDL_TRUE;
+        } else if (queued) {
+            this->hidden->queueWasEmpty = SDL_FALSE;
         }
     }
 
@@ -96,11 +135,15 @@ static int N3DSAUDIO_OpenDevice(_THIS, const char *devname)
     Result ndsp_init_res;
     Uint8 *data_vaddr;
     float mix[12];
+    bool is_new_3ds = false;
     this->hidden = (struct SDL_PrivateAudioData *)SDL_calloc(1, sizeof(*this->hidden));
 
     if (this->hidden == NULL) {
         return SDL_OutOfMemory();
     }
+
+    APT_CheckNew3DS(&is_new_3ds);
+    this->hidden->diagnosticsEnabled = !is_new_3ds;
 
     /* Initialise the DSP service */
     ndsp_init_res = ndspInit();
@@ -148,7 +191,7 @@ static int N3DSAUDIO_OpenDevice(_THIS, const char *devname)
     }
 
     SDL_memset(data_vaddr, 0, this->hidden->mixlen * NUM_BUFFERS);
-    DSP_FlushDataCache(data_vaddr, this->hidden->mixlen * NUM_BUFFERS);
+    N3DSAUDIO_CleanDataCache(data_vaddr, this->hidden->mixlen * NUM_BUFFERS);
 
     this->hidden->nextbuf = 0;
     this->hidden->channels = this->spec.channels;
@@ -206,13 +249,21 @@ static void N3DSAUDIO_PlayDevice(_THIS)
         return;
     }
 
+    if (this->hidden->refillStart) {
+        Uint32 us = (Uint32)((svcGetSystemTick() - this->hidden->refillStart) * 1000000ULL / SYSCLOCK_ARM11);
+        this->hidden->refillLastUs = us;
+        if (us > this->hidden->refillMaxUs) this->hidden->refillMaxUs = us;
+        this->hidden->refillTotalUs += us;
+        this->hidden->refillCount++;
+        this->hidden->refillStart = 0;
+    }
     this->hidden->nextbuf = (nextbuf + 1) % NUM_BUFFERS;
 
     contextUnlock(this);
 
     memcpy((void *)this->hidden->waveBuf[nextbuf].data_vaddr,
            this->hidden->mixbuf, sampleLen);
-    DSP_FlushDataCache(this->hidden->waveBuf[nextbuf].data_vaddr, sampleLen);
+    N3DSAUDIO_CleanDataCache(this->hidden->waveBuf[nextbuf].data_vaddr, sampleLen);
 
     ndspChnWaveBufAdd(0, &this->hidden->waveBuf[nextbuf]);
 }
@@ -229,6 +280,8 @@ static void N3DSAUDIO_WaitDevice(_THIS)
 
 static Uint8 *N3DSAUDIO_GetDeviceBuf(_THIS)
 {
+    if (this->hidden->diagnosticsEnabled)
+        this->hidden->refillStart = svcGetSystemTick();
     return this->hidden->mixbuf;
 }
 
@@ -249,6 +302,7 @@ static void N3DSAUDIO_CloseDevice(_THIS)
 
     ndspExit();
 
+    audio_device = NULL;
     FreePrivateData(this);
 }
 
@@ -257,7 +311,7 @@ static void N3DSAUDIO_ThreadInit(_THIS)
     s32 current_priority;
     svcGetThreadPriority(&current_priority, CUR_THREAD_HANDLE);
     /*
-     * Keep audio just below the game thread. NDSP is triple-buffered, so the
+     * Keep audio just below the game thread. NDSP is double-buffered, so the
      * mixer can run between frame-pacing intervals without preempting the
      * top-screen scanline renderer mid-frame.
      */
@@ -265,6 +319,38 @@ static void N3DSAUDIO_ThreadInit(_THIS)
     /* 0x18 is reserved for video, 0x30 is the default for main thread */
     current_priority = SDL_clamp(current_priority, 0x19, 0x31);
     svcSetThreadPriority(CUR_THREAD_HANDLE, current_priority);
+    svcGetThreadPriority(&current_priority, CUR_THREAD_HANDLE);
+    this->hidden->workerPriority = (Uint32)current_priority;
+}
+
+/* Snapshot under the audio lock; the caller writes files after releasing it.
+ * Shared ABI: 16 Uint32 values, documented by the dump's audio.txt writer. */
+void Zelda3_N3DSAudioGetStats(Uint32 values[16])
+{
+    SDL_AudioDevice *this = audio_device;
+    SDL_memset(values, 0, 16 * sizeof(*values));
+    if (!this || !this->hidden) return;
+    contextLock(this);
+    values[0] = 1;
+    values[1] = this->spec.freq;
+    values[2] = this->spec.samples;
+    values[3] = this->spec.channels;
+    values[4] = NUM_BUFFERS;
+    for (unsigned i = 0; i < NUM_BUFFERS; i++) {
+        Uint32 status = this->hidden->waveBuf[i].status;
+        values[5] += status == NDSP_WBUF_QUEUED;
+        values[6] += status == NDSP_WBUF_PLAYING;
+        values[7] += status == NDSP_WBUF_FREE;
+    }
+    values[8] = this->hidden->refillCount;
+    values[9] = values[8] ? (Uint32)(this->hidden->refillTotalUs / values[8]) : 0;
+    values[10] = this->hidden->refillLastUs;
+    values[11] = this->hidden->refillMaxUs;
+    values[12] = this->hidden->emptyQueueEvents;
+    values[13] = this->hidden->workerPriority;
+    values[14] = cache_clean_mode;
+    values[15] = this->spec.format;
+    contextUnlock(this);
 }
 
 static SDL_bool N3DSAUDIO_Init(SDL_AudioDriverImpl *impl)
