@@ -39,6 +39,35 @@ jobs:
           chmod +x /opt/tools/makerom /opt/tools/bannertool
           ls -la /opt/tools/
 
+      - name: Updater dependencies (curl, mbedTLS, Jansson)
+        run: |
+          set -e
+          DEPS="${DEVKITPRO}/portlibs/3ds"
+          have_deps() {
+            for l in curl jansson mbedtls mbedx509 mbedcrypto; do
+              [ -f "$1/lib/lib$l.a" ] || return 1
+            done
+          }
+          echo "== what this image already ships =="
+          ls "$DEPS/lib" 2>/dev/null | head -60 || true
+          dkp-pacman -Q 2>/dev/null | grep -iE '3ds-(curl|mbedtls|jansson)' || echo "  (no updater deps installed)"
+          if ! have_deps "$DEPS"; then
+            echo "== installing the devkitPro packages =="
+            dkp-pacman -S --noconfirm --needed 3ds-curl 3ds-mbedtls 3ds-jansson || \
+              dkp-pacman -Sy --noconfirm --needed 3ds-curl 3ds-mbedtls 3ds-jansson || \
+              echo "::warning::devkitPro repository unreachable, building from source"
+          fi
+          # Verify the prefix instead of trusting pacman's exit status: fall back
+          # to the in-tree build script when the libraries really aren't there.
+          if have_deps "$DEPS"; then
+            echo "UPDATE_DEPS_ROOT=$DEPS" >> "$GITHUB_ENV"
+          else
+            echo "== building updater dependencies from source =="
+            bash platform/3ds/update-dependencies/build-deps.sh "$PWD/.deps/prefix"
+            echo "UPDATE_DEPS_ROOT=$PWD/.deps/prefix" >> "$GITHUB_ENV"
+          fi
+          cat "$GITHUB_ENV"
+
       - name: Build (3DSX + CIA), both variants
         env:
           ZELDA3_TOOLS_ROOT: /opt/tools
