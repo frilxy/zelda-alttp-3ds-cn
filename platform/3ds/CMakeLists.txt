@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.20)
 
 project(zelda3_3ds VERSION 3.2 LANGUAGES C)
 
+# Single source of truth for the released version.  It is compiled into the
+# binary (the in-game updater compares against it), used for the .3dsx name, and
+# read back by build.sh and .github/workflows/build.yml to name the CIA,
+# the release tag and the release assets.  Bump it here and nowhere else.
+set(ZELDA3_3DS_VERSION "3.2-E1")
+
 set(ZELDA3_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
 set(ZELDA3_NATIVE "${ZELDA3_ROOT}/app/jni/src")
 set(SDL2_ROOT "" CACHE PATH "Local SDL2 installation built for Nintendo 3DS")
@@ -60,7 +66,7 @@ target_include_directories(zelda3-3ds PRIVATE
 
 target_compile_definitions(zelda3-3ds PRIVATE
   SYSTEM_VOLUME_MIXER_AVAILABLE=0
-  ZELDA3_3DS_VERSION=\"3.2-E1\"
+  ZELDA3_3DS_VERSION=\"${ZELDA3_3DS_VERSION}\"
   NDEBUG=1
 )
 if(BOTTOM_SCREEN_CN)
@@ -137,7 +143,7 @@ ctr_generate_smdh(
 
 ctr_create_3dsx(zelda3-3ds-3dsx
   TARGET zelda3-3ds
-  OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/zelda3-3ds-v3.2-E1.3dsx"
+  OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/zelda3-3ds-v${ZELDA3_3DS_VERSION}.3dsx"
   SMDH "${ZELDA3_SMDH}"
   ROMFS "${ZELDA3_ROMFS}"
 )

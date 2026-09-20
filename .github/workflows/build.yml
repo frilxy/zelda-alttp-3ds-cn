@@ -121,7 +121,9 @@ jobs:
           # rejects anything that isn't a parseable version (update_manifest.c),
           # so a rolling "latest" tag would make releases invisible to it, and
           # its asset lookup wants exactly zelda3-3ds-v<version>.cia / .3dsx.
-          VERSION="$(sed -n 's/.*ZELDA3_3DS_VERSION=\\"\([^"\\]*\)\\".*/\1/p' platform/3ds/CMakeLists.txt)"
+          # Read the version through build.sh so only one parser exists; the
+          # asset names it produces are derived from the same value.
+          VERSION="$(platform/3ds/build.sh --print-version)"
           [ -n "$VERSION" ] || { echo "could not read ZELDA3_3DS_VERSION"; exit 1; }
           TAG="v${VERSION}"
           echo "publishing $TAG"

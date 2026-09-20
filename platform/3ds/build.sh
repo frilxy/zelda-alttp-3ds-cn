@@ -13,8 +13,23 @@ if [[ "${BOTTOM_SCREEN_CN:-}" == "1" ]]; then
   SUFFIX="-cn-bottom"
   BSCN_FLAG=ON
 fi
+# The release version has a single source of truth: platform/3ds/CMakeLists.txt.
+# It is compiled into the binary (the in-game updater compares against it) and
+# used for the .3dsx name, so the CIA/3DSX asset names derived from it here can
+# never drift from what the updater looks for.
+VERSION="$(sed -n 's/^set(ZELDA3_3DS_VERSION "\([^"]*\)").*/\1/p' "${ROOT}/platform/3ds/CMakeLists.txt")"
+if [[ -z "${VERSION}" ]]; then
+  printf 'error: no ZELDA3_3DS_VERSION in platform/3ds/CMakeLists.txt\n' >&2
+  exit 1
+fi
+# CI and the release tooling ask the script for the version instead of parsing
+# CMakeLists.txt themselves, so there is exactly one parser to keep in sync.
+if [[ "${1:-}" == "--print-version" ]]; then
+  printf '%s\n' "${VERSION}"
+  exit 0
+fi
 GAME_BUILD="${ROOT}/build-3ds${SUFFIX}/game"
-OUT_BASE="zelda3-3ds-v3.2-E1${SUFFIX}"
+OUT_BASE="zelda3-3ds-v${VERSION}${SUFFIX}"
 TOOLS_ROOT="${ZELDA3_TOOLS_ROOT:-${ROOT}/../../Tools/bin}"
 
 export DEVKITPRO DEVKITARM
@@ -45,10 +60,10 @@ cmake \
   -DBOTTOM_SCREEN_CN="${BSCN_FLAG}"
 cmake --build "${GAME_BUILD}" --parallel
 
-# CMake pegs the .3dsx name at zelda3-3ds-v3.2-E1.3dsx; rename it so the
+# CMake pegs the .3dsx name at zelda3-3ds-v<version>.3dsx; rename it so the
 # bottom-screen-CN build doesn't collide with the standard build in the release.
-if [[ "${SUFFIX}" != "" && -f "${GAME_BUILD}/zelda3-3ds-v3.2-E1.3dsx" ]]; then
-  mv "${GAME_BUILD}/zelda3-3ds-v3.2-E1.3dsx" "${GAME_BUILD}/${OUT_BASE}.3dsx"
+if [[ "${SUFFIX}" != "" && -f "${GAME_BUILD}/zelda3-3ds-v${VERSION}.3dsx" ]]; then
+  mv "${GAME_BUILD}/zelda3-3ds-v${VERSION}.3dsx" "${GAME_BUILD}/${OUT_BASE}.3dsx"
 fi
 
 MAKEROM="${MAKEROM:-${TOOLS_ROOT}/makerom}"
