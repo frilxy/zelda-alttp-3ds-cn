@@ -25,6 +25,10 @@ Docs/
 *.o
 app/jni/src/zelda3
 
+# Python bytecode from the asset/atlas generator scripts
+__pycache__/
+*.pyc
+
 # Local configuration file (sdk path, etc)
 local.properties
 
