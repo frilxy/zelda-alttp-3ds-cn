@@ -1,7 +1,16 @@
 name: Build 3DS CIA
 
 on:
+  # Only main publishes.  The release step replaces the current version's
+  # release in place (delete + recreate + --cleanup-tag), so an unfiltered
+  # `push` meant that pushing any work-in-progress branch would overwrite the
+  # release that every installed copy's in-game updater points at.
   push:
+    branches: [main]
+  # Pull requests build too, so branch work is verifiable without touching a
+  # release: for a pull_request ref the publish step's main-only guard skips.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -91,6 +100,9 @@ jobs:
           if-no-files-found: warn
 
       - name: Publish the rolling GitHub Release
+        # A manual workflow_dispatch run on a branch should still build and
+        # upload the Actions artifact, but must never publish a release.
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
