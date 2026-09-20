@@ -131,6 +131,15 @@ jobs:
             echo "$TAG already exists: replacing it with this build"
             $GH release delete "$TAG" --yes --cleanup-tag
           fi
+          # A tag can exist without a release -- a fork inherits the upstream
+          # tags, so v3.2 is already there pointing at upstream's commit.  gh
+          # release create reuses an existing tag and ignores --target, which
+          # would attach this build's release to upstream's commit instead of
+          # the one that produced the artifacts, so drop the stale tag first.
+          if $GH api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "$TAG exists as a tag without a release: recreating it at $GITHUB_SHA"
+            $GH api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG"
+          fi
           # The top screen renders the changelog with an ASCII-only font and
           # Update_FormatNotes strips every byte >= 128, so keep the notes ASCII.
           $GH release create "$TAG" \
