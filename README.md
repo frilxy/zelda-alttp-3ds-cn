@@ -20,8 +20,8 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 | 版本 | 内容 |
 |---|---|
-| **标准版** `zelda3-3ds-v3.2-E1` | 对话全中文，下屏仍为英文 |
-| **下屏汉化版** `zelda3-3ds-v3.2-E1-cn-bottom` | 对话 + **下屏菜单/设置/地图 UI 全中文** |
+| **标准版** `zelda3-3ds-v3.2` | 对话全中文，下屏仍为英文 |
+| **下屏汉化版** `zelda3-3ds-v3.2-cn-bottom` | 对话 + **下屏菜单/设置/地图 UI 全中文** |
 
 > 想要下屏中文就用 **`-cn-bottom`** 那个。
 
@@ -43,9 +43,9 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 ---
 
-## 上游 3.2-E1 更新内容
+## 上游 3.2 更新内容
 
-本 fork 已合并上游 **v3.2-E1**（相对 3.0E 共 124 个文件、+27964 / −785 行），主要新增：
+本 fork 已合并上游 **v3.2**（含 v3.2-E1、v3.2-E2）。相对 3.0E 共 124 个文件、+27964 / −785 行，主要新增：
 
 - **Old 3DS 的 PICA200 GPU 渲染器** + 软件回退（老机型帧率明显提升）；
 - 原生 **400×240 宽屏**输出；
@@ -55,9 +55,15 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 - 下屏新增 **读取存档（Load State）**、**显示帧率**、**内存转储** 等开发者选项；
 - 触摸操作修正、新的横幅与 3D 图标。
 
+**v3.2 相对 v3.2-E1 的两处修复（本次已同步）：**
+
+- **更新器批量传输 SD 数据**：I/O 工作线程的优先级改为按调用者动态计算，
+  下载不再被渲染任务饿死；
+- 修复**重启 / 重选 ROM 后残留旧游戏 RAM** 导致的画面全黑、无声音。
+
 > ⚠️ 上游更新器默认指向 **上游仓库**，那会把汉化版覆盖掉。本 fork 已把它改成本仓库
 > （`platform/3ds/source/update_manifest.h` 的 `UPDATE_REPOSITORY`），只安装本项目的
-> `zelda3-3ds-v3.2-E1.cia / .3dsx`。
+> `zelda3-3ds-v3.2.cia / .3dsx`。
 > 另注：上屏日志用的是 ASCII 定宽字体（`Update_FormatNotes` 会丢弃所有 ≥128 的字节），
 > 因此本仓库的 Release 说明保持英文。
 
@@ -65,8 +71,8 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 版本号就是上游版本号，所以判断逻辑很简单：**版本号没变，游戏内不会提示更新**。
 
-- 装的是 `v3.2-E1`，重建同一版本 → 显示 **`已是最新版本`**，按钮只会做「检查更新」，不会重复下载安装；
-- 只有版本号**变大**（上游发 3.2-E2，或我们提升 `platform/3ds/CMakeLists.txt` 里的
+- 装的是 `v3.2`，重建同一版本 → 显示 **`已是最新版本`**，按钮只会做「检查更新」，不会重复下载安装；
+- 只有版本号**变大**（上游发布更高的 `3.x`，或我们提升 `platform/3ds/CMakeLists.txt` 里的
   `ZELDA3_3DS_VERSION`）才会提示「发现新版本」并允许下载安装。
 
 所以「同一版本重编译」的用户不会被反复打扰；要拿新构建直接从 Release 页下载即可
@@ -80,15 +86,15 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 | 文件 | 用途 |
 |---|---|
-| `zelda3-3ds-v3.2-E1.cia` | 标准版，FBI 安装（对话中文，下屏英文） |
-| `zelda3-3ds-v3.2-E1.3dsx` | 标准版，Homebrew Launcher |
-| `zelda3-3ds-v3.2-E1-cn-bottom.cia` | **下屏汉化版**，FBI 安装（下屏也中文） |
-| `zelda3-3ds-v3.2-E1-cn-bottom.3dsx` | **下屏汉化版**，Homebrew Launcher |
+| `zelda3-3ds-v3.2.cia` | 标准版，FBI 安装（对话中文，下屏英文） |
+| `zelda3-3ds-v3.2.3dsx` | 标准版，Homebrew Launcher |
+| `zelda3-3ds-v3.2-cn-bottom.cia` | **下屏汉化版**，FBI 安装（下屏也中文） |
+| `zelda3-3ds-v3.2-cn-bottom.3dsx` | **下屏汉化版**，Homebrew Launcher |
 | `cn_language.bin` | 备用中文语言块（一般无需使用） |
 
 发布规则：
 
-- Release 的 tag 就是编译进程序的版本号（当前 `v3.2-E1`）——游戏内更新器只认这种合法版本号，
+- Release 的 tag 就是编译进程序的版本号（当前 `v3.2`）——游戏内更新器只认这种合法版本号，
   所以不使用 `latest` 之类的滚动 tag；`/releases/latest` 依旧指向最新版本。
 - **版本号变化 → 新增一个 Release**（旧版本保留，可随时回退下载）。
 - **同一版本重新构建 → 原地覆盖该版本的 Release**：资产与说明一并替换，tag 指向产生这些产物的那次提交；
@@ -146,6 +152,15 @@ BOTTOM_SCREEN_CN=1 platform/3ds/build.sh   # 下屏汉化版
 - 下屏设置：`画面` / `加速倍率` / `开发者选项` / `更新` / `重启`。
 - 下屏 `更新`：检查并安装本仓库的最新版本（需 Wi-Fi）；点版本名可在**上屏**看更新日志。
 - 快速诊断：按 `L + R + A` 生成内存 + 双屏截图转储。
+
+## 致谢
+
+上游 v3.2 的贡献者（随上游合并一并保留）：
+
+- [@999sian](https://github.com/999sian)：Old 3DS 优化；
+- [arth78](https://github.com/arth78)：WIDE 显示；
+- [Archaistic](https://github.com/Archaistic)：WIDE 高度与 Triforce 改进；
+- Logo：[Phibonacci](https://github.com/Phibonacci)，基于 [TiraArt](https://sketchfab.com/TiraArt) 的原始 3D 模型。
 
 ## 许可与法律
 
