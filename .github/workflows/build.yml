@@ -101,8 +101,8 @@ jobs:
           ZELDA3_TOOLS_ROOT: /opt/tools
         run: |
           chmod +x platform/3ds/build.sh
-          # One artifact pair: the bottom screen is always translated now, so the
-          # old two-variant split and its -cn-bottom suffix are gone.
+          # One build; its artifact name keeps the -cn-bottom suffix so older
+          # installs, whose updater matches the exact name, can upgrade in place.
           platform/3ds/build.sh
 
       - name: Upload Actions artifact
@@ -110,8 +110,8 @@ jobs:
         with:
           name: zelda3-3ds-cn
           path: |
-            build-3ds/game/*.cia
-            build-3ds/game/*.3dsx
+            build-3ds-cn-bottom/game/*.cia
+            build-3ds-cn-bottom/game/*.3dsx
             cn_language.bin
           if-no-files-found: warn
 
@@ -165,11 +165,11 @@ jobs:
           Assets: install the .cia with FBI, or copy the .3dsx for the Homebrew Launcher.
           Both the dialogue and the bottom-screen UI are translated.
 
-          The in-game updater (bottom screen, UPDATE) installs zelda3-3ds-${TAG}.cia or .3dsx." \
+          The in-game updater (bottom screen, UPDATE) installs zelda3-3ds-${TAG}-cn-bottom.cia or .3dsx." \
             --target "$GITHUB_SHA" \
             --latest
           # Upload build assets separately; splitting create from upload avoids
           # an upload race.
-          for f in build-3ds/game/*.cia build-3ds/game/*.3dsx cn_language.bin; do
+          for f in build-3ds-cn-bottom/game/*.cia build-3ds-cn-bottom/game/*.3dsx cn_language.bin; do
             $GH release upload "$TAG" "$f" --clobber 2>/dev/null || echo "warn: could not upload $f"
           done

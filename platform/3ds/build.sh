@@ -6,9 +6,12 @@ DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
 DEVKITARM="${DEVKITARM:-${DEVKITPRO}/devkitARM}"
 SDL_BUILD="${ROOT}/build-3ds/sdl"
 SDL_PREFIX="${ROOT}/build-3ds/prefix"
-# The bottom screen is always the Chinese build now: the two-variant split is gone,
-# so there is no -cn-bottom suffix and one artifact pair per release.
-SUFFIX=""
+# One build, and its artifact name keeps the -cn-bottom suffix on purpose: that is
+# the exact name older installs' updaters look for, so they can upgrade in place
+# instead of needing a manual reinstall.  The suffix is the only one that ever
+# existed, and the new updater also matches by stem, so one pair of files serves
+# both old and new installs.
+SUFFIX="-cn-bottom"
 BSCN_FLAG=ON
 # The release version has a single source of truth: platform/3ds/CMakeLists.txt.
 # It is compiled into the binary (the in-game updater compares against it) and

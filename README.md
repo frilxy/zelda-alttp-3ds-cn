@@ -42,8 +42,8 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 | 文件 | 用途 |
 |---|---|
-| `zelda3-3ds-v3.2.3.cia` | FBI 安装（推荐） |
-| `zelda3-3ds-v3.2.3.3dsx` | Homebrew Launcher |
+| `zelda3-3ds-v3.2.3-cn-bottom.cia` | FBI 安装（推荐） |
+| `zelda3-3ds-v3.2.3-cn-bottom.3dsx` | Homebrew Launcher |
 | `cn_language.bin` | 备用中文语言块（一般无需使用） |
 
 发布规则：
