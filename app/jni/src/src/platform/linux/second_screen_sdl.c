@@ -1247,7 +1247,7 @@ static void draw_remap_panel(RectFS r) {
     draw_settings_row(row, armed);
     float ty = row->y + row->h / 2 - 9 * u;
     draw_text(kPadCmdNames[i], row->x + 12 * u, ty, 2.1f * u);
-    const char *v = armed ? "PRESS KEY"
+    const char *v = armed ? SS_STR("PRESS KEY", "请按键")
         : (pad_controls[i] >= 0 && pad_controls[i] < 17 ? kPadButtonLabel[pad_controls[i]] : "----");
     draw_text(v, row->x + row->w - 12 * u - text_width(v, 2.1f * u), ty, 2.1f * u);
   }
@@ -1263,13 +1263,13 @@ static void draw_remap_panel(RectFS r) {
 static const char *display_mode_label(void) {
 #ifdef __3DS__
   switch (Platform3DS_GetDisplayMode()) {
-  case kPlatform3DSDisplayOriginal: return "ORIGINAL";
-  case kPlatform3DSDisplayStretch: return "STRETCH";
+  case kPlatform3DSDisplayOriginal: return SS_STR("ORIGINAL", "原版");
+  case kPlatform3DSDisplayStretch: return SS_STR("STRETCH", "拉伸");
   case kPlatform3DSDisplayUltraWideMod:
-  default: return "WIDE";
+  default: return SS_STR("WIDE", "宽屏");
   }
 #else
-  return SS_IsWidescreen() ? "WIDE" : "ORIGINAL";
+  return SS_IsWidescreen() ? SS_STR("WIDE", "宽屏") : SS_STR("ORIGINAL", "原版");
 #endif
 }
 
@@ -1296,7 +1296,7 @@ static void draw_screen_panel(RectFS r) {
   draw_text(SS_STR("BACK","返回"), screen_back_r.x + screen_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2.2f * u) / 2,
             screen_back_r.y + screen_back_r.h / 2 - 9 * u, 2.2f * u);
 
-  const char *edge_value = "FIXED CAMERA";
+  const char *edge_value = SS_STR("FIXED CAMERA", "固定视角");
 #ifdef __3DS__
   if (Platform3DS_GetWideEdgeMode() == kPlatform3DSWideEdgeStandard)
     edge_value = SS_STR("STANDARD","标准");
@@ -1335,6 +1335,25 @@ static void draw_screen_panel(RectFS r) {
   }
 }
 
+// On-screen label for a Load State result.  The English wording stays in
+// dump_state.c (shared with the logs); the Chinese lives here, because the
+// atlas generator scans the bottom-screen sources for the glyphs it bakes.
+static const char *load_result_label(ZeldaDumpStateResult result) {
+#ifdef BOTTOM_SCREEN_CN
+  switch (result) {
+  case kZeldaDumpStateLoaded:   return "已读取";
+  case kZeldaDumpStateNoDump:   return "无转储";
+  case kZeldaDumpStateNoState:  return "无存档";
+  case kZeldaDumpStateInvalid:  return "无效";
+  case kZeldaDumpStateWrongRom: return "版本不符";
+  case kZeldaDumpStateIoError:  return "读写错误";
+  }
+  return "错误";
+#else
+  return DumpState_ResultLabel(result);
+#endif
+}
+
 static void draw_developer_panel(RectFS r) {
   draw_text(SS_STR("DEVELOPER","开发者选项"), r.x + r.w / 2 - text_width(SS_STR("DEVELOPER","开发者选项"), 3 * u) / 2,
             r.y + 18 * u, 3 * u);
@@ -1349,9 +1368,9 @@ static void draw_developer_panel(RectFS r) {
 #else
   show_fps = developer_show_fps;
 #endif
-  const char *load_value = load_result == -2 ? "WAIT" :
+  const char *load_value = load_result == -2 ? SS_STR("WAIT", "等待") :
     (load_result >= 0 && SDL_GetTicks() < load_flash_until ?
-      DumpState_ResultLabel((ZeldaDumpStateResult)load_result) : "LOAD");
+      load_result_label((ZeldaDumpStateResult)load_result) : SS_STR("LOAD", "读取"));
   const char *labels[4] = {
     SS_STR("MEM DUMP","内存转存"), SS_STR("LOAD STATE","读取存档"),
     SS_STR("SHOW FPS","显示帧率"), SS_STR("OVERLAY","叠加层"),
@@ -2536,7 +2555,7 @@ static void draw_second_screen(int logic_frames) {
     UpdateStatus update_status; Updater_GetStatus(&update_status);
     if (update_status.state == UPDATE_AVAILABLE && tab != TAB_SETTINGS) {
       fill_round(18 * u, H - 52 * u, W - 36 * u, 36 * u, 6 * u, COL_BOX);
-      const char *notice = "UPDATE AVAILABLE - OPEN SETTINGS";
+      const char *notice = SS_STR("UPDATE AVAILABLE - OPEN SETTINGS", "发现新版本 - 打开设置");
       draw_text(notice, W / 2 - text_width(notice, 1.6f * u) / 2, H - 40 * u, 1.6f * u);
     }
 #endif
