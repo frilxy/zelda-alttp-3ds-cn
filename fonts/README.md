@@ -8,29 +8,43 @@
 
 ## 文件
 
-| 文件 | 说明 |
+| 文件 | 用途 |
 |---|---|
-| `fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf` | 10px 等宽简体中文点阵字面（原始位图字形，非缩放） |
+| `fusion-pixel-12px-monospaced-zh_hans.ms.bitmap.ttf` | **当前使用**。12px 等宽简体中文点阵字面 |
+| `fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf` | 旧的 10px 字面，保留以便 `--font` 回退对比 |
 | `OFL.txt` | 该字体及其衍生来源的 SIL Open Font License 1.1 |
+
+两把都是**纯位图字面**（没有可缩放轮廓）：只有在自己那一档尺寸下才能光栅化，
+请求其他尺寸会得到**空白字形**。这也是为什么放大只能靠运行时整数倍缩放，
+而不是换字号。
+
+## 为什么是 12px
+
+下屏是 320×240 物理像素，正文在 `u = 0.5` 下以 1.0 倍绘制，所以字形按原始像素
+1:1 落到屏幕上——12px 字面的墨迹是 11×11，正好填满原先 10px（墨迹 9×9）留下的
+上下空隙，而**字身框仍是 16×16、进位仍是 16px**，因此版面无需改动。
+
+再往上只有 16px，而 16px 的中文档在主流像素字体里**没有完整实现**
+（方舟像素 16px 只有 97 个 CJK 字形）。矢量字体在 12px 会因抗锯齿糊成一团，
+到 16px 才勉强可用，且需要把图集从 1-bit 掩码改成带 alpha 才存得下灰阶。
 
 ## 来源
 
 - 上游项目：[TakWolf/fusion-pixel-font](https://github.com/TakWolf/fusion-pixel-font)（SIL OFL 1.1）
 - Release：tag [`2026.08.11`](https://github.com/TakWolf/fusion-pixel-font/releases/tag/2026.08.11)
-- 资产：`fusion-pixel-font-10px-monospaced-ms.bitmap.ttf-v2026.08.11.zip`
+- 12px 资产：`fusion-pixel-font-12px-monospaced-ms.bitmap.ttf-v2026.08.11.zip`
+  （asset id `509931730`，8 827 782 字节）
+- 10px 资产：`fusion-pixel-font-10px-monospaced-ms.bitmap.ttf-v2026.08.11.zip`
   （asset id `509931660`，5 865 652 字节）
-- 包内取出的两个文件：`fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf`、`OFL.txt`
+- 两包内各取出 `…-zh_hans.ms.bitmap.ttf`；`OFL.txt` 取自 12px 包
 
 校验和（`sha256sum`）：
 
 ```
+4e443b6e40c19ecb9bb08bc85091b7d5f48357f3b994c60850a3e3a797fc55f2  fusion-pixel-12px-monospaced-zh_hans.ms.bitmap.ttf
 17df8b7af3def5f81f57346623e239464e9d72c66d2f2f4bb2db1893168eee32  fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf
 bc518cf64b8032c07690f33cc270c35c179255a6ac8efa7c165ebae7e8f76a63  OFL.txt
 ```
-
-> 这把字体是**逐字节可复现**的：用它在 2026-10-11 重新生成 `ss_cjk_data.h`，
-> 输出与仓库中已提交的文件完全一致，因此可以确认就是制作时使用的那一把。
-> 换字体版本会改变字形，`--check` 会立刻报出来。
 
 ## 重新生成图集
 
@@ -42,9 +56,11 @@ pip install Pillow
 
 python tools/secondscreen/gen_cjk_atlas.py --check   # 只检查是否最新
 python tools/secondscreen/gen_cjk_atlas.py           # 重新生成 ss_cjk_data.h
+python tools/secondscreen/gen_cjk_atlas.py --font fonts/fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf
 ```
 
-字体路径由脚本的 `DEFAULT_FONT` 指定；换字体用 `--font PATH` 覆盖。
+字体路径由脚本的 `DEFAULT_FONT` 指定；用 `--font` 可切到 10px 那一档做对比
+（切回去还要把 `BOX`/`OFF_X`/`OFF_Y` 常量一起改回来，见脚本注释）。
 
 **改了下屏中文文案后必须重跑**，否则新字在图集里没有对应字形，会显示成空白。
 脚本会自动扫描 `second_screen.c`、`second_screen_sdl.c`、`updater.c` 里的中文字符，

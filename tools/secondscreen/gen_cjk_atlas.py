@@ -34,7 +34,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.path.join(ROOT, "app", "jni", "src", "src", "ss_cjk_data.h")
 DEFAULT_FONT = os.path.join(
-    ROOT, "fonts", "fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf")
+    ROOT, "fonts", "fusion-pixel-12px-monospaced-zh_hans.ms.bitmap.ttf")
 SOURCES = [
     "app/jni/src/src/platform/linux/second_screen_sdl.c",
     "app/jni/src/src/second_screen.c",
@@ -42,13 +42,15 @@ SOURCES = [
     "platform/3ds/source/updater.c",
 ]
 
-# Rendering parameters.  The 10px face draws into a 10x10 box; the box is blitted
-# at (3, 2) inside the 16x16 cell, which is what the draw code compensates for
-# with its `y - 4 * scale` baseline shift.
+# Rendering parameters.  The face is a native bitmap font, so it only rasterises
+# at its own size: ask for any other size and the glyphs come out empty.  The
+# 12px face draws 11x11 of ink, blitted at (2, 1) inside the 16x16 cell so the
+# ink centre stays at (7, 7) -- the same centre the 10px face had at (3, 2).
+# That is what keeps the draw code's `y - 4 * scale` baseline shift valid.
 CELL = 16
-BOX = 10
-OFF_X = 3
-OFF_Y = 2
+BOX = 12
+OFF_X = 2
+OFF_Y = 1
 BODY = 2
 OUTLINE = 1
 
