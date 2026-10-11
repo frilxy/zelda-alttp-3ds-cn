@@ -11,15 +11,19 @@ that atlas, so the two stay pixel-identical.
 Usage:
     gen_cjk_atlas.py [--font PATH] [--check]
 
+    Requires Python 3 and Pillow (Image/ImageDraw/ImageFont).
+
     --font   10px bitmap face to render with.  Defaults to
-             fonts/fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf, taken
-             from TakWolf/fusion-pixel-font release 2026.08.11:
-             fusion-pixel-font-10px-monospaced-ms.bitmap.ttf-v2026.08.11.zip
+             fonts/fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf, which
+             ships with the repository (see fonts/README.md for the version,
+             the SIL OFL licence and the checksum), so regenerating the atlas
+             needs no network access.
     --check  only report whether ss_cjk_data.h is up to date; write nothing.
 
 The character set is discovered by scanning the bottom-screen sources for CJK
 codepoints, so adding a Chinese string to the UI only requires re-running this
-script.
+script.  Forgetting to re-run it is silent at build time but leaves the new
+characters blank on screen, which is why --check belongs in CI.
 """
 import argparse
 import glob
