@@ -33,8 +33,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.path.join(ROOT, "app", "jni", "src", "src", "ss_cjk_data.h")
-DEFAULT_FONT = os.path.join(
-    ROOT, "fonts", "fusion-pixel-12px-monospaced-zh_hans.ms.bitmap.ttf")
+DEFAULT_FONT = os.path.join(ROOT, "fonts", "unifont-18.0.01.otf")
 SOURCES = [
     "app/jni/src/src/platform/linux/second_screen_sdl.c",
     "app/jni/src/src/second_screen.c",
@@ -43,14 +42,15 @@ SOURCES = [
 ]
 
 # Rendering parameters.  The face is a native bitmap font, so it only rasterises
-# at its own size: ask for any other size and the glyphs come out empty.  The
-# 12px face draws 11x11 of ink, blitted at (2, 1) inside the 16x16 cell so the
-# ink centre stays at (7, 7) -- the same centre the 10px face had at (3, 2).
-# That is what keeps the draw code's `y - 4 * scale` baseline shift valid.
+# at its own size: ask for any other size and the glyphs come out empty (Unifont
+# has strikes at 16 and 32 only).  Unifont's CJK glyph fills its whole em box, so
+# the 16x16 cell is rendered at (0, 0) with no inset, and the draw code paints it
+# straight at the text origin -- the Latin atlas in ss_latin_data.h uses the same
+# origin, which is what keeps the two baselines together.
 CELL = 16
-BOX = 12
-OFF_X = 2
-OFF_Y = 1
+BOX = 16
+OFF_X = 0
+OFF_Y = 0
 BODY = 2
 OUTLINE = 1
 
