@@ -173,17 +173,3 @@ jobs:
           for f in build-3ds/game/*.cia build-3ds/game/*.3dsx cn_language.bin; do
             $GH release upload "$TAG" "$f" --clobber 2>/dev/null || echo "warn: could not upload $f"
           done
-          # Backward compatibility for installs made before the suffix was dropped.
-          # Their updater asks for zelda3-3ds-v<version>-cn-bottom.cia / .3dsx by
-          # name (UPDATE_ASSET_VARIANT), so publish the same bytes under that name
-          # too.  Without it such an install finds no matching asset, the release is
-          # rejected as an invalid candidate and the bottom screen reports
-          # "版本数据无效" instead of offering the update.
-          for f in build-3ds/game/*.cia build-3ds/game/*.3dsx; do
-            base="$(basename "$f")"
-            case "$base" in *-cn-bottom.*) continue ;; esac
-            stem="${base%.*}"; ext="${base##*.}"
-            cp "$f" "/tmp/${stem}-cn-bottom.${ext}"
-            $GH release upload "$TAG" "/tmp/${stem}-cn-bottom.${ext}" --clobber 2>/dev/null \
-              || echo "warn: could not upload the -cn-bottom alias for $base"
-          done
