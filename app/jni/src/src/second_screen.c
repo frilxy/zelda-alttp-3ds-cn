@@ -14,7 +14,8 @@
 #include "messaging.h"
 #include "config.h"
 #include "ss_cjk_data.h"
-#include "ss_latin_data.h"
+#include "ss_cjk_tab_data.h"    // 10px face, bottom tab labels
+#include "ss_cjk_title_data.h"  // 8px face, panel titles drawn at 2x
 #include "zelda_rtl.h"
 #include "snes/ppu.h"
 #include "second_screen_tables.h"
@@ -239,30 +240,6 @@ bool SS_RenderIconSheet(uint32 *px) {
 }
 
 // Glyph sheet: kGlyphCount cells of 8x8, kGlyphCols per row (ss_sheets.h).
-// Digits and A-Z for the bottom screen: 36 cells of 8x16, kSSLatinCount rows of
-// SS_TEXT_COLS, from the atlas baked by tools/secondscreen/gen_latin_sheet.py.
-// Needs no game assets, unlike the tile sheets above.
-bool SS_RenderTextSheet(uint32 *px) {
-  // Kept local rather than using SS_TEXT_COLS from ss_sheets.h: this file is part
-  // of the shared engine and does not include the platform/linux sheet header, the
-  // same reason SS_RenderLetterSheet below uses a literal 16.  Must stay in step
-  // with SS_TEXT_COLS, which is what the SDL side indexes the texture with.
-  const int cols = 16;
-  int w = cols * 8, h = ((kSSLatinCount + cols - 1) / cols) * 16;
-  memset(px, 0, (size_t)w * h * 4);
-  for (int i = 0; i < kSSLatinCount; i++) {
-    const uint8_t *g = kSSLatinGlyphs + i * 32;
-    int x0 = (i % cols) * 8, y0 = (i / cols) * 16;
-    for (int y = 0; y < 16; y++)
-      for (int x = 0; x < 8; x++) {
-        int v = (g[y * 2 + x / 4] >> ((3 - (x % 4)) * 2)) & 3;
-        if (v == 1) px[(y0 + y) * w + x0 + x] = 0xff282830u;
-        else if (v == 2) px[(y0 + y) * w + x0 + x] = 0xfff8f8f8u;
-      }
-  }
-  return true;
-}
-
 bool SS_RenderGlyphSheet(uint32 *px) {
   int w = kGlyphCols * 8, h = ((kGlyphCount + kGlyphCols - 1) / kGlyphCols) * 8;
   if (!SS_AssetsReady()) return false;
@@ -300,11 +277,14 @@ bool SS_RenderLetterSheet(uint32 *px) {
 // (16x16 2bpp: 0=transparent, 1=outline, 2=body), matching the bottom-screen
 // letter style (dark outline + white body).
 #define kSS_CjkCols 16
-bool SS_RenderCjkSheet(uint32 *px) {
-  int w = kSS_CjkCols * 16, h = ((kSSCjkCount + kSS_CjkCols - 1) / kSS_CjkCols) * 16;
+// Three atlases come out of gen_cjk_atlas.py -- body 12px, tab 10px, title 8px --
+// all over the same character list and all with the glyph ink centred on cell
+// pixel (7,7), so one draw offset keeps every face on the same baseline.
+static bool render_cjk_sheet(uint32 *px, const uint8_t *glyphs, int count) {
+  int w = kSS_CjkCols * 16, h = ((count + kSS_CjkCols - 1) / kSS_CjkCols) * 16;
   memset(px, 0, (size_t)w * h * 4);
-  for (int i = 0; i < kSSCjkCount; i++) {
-    const uint8_t *g = kSSCjkGlyphs + i * 64;
+  for (int i = 0; i < count; i++) {
+    const uint8_t *g = glyphs + i * 64;
     int x0 = (i % kSS_CjkCols) * 16, y0 = (i / kSS_CjkCols) * 16;
     for (int y = 0; y < 16; y++)
       for (int x = 0; x < 16; x++) {
@@ -315,6 +295,9 @@ bool SS_RenderCjkSheet(uint32 *px) {
   }
   return true;
 }
+bool SS_RenderCjkSheet(uint32 *px) { return render_cjk_sheet(px, kSSCjkGlyphs, kSSCjkCount); }
+bool SS_RenderCjkTabSheet(uint32 *px) { return render_cjk_sheet(px, kSSCjkTabGlyphs, kSSCjkTabCount); }
+bool SS_RenderCjkTitleSheet(uint32 *px) { return render_cjk_sheet(px, kSSCjkTitleGlyphs, kSSCjkTitleCount); }
 #endif // BOTTOM_SCREEN_CN
 
 // The 512x512 world map, composited from the game's mode-7 map data.

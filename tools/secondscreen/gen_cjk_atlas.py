@@ -1,39 +1,42 @@
 #!/usr/bin/env python3
-"""Regenerate app/jni/src/src/ss_cjk_data.h, the bottom-screen CJK glyph atlas.
+"""Regenerate the bottom-screen Chinese glyph atlases.
 
-The bottom screen draws Simplified Chinese from a tiny baked atlas instead of a
-runtime font: every character used by the bottom-screen UI is rendered once from
-Fusion Pixel's native 10px bitmap face into a 16x16 cell and stored as 2bpp
-(0 = transparent, 1 = outline, 2 = body), 4 bytes per row, 64 bytes per glyph.
-second_screen.c (3DS/Citro) and second_screen_sdl.c (desktop preview) both blit
-that atlas, so the two stay pixel-identical.
+Three faces are baked from the same character list, so one glyph index works for
+all of them; only the texture and the draw scale differ:
+
+  ss_cjk_data.h        Fusion Pixel 12px, drawn at 1x  -- body text
+  ss_cjk_tab_data.h    Fusion Pixel 10px, drawn at 1x  -- bottom tab labels
+  ss_cjk_title_data.h  Fusion Pixel  8px, drawn at 2x  -- panel titles, 14px ink
+
+The 8px face at 2x is the only way to land a heading between the body's 11px and
+22px: Fusion Pixel ships 8/10/12px native sizes only, and any non-integer runtime
+scale of the 12px face puts strokes on fractional pixels -- that is why the old
+1.5x titles looked fuzzy.
+
+A cell is 16x16, 2bpp (0 = transparent, 1 = outline, 2 = body), four pixels per
+byte, 64 bytes per glyph.  Each face's glyph is inset so its ink centre lands on
+cell pixel (7, 7); every face shares that centre, so one draw offset is valid for
+all three.  second_screen.c (3DS) and second_screen_sdl.c (desktop preview) both
+blit these atlases, so the two stay pixel-identical.
 
 Usage:
-    gen_cjk_atlas.py [--font PATH] [--check]
+    gen_cjk_atlas.py [--check] [--face NAME]
 
-    Requires Python 3 and Pillow (Image/ImageDraw/ImageFont).
+    Requires Python 3 and Pillow.
 
-    --font   10px bitmap face to render with.  Defaults to
-             fonts/fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf, which
-             ships with the repository (see fonts/README.md for the version,
-             the SIL OFL licence and the checksum), so regenerating the atlas
-             needs no network access.
-    --check  only report whether ss_cjk_data.h is up to date; write nothing.
+    --check  report whether the headers are up to date; write nothing.
+    --face   restrict to one face (body, tab or title).
 
 The character set is discovered by scanning the bottom-screen sources for CJK
-codepoints, so adding a Chinese string to the UI only requires re-running this
-script.  Forgetting to re-run it is silent at build time but leaves the new
-characters blank on screen, which is why --check belongs in CI.
+codepoints, so adding a Chinese string only requires re-running this script.
+Forgetting to re-run it is silent at build time but leaves the new characters
+blank on screen, which is why --check belongs in CI.
 """
 import argparse
-import glob
 import os
-import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-OUT = os.path.join(ROOT, "app", "jni", "src", "src", "ss_cjk_data.h")
-DEFAULT_FONT = os.path.join(ROOT, "fonts", "unifont-18.0.01.otf")
 SOURCES = [
     "app/jni/src/src/platform/linux/second_screen_sdl.c",
     "app/jni/src/src/second_screen.c",
@@ -41,18 +44,19 @@ SOURCES = [
     "platform/3ds/source/updater.c",
 ]
 
-# Rendering parameters.  The face is a native bitmap font, so it only rasterises
-# at its own size: ask for any other size and the glyphs come out empty (Unifont
-# has strikes at 16 and 32 only).  Unifont's CJK glyph fills its whole em box, so
-# the 16x16 cell is rendered at (0, 0) with no inset, and the draw code paints it
-# straight at the text origin -- the Latin atlas in ss_latin_data.h uses the same
-# origin, which is what keeps the two baselines together.
 CELL = 16
-BOX = 16
-OFF_X = 0
-OFF_Y = 0
 BODY = 2
 OUTLINE = 1
+
+# name, font file, native size, x inset, y inset, header, C prefix, purpose
+FACES = [
+    ("body", "fusion-pixel-12px-monospaced-zh_hans.ms.bitmap.ttf", 12, 2, 1,
+     "ss_cjk_data.h", "kSSCjk", "body text, drawn at 1x"),
+    ("tab", "fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf", 10, 3, 2,
+     "ss_cjk_tab_data.h", "kSSCjkTab", "bottom tab labels, drawn at 1x"),
+    ("title", "fusion-pixel-8px-monospaced-zh_hans.ms.bitmap.ttf", 8, 4, 3,
+     "ss_cjk_title_data.h", "kSSCjkTitle", "panel titles, drawn at 2x (14px ink)"),
+]
 
 
 def is_cjk(ch):
@@ -68,12 +72,12 @@ def used_chars():
     return sorted(seen)
 
 
-def render(font, ch):
+def render(font, off_x, off_y, ch):
     from PIL import Image, ImageDraw
     img = Image.new("L", (CELL, CELL), 0)
-    ImageDraw.Draw(img).text((OFF_X, OFF_Y), ch, font=font, fill=255)
+    ImageDraw.Draw(img).text((off_x, off_y), ch, font=font, fill=255)
     px = img.load()
-    out = bytearray(CELL * 4)
+    out = bytearray(CELL * CELL // 4)
     for y in range(CELL):
         for x in range(CELL):
             v = px[x, y]
@@ -97,60 +101,66 @@ def c_escape(data):
     return "".join(parts)
 
 
-def build(font_path):
+def build(face, chars):
     from PIL import ImageFont
-    chars = used_chars()
-    font = ImageFont.truetype(font_path, BOX)
-    glyphs = [render(font, ch) for ch in chars]
-
+    name, fname, box, ox, oy, header, prefix, purpose = face
+    path = os.path.join(ROOT, "fonts", fname)
+    if not os.path.exists(path):
+        sys.exit("font not found: %s\nsee fonts/README.md for the download URL" % path)
+    font = ImageFont.truetype(path, box)
+    glyphs = [render(font, ox, oy, ch) for ch in chars]
+    for ch, g in zip(chars, glyphs):
+        if not any(g):
+            sys.exit("%s: %r rendered empty -- is %d the native size?" % (name, ch, box))
     lines = [
         "#pragma once",
         "#include <stddef.h>",
         "#include <stdint.h>",
-        "// Bottom-screen Simplified-Chinese glyph atlas, NATIVE 10px Fusion Pixel bitmap"
-        " (crisp), no outline.",
-        "// 16x16 2bpp cell (0=transparent,2=white body), centered 10px glyph,"
-        " one per char in kSSCjkChars order.",
+        "// Bottom-screen Simplified-Chinese glyph atlas -- Fusion Pixel %dpx, %s."
+        % (box, purpose),
+        "// 16x16 2bpp cell (0=transparent, 1=outline, 2=body), 64 bytes per glyph,",
+        "// in %sChars order.  The glyph is inset so its ink centre is cell pixel (7,7),"
+        % prefix,
+        "// the centre every face shares, so one draw offset works for all of them.",
         "// Generated by tools/secondscreen/gen_cjk_atlas.py -- do not edit by hand.",
-        "enum { kSSCjkCount = %d };" % len(chars),
-        'static const char kSSCjkChars[kSSCjkCount*4+1] = "%s";'
-        % c_escape("".join(chars).encode("utf-8")),
-        "static const uint8_t kSSCjkGlyphs[kSSCjkCount*64] = {",
+        "enum { %sCount = %d };" % (prefix, len(chars)),
+        'static const char %sChars[%sCount*4+1] = "%s";'
+        % (prefix, prefix, c_escape("".join(chars).encode("utf-8"))),
+        "static const uint8_t %sGlyphs[%sCount*64] = {" % (prefix, prefix),
     ]
     for g in glyphs:
         lines.append("  " + ", ".join("0x%02x" % b for b in g) + ",")
     lines.append("};")
-    return "\n".join(lines) + "\n", chars, glyphs
+    return "\n".join(lines) + "\n"
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--font", default=DEFAULT_FONT)
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--face", choices=[f[0] for f in FACES], default=None)
     args = ap.parse_args()
 
-    if not os.path.exists(args.font):
-        sys.exit("font not found: %s\nsee the module docstring for the download URL"
-                 % args.font)
-    text, chars, _ = build(args.font)
-    current = None
-    if os.path.exists(OUT):
-        with open(OUT, encoding="utf-8") as fh:
-            current = fh.read()
-
-    if args.check:
-        if current == text:
-            print("ss_cjk_data.h is up to date (%d glyphs)" % len(chars))
-            return 0
-        old = re.search(r"kSSCjkCount = (\d+)", current or "")
-        print("ss_cjk_data.h is OUT OF DATE (have %s, need %d glyphs)"
-              % (old.group(1) if old else "?", len(chars)))
-        return 1
-
-    with open(OUT, "w", encoding="utf-8") as fh:
-        fh.write(text)
-    print("wrote %s (%d glyphs)" % (os.path.relpath(OUT, ROOT), len(chars)))
-    return 0
+    chars = used_chars()
+    faces = [f for f in FACES if args.face is None or f[0] == args.face]
+    stale = []
+    for face in faces:
+        name, _, _, _, _, header, _, _ = face
+        out = os.path.join(ROOT, "app", "jni", "src", "src", header)
+        text = build(face, chars)
+        cur = open(out, encoding="utf-8").read() if os.path.exists(out) else ""
+        if args.check:
+            ok = cur == text
+            print("%-22s %s (%d glyphs)" % (header,
+                  "up to date" if ok else "OUT OF DATE -- re-run gen_cjk_atlas.py",
+                  len(chars)))
+            if not ok:
+                stale.append(header)
+            continue
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        print("wrote %s (%d glyphs, %s)" % (os.path.relpath(out, ROOT), len(chars), name))
+    return 1 if stale else 0
 
 
 if __name__ == "__main__":
