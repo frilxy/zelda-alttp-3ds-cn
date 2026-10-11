@@ -149,7 +149,8 @@ jobs:
           Assets: install the .cia with FBI, or copy the .3dsx for the Homebrew Launcher.
           The *-cn-bottom packages also translate the bottom screen.
 
-          The in-game updater (bottom screen, UPDATE) installs zelda3-3ds-${TAG}.cia or .3dsx from this repository." \
+          The in-game updater (bottom screen, UPDATE) installs the build matching the one you are running:
+          zelda3-3ds-${TAG}.cia or .3dsx, or the -cn-bottom pair if that is what you installed." \
             --target "$GITHUB_SHA" \
             --latest
           # Upload build assets separately; splitting create from upload avoids

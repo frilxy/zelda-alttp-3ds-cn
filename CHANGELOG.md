@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.2.2
+
+- Fixed the in-game updater on the -cn-bottom build. It asked for
+  zelda3-3ds-v<version>.cia whether or not the running build translated the
+  bottom screen, so updating a -cn-bottom install silently replaced it with the
+  standard build and the bottom screen reverted to English. The updater now
+  requests the variant it is running; build.sh already names the assets that way.
+- platform/3ds/README.md: the v3.2 release link said v3.2 while pointing at the
+  v3.2.1 tag.
+
 ## v3.2.1
 
 - Finished the bottom-screen Chinese: the update banner, the Display Mode and
