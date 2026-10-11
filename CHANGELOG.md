@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.2.7
+
+- Panel titles and bottom tab labels both move to the 12px body face at 1.5x
+  (16.5px).  Titles were the 8px face at 2x (14px) and still read as too small on
+  hardware; the tab labels had just gone back to 1x (11px) and read as too small
+  too.  Both now share one size and one face, separated by position and container.
+- Drops the 8px title atlas: the bottom screen is back to a single CJK atlas.
+- Known trade-off: a 1.5x nearest-neighbour scale of a pixel font duplicates
+  pixels unevenly, so stroke widths vary slightly.  That is inherent to a
+  non-integer scale; the integer alternative (2x = 22px) is too large.
+- Fit checked: the tab buttons are 88.7x34px and 16.5px text is 48px wide in a
+  24px cell; every panel's first row starts at 27.5-41px while title ink ends at
+  21px, so nothing collides.
+
 ## v3.2.6
 
 - The bottom tab labels (GEAR / MAP / ITEMS) go back to the 12px face at 1x, the

@@ -14,7 +14,6 @@
 #include "messaging.h"
 #include "config.h"
 #include "ss_cjk_data.h"
-#include "ss_cjk_title_data.h"  // 8px face, panel titles drawn at 2x
 #include "zelda_rtl.h"
 #include "snes/ppu.h"
 #include "second_screen_tables.h"
@@ -295,7 +294,6 @@ static bool render_cjk_sheet(uint32 *px, const uint8_t *glyphs, int count) {
   return true;
 }
 bool SS_RenderCjkSheet(uint32 *px) { return render_cjk_sheet(px, kSSCjkGlyphs, kSSCjkCount); }
-bool SS_RenderCjkTitleSheet(uint32 *px) { return render_cjk_sheet(px, kSSCjkTitleGlyphs, kSSCjkTitleCount); }
 #endif // BOTTOM_SCREEN_CN
 
 // The 512x512 world map, composited from the game's mode-7 map data.

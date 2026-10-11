@@ -49,7 +49,6 @@ enum Platform3DSCStickMode {
 #include "second_screen_shapes.h"
 #include "ss_textures.h"           // baked theme background tiles (menu/parchment/stone)
 #include "ss_cjk_data.h"           // bottom-screen Simplified-Chinese glyph atlas
-#include "ss_cjk_title_data.h"     // 8px face for panel titles, drawn at 2x
 #include "ss_tex_triforce.h"       // baked AA triangle mask for the cinema-screen triforce
 
 #ifdef BOTTOM_SCREEN_CN
@@ -78,7 +77,6 @@ bool SS_RenderGlyphSheet(uint32_t *px);
 bool SS_RenderLetterSheet(uint32_t *px);
 #ifdef BOTTOM_SCREEN_CN
 bool SS_RenderCjkSheet(uint32_t *px);
-bool SS_RenderCjkTitleSheet(uint32_t *px);
 #endif
 bool SS_RenderWorldMap(uint32_t *px, bool dark);
 bool SS_GetMirrorPortal(int *out);
@@ -191,7 +189,6 @@ static SDL_Texture *tex_map[2], *tex_icons, *tex_glyphs, *tex_letters, *tex_face
 // atlas at the call site.  In the standard build all three stay NULL; CJK strings
 // never reach them (SS_STR returns English) and ASCII uses the game's tile font.
 static SDL_Texture *tex_cjk;        // 12px face, body text
-static SDL_Texture *tex_cjk_title;  //  8px face, panel titles drawn at 2x
 static SDL_Texture *tex_floor, *tex_mapicons;
 static SDL_Texture *tex_bg_menu, *tex_bg_parch, *tex_bg_stone;
 #ifdef __3DS__
@@ -636,8 +633,6 @@ static bool try_load_art(void) {
 #ifdef BOTTOM_SCREEN_CN
   SS_RenderCjkSheet(buf);
   tex_cjk = make_tex(16 * 16, ((kSSCjkCount + 15) / 16) * 16, buf, true);
-  SS_RenderCjkTitleSheet(buf);
-  tex_cjk_title = make_tex(16 * 16, ((kSSCjkTitleCount + 15) / 16) * 16, buf, true);
 #endif
   SS_RenderLinkFace(buf, 0);
   tex_face = make_tex(16, 16, buf, true);
@@ -898,7 +893,7 @@ static void draw_dungeon(RectFS r, int link_x, int link_y, int room, int dungeon
 
 static void draw_items(RectFS r) {
   menu_box(r, COL_BOX_BORDER);
-  draw_text_tex(SS_STR("ITEMS","道具"), r.x + r.w / 2 - text_width(SS_STR("ITEMS","道具"), 4 * u) / 2, r.y + 18 * u, 4 * u, tex_cjk_title);
+  draw_text_tex(SS_STR("ITEMS","道具"), r.x + r.w / 2 - text_width(SS_STR("ITEMS","道具"), 3 * u) / 2, r.y + 18 * u, 3 * u, tex_cjk);
 
   float cw1 = (r.w - 70 * u) / 5, cw2 = (r.h - 100 * u) / 4;
   float cellW = cw1 < cw2 ? cw1 : cw2;
@@ -933,8 +928,8 @@ static void draw_gear(RectFS r) {
   // Panel-title face at 2x, like every other heading on this screen (was the 5x7
   // tiny font at a non-integer 1.4x, which also made the characters fuzzy).
   draw_text_tex(SS_STR("GEAR","装备"),
-                r.x + r.w / 2 - text_width(SS_STR("GEAR","装备"), 4 * u) / 2,
-                r.y + 12 * u, 4 * u, tex_cjk_title);
+                r.x + r.w / 2 - text_width(SS_STR("GEAR","装备"), 3 * u) / 2,
+                r.y + 12 * u, 3 * u, tex_cjk);
 
   int sword = sram8(0x59), shield = sram8(0x5A);
   int gear_cells[7];
@@ -1220,8 +1215,8 @@ static void draw_settings_row(RectFS *row, bool armed) {
 }
 
 static void draw_remap_panel(RectFS r) {
-  draw_text_tex(SS_STR("REMAP BUTTONS","按键设置"), r.x + r.w / 2 - text_width(SS_STR("REMAP BUTTONS","按键设置"), 4 * u) / 2,
-            r.y + 18 * u, 4 * u, tex_cjk_title);
+  draw_text_tex(SS_STR("REMAP BUTTONS","按键设置"), r.x + r.w / 2 - text_width(SS_STR("REMAP BUTTONS","按键设置"), 3 * u) / 2,
+            r.y + 18 * u, 3 * u, tex_cjk);
   remap_back_r = (RectFS){r.x + 14 * u, r.y + 12 * u, 76 * u, 32 * u};
   draw_settings_row(&remap_back_r, false);
   draw_text(SS_STR("BACK","返回"), remap_back_r.x + remap_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
@@ -1306,8 +1301,8 @@ static const char *wide_zoom_label(void) {
 }
 
 static void draw_screen_panel(RectFS r) {
-  draw_text_tex(SS_STR("SCREEN","画面"), r.x + r.w / 2 - text_width(SS_STR("SCREEN","画面"), 4 * u) / 2,
-            r.y + 18 * u, 4 * u, tex_cjk_title);
+  draw_text_tex(SS_STR("SCREEN","画面"), r.x + r.w / 2 - text_width(SS_STR("SCREEN","画面"), 3 * u) / 2,
+            r.y + 18 * u, 3 * u, tex_cjk);
   screen_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&screen_back_r, false);
   draw_text(SS_STR("BACK","返回"), screen_back_r.x + screen_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
@@ -1372,8 +1367,8 @@ static const char *load_result_label(ZeldaDumpStateResult result) {
 }
 
 static void draw_developer_panel(RectFS r) {
-  draw_text_tex(SS_STR("DEVELOPER","开发者选项"), r.x + r.w / 2 - text_width(SS_STR("DEVELOPER","开发者选项"), 4 * u) / 2,
-            r.y + 18 * u, 4 * u, tex_cjk_title);
+  draw_text_tex(SS_STR("DEVELOPER","开发者选项"), r.x + r.w / 2 - text_width(SS_STR("DEVELOPER","开发者选项"), 3 * u) / 2,
+            r.y + 18 * u, 3 * u, tex_cjk);
   developer_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&developer_back_r, false);
   draw_text(SS_STR("BACK","返回"), developer_back_r.x + developer_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
@@ -1414,8 +1409,8 @@ static void draw_developer_panel(RectFS r) {
 static void draw_load_confirmation(RectFS r) {
   const char *title = SS_STR("LOAD STATE", "读取存档");
   draw_text_tex(title,
-            r.x + r.w / 2 - text_width(title, 4 * u) / 2,
-            r.y + 24 * u, 4 * u, tex_cjk_title);
+            r.x + r.w / 2 - text_width(title, 3 * u) / 2,
+            r.y + 24 * u, 3 * u, tex_cjk);
   const char *lines[] = {
     SS_STR("LOAD THE LATEST DUMP", "读取最新存档"),
     SS_STR("FOR THIS ROM PROFILE", "当前游戏存档"),
@@ -1446,8 +1441,8 @@ static void draw_load_confirmation(RectFS r) {
 }
 
 static void draw_developer_overlay_panel(RectFS r) {
-  draw_text_tex(SS_STR("OVERLAY","叠加层"), r.x + r.w / 2 - text_width(SS_STR("OVERLAY","叠加层"), 4 * u) / 2,
-            r.y + 18 * u, 4 * u, tex_cjk_title);
+  draw_text_tex(SS_STR("OVERLAY","叠加层"), r.x + r.w / 2 - text_width(SS_STR("OVERLAY","叠加层"), 3 * u) / 2,
+            r.y + 18 * u, 3 * u, tex_cjk);
   developer_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&developer_back_r, false);
   draw_text(SS_STR("BACK","返回"), developer_back_r.x + developer_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
@@ -1512,8 +1507,8 @@ static void draw_developer_overlay_panel(RectFS r) {
 
 static void draw_update_panel(RectFS r) {
   const char *title = SS_STR("UPDATE", "更新");
-  draw_text_tex(title, r.x + r.w / 2 - text_width(title, 4 * u) / 2,
-            r.y + 18 * u, 4 * u, tex_cjk_title);
+  draw_text_tex(title, r.x + r.w / 2 - text_width(title, 3 * u) / 2,
+            r.y + 18 * u, 3 * u, tex_cjk);
   update_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&update_back_r, false);
   draw_text(SS_STR("BACK", "返回"), update_back_r.x + 16 * u,
@@ -1600,7 +1595,7 @@ static void draw_settings(RectFS r) {
       draw_developer_panel(r);
     return;
   }
-  draw_text_tex(SS_STR("SETTINGS","设置"), r.x + r.w / 2 - text_width(SS_STR("SETTINGS","设置"), 4 * u) / 2, r.y + 18 * u, 4 * u, tex_cjk_title);
+  draw_text_tex(SS_STR("SETTINGS","设置"), r.x + r.w / 2 - text_width(SS_STR("SETTINGS","设置"), 3 * u) / 2, r.y + 18 * u, 3 * u, tex_cjk);
 
   char turbo_value[12];
 #ifdef __3DS__
@@ -1663,12 +1658,11 @@ static void draw_tab_button(RectFS r, const char *label, bool active) {
   fill_round(r.x + 3 * u, r.y + 3 * u, r.w - 6 * u, r.h - 6 * u, 8 * u,
              active ? COL_GOLD : COL_BOX_BORDER2);
   fill_round(r.x + 7 * u, r.y + 7 * u, r.w - 14 * u, r.h - 14 * u, 6 * u, bg);
-  // Body face and size: the 10px face made these read as too small next to the
-  // rest of the screen, and the 12px face is what the body text and the top
-  // screen's dialogue both use.
-  float s = 2 * u;
+  // 12px face at 1.5x, same as the panel titles: at 1x these read as too small
+  // inside the 34px-tall tab buttons.
+  float s = 3 * u;
   if (label)
-    draw_text(label, r.x + r.w / 2 - text_width(label, s) / 2, r.y + r.h / 2 - 16 * u, s);
+    draw_text(label, r.x + r.w / 2 - text_width(label, s) / 2, r.y + r.h / 2 - 8 * s, s);
 }
 
 static void draw_tab_bar(float tab_h) {
