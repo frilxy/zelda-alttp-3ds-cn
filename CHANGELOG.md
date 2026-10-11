@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.2.8
+
+- Panel titles and tab labels now use GNU Unifont's native 16px strike drawn at 1x
+  (15x16 of ink, no scaling at all, so strokes are perfectly even).  They were the
+  12px body face at 1.5x -- about the same size, but a non-integer scale duplicates
+  pixels unevenly and the strokes varied in width.
+- Fixes the "text sits too high" bug from v3.2.7: the tab label's y was written as
+  `r.h / 2 - 8 * s`, which at 1.5x pushed the cell top 1px outside the button.
+  Both are now centred from the measured ink box: tabs at `r.h / 2 - 8 * u` (cell
+  9..25, centre 17 = the button's centre) and titles at `r.y + 20 * u` (ink 6..22).
+- Trade-off: titles and tabs are Unifont while body text stays Fusion Pixel.  That
+  is what a real 16px with zero scaling costs -- Fusion Pixel has no 16px cut.
+
 ## v3.2.7
 
 - Panel titles and bottom tab labels both move to the 12px body face at 1.5x

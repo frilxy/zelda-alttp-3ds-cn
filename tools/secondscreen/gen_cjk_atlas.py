@@ -50,6 +50,9 @@ OUTLINE = 1
 FACES = [
     ("body", "fusion-pixel-12px-monospaced-zh_hans.ms.bitmap.ttf", 12, 2, 1,
      "ss_cjk_data.h", "kSSCjk", "body text and tab labels, drawn at 1x"),
+    ("large", "unifont-18.0.01.otf", 16, 0, 0,
+     "ss_cjk_large_data.h", "kSSCjkLarge",
+     "panel titles and tab labels, drawn at 1x (16px ink)"),
 ]
 
 
