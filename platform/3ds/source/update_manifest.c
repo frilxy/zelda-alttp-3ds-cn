@@ -58,7 +58,7 @@ static bool candidate(json_t *o, bool pre, bool homebrew, UpdateRelease *out) {
   if (!text(o, "tag_name", tag, sizeof(tag)) || !Update_ValidVersion(tag)) return false;
   const char *v = tag[0] == 'v' ? tag + 1 : tag;
   char name[96], expected[512];
-  snprintf(name, sizeof(name), "zelda3-3ds-v%s.%s", v, homebrew ? "3dsx" : "cia");
+  snprintf(name, sizeof(name), "zelda3-3ds-v%s%s.%s", v, UPDATE_ASSET_VARIANT, homebrew ? "3dsx" : "cia");
   snprintf(expected, sizeof(expected), "https://github.com/" UPDATE_REPOSITORY "/releases/download/%s/%s", tag, name);
   json_t *assets = json_object_get(o, "assets"), *a; size_t i; bool found = false;
   if (!json_is_array(assets)) return false;

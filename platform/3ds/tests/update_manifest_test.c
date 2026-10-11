@@ -6,7 +6,7 @@
 #include <string.h>
 static json_t *make(const char *tag, bool pre, bool homebrew) {
   char url[512], name[100]; const char *v=tag[0]=='v'?tag+1:tag;
-  snprintf(name,sizeof(name),"zelda3-3ds-v%s.%s",v,homebrew?"3dsx":"cia");
+  snprintf(name,sizeof(name),"zelda3-3ds-v%s%s.%s",v,UPDATE_ASSET_VARIANT,homebrew?"3dsx":"cia");
   snprintf(url,sizeof(url),"https://github.com/" UPDATE_REPOSITORY "/releases/download/%s/%s",tag,name);
   return json_pack("{s:s,s:b,s:b,s:[{s:s,s:s,s:s,s:i}]}","tag_name",tag,"draft",0,"prerelease",pre,"assets",
     "name",name,"browser_download_url",url,"digest","sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","size",5000000);
