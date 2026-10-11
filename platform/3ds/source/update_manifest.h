@@ -10,11 +10,9 @@
 #define UPDATE_REPOSITORY "frilxy/zelda-alttp-3ds-cn"
 #define UPDATE_MAX_FILE (32u * 1024u * 1024u)
 
-// Every release publishes two builds from the same version: the plain one and
-// fetch the standard build and its bottom screen would revert to English.
-// build.sh appends the very same suffix to the asset names.
-// The bottom screen is always translated now, so there is no variant suffix: one
-// asset pair per release, zelda3-3ds-v<version>.cia / .3dsx.
+// The bottom screen is always translated, so there is no variant suffix and one
+// asset pair per release: zelda3-3ds-v<version>.cia / .3dsx.  build.sh derives its
+// artifact names from the same version string, so the two cannot drift.
 #define UPDATE_ASSET_VARIANT ""
 typedef struct UpdateRelease {
   char version[48];

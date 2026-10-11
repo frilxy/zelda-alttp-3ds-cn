@@ -17,6 +17,25 @@ permissions:
   contents: write
 
 jobs:
+  # Runs on a plain runner, not the devkitARM container: that image has no
+  # Pillow, and gen_cjk_atlas.py --check needs it.  These checks are cheap and
+  # catch the two bug classes this project actually hit -- a source using a symbol
+  # from a header it does not include, and panel text colliding with a title or
+  # running past its box.
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Pillow
+        run: pip install --quiet Pillow
+      - name: Header visibility and panel fit
+        run: |
+          python3 tools/secondscreen/check_headers.py
+          python3 tools/secondscreen/check_panel_fit.py
+      - name: Atlases in sync with the UI strings
+        run: python3 tools/secondscreen/gen_cjk_atlas.py --check
+
   build:
     # devkitPro publishes devkitARM images on Docker Hub with the 3DS
     # toolchain (devkitARM, libctru, citro2d, SDL2 cross files).
@@ -76,12 +95,6 @@ jobs:
             echo "UPDATE_DEPS_ROOT=$PWD/.deps/prefix" >> "$GITHUB_ENV"
           fi
           cat "$GITHUB_ENV"
-
-      - name: Static checks (header visibility, panel fit)
-        run: |
-          python3 tools/secondscreen/check_headers.py
-          python3 tools/secondscreen/check_panel_fit.py
-          python3 tools/secondscreen/gen_cjk_atlas.py --check
 
       - name: Build (3DSX + CIA)
         env:
