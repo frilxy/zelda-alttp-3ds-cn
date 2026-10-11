@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.2.3
+
+- Bottom-screen text now uses the 12px Fusion Pixel face: each glyph's ink grows
+  from 9x9 to 11x11, filling the vertical space the 10px face left unused. The
+  cell stays 16x16 and the advance stays 16px per character, so no layout
+  constant changed.
+- Every text scale is now an integer multiple. Panel titles were drawn at 1.5x,
+  back buttons at 1.10x and the update banner at 0.80x; with nearest-neighbour
+  sampling that made strokes alternate between one and two pixels wide, and the
+  0.80x banner was genuinely discarding pixels. Body text stays 1.0x and panel
+  titles become 2.0x.
+- The 12px face ships in fonts/ alongside the old 10px one, so the atlas can be
+  regenerated offline and switched back with --font.
+
 ## v3.2.2
 
 - Fixed the in-game updater on the -cn-bottom build. It asked for
