@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.2.4
+
+- The bottom screen now uses GNU Unifont's native 16px bitmap strike for Chinese,
+  replacing the 12px Fusion Pixel face.  Unifont covers 20992 Simplified-Chinese
+  codepoints and its 16px strike is a pure 1-bit bitmap, so the 2bpp atlas format
+  and both renderers are unchanged.
+- Latin glyphs now come from Unifont too: a half-width 8x16 design sharing the CJK
+  em box, so digits and A-Z sit on the same baseline as the Chinese.  They used to
+  come from the game's own 8x8 tile font (~5x7 of ink), which read as a visibly
+  different face next to 16px CJK.  Bottom-screen text no longer needs the game
+  assets at all; icons still do.
+- Every panel's vertical rhythm was re-tuned.  3.2.3's y positions assumed a ~10px
+  text block; a 16px block is 60% taller, so screen, developer, settings, remap,
+  overlay, items, load-confirmation and update all needed new row heights and
+  start offsets.  Horizontal layout is unaffected: text_width() counts 16px per
+  CJK and 8px per ASCII regardless of glyph size.
+- New generator tools/secondscreen/gen_latin_sheet.py bakes the digits-and-A-Z
+  sheet; gen_cjk_atlas.py now reads the Unifont face.
+
 ## v3.2.3
 
 - Bottom-screen text now uses the 12px Fusion Pixel face: each glyph's ink grows

@@ -20,8 +20,8 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 | 版本 | 内容 |
 |---|---|
-| **标准版** `zelda3-3ds-v3.2.3` | 对话全中文，下屏仍为英文 |
-| **下屏汉化版** `zelda3-3ds-v3.2.3-cn-bottom` | 对话 + **下屏菜单/设置/地图 UI 全中文** |
+| **标准版** `zelda3-3ds-v3.2.4` | 对话全中文，下屏仍为英文 |
+| **下屏汉化版** `zelda3-3ds-v3.2.4-cn-bottom` | 对话 + **下屏菜单/设置/地图 UI 全中文** |
 
 > 想要下屏中文就用 **`-cn-bottom`** 那个。
 
@@ -44,6 +44,20 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 ---
 
 ## 本 fork 的更新
+
+### v3.2.4 — 下屏改用 16px 全字集点阵，拉丁同源
+
+- **中文换成 GNU Unifont 的 16px 原生点阵**（墨迹 15×16，填满整个字身框）。
+  Unifont 完整覆盖 BMP，简体中文有 **20 992 个字形**，且 16px 档是
+  **纯 1-bit 点阵**——所以 2bpp 图集格式和两个渲染后端都不用改。
+- **拉丁也换成 Unifont 自己的半宽 8×16**，与中文同字体、同 em 框、同基线。
+  此前下屏的 0-9 与 A-Z 取自游戏自带的 8×8 tile 字模（约 5×7 墨迹），
+  和 16px 中文并排明显脱节。文本渲染因此**不再依赖游戏资源**（图标仍依赖）。
+- **版面为 16px 重排**。3.2.3 的 y 坐标是按 ~10px 文字块调的，16px 块高了 60%，
+  所以画面/开发者/设置/按键设置/叠加层/道具/读取存档/更新**八个页面**的行高
+  与起始位置全部重算。横向不受影响：`text_width()` 按字符数计算
+  （中文 16px、ASCII 8px），与字形大小无关。
+- 字体与生成脚本见 [`fonts/README.md`](fonts/README.md)。
 
 ### v3.2.3 — 下屏字体与缩放
 
@@ -97,7 +111,7 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 > ⚠️ 上游更新器默认指向 **上游仓库**，那会把汉化版覆盖掉。本 fork 已把它改成本仓库
 > （`platform/3ds/source/update_manifest.h` 的 `UPDATE_REPOSITORY`），只安装本项目的
-> `zelda3-3ds-v3.2.3.cia / .3dsx`。
+> `zelda3-3ds-v3.2.4.cia / .3dsx`。
 > 另注：上屏日志用的是 ASCII 定宽字体（`Update_FormatNotes` 会丢弃所有 ≥128 的字节），
 > 因此本仓库的 Release 说明保持英文。
 
@@ -105,12 +119,12 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 版本号就是上游版本号，所以判断逻辑很简单：**版本号没变，游戏内不会提示更新**。
 
-- 装的是 `v3.2.3`，重建同一版本 → 显示 **`已是最新版本`**，按钮只会做「检查更新」，不会重复下载安装；
+- 装的是 `v3.2.4`，重建同一版本 → 显示 **`已是最新版本`**，按钮只会做「检查更新」，不会重复下载安装；
 - 只有版本号**变大**（上游发布更高的 `3.x`，或我们提升 `platform/3ds/CMakeLists.txt` 里的
   `ZELDA3_3DS_VERSION`）才会提示「发现新版本」并允许下载安装。
 
 更新器会安装**和你当前所装一致的那个变体**：装的是标准版就装标准版，装的是 `-cn-bottom`
-就装 `-cn-bottom`，不会因为更新把下屏中文弄丢（这一点从 v3.2.3 起修正，
+就装 `-cn-bottom`，不会因为更新把下屏中文弄丢（这一点从 v3.2.4 起修正，
 更早的版本会把 `-cn-bottom` 覆盖成标准版）。
 
 所以「同一版本重编译」的用户不会被反复打扰；要拿新构建直接从 Release 页下载即可
@@ -124,15 +138,15 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 | 文件 | 用途 |
 |---|---|
-| `zelda3-3ds-v3.2.3.cia` | 标准版，FBI 安装（对话中文，下屏英文） |
-| `zelda3-3ds-v3.2.3.3dsx` | 标准版，Homebrew Launcher |
-| `zelda3-3ds-v3.2.3-cn-bottom.cia` | **下屏汉化版**，FBI 安装（下屏也中文） |
-| `zelda3-3ds-v3.2.3-cn-bottom.3dsx` | **下屏汉化版**，Homebrew Launcher |
+| `zelda3-3ds-v3.2.4.cia` | 标准版，FBI 安装（对话中文，下屏英文） |
+| `zelda3-3ds-v3.2.4.3dsx` | 标准版，Homebrew Launcher |
+| `zelda3-3ds-v3.2.4-cn-bottom.cia` | **下屏汉化版**，FBI 安装（下屏也中文） |
+| `zelda3-3ds-v3.2.4-cn-bottom.3dsx` | **下屏汉化版**，Homebrew Launcher |
 | `cn_language.bin` | 备用中文语言块（一般无需使用） |
 
 发布规则：
 
-- Release 的 tag 就是编译进程序的版本号（当前 `v3.2.3`）——游戏内更新器只认这种合法版本号，
+- Release 的 tag 就是编译进程序的版本号（当前 `v3.2.4`）——游戏内更新器只认这种合法版本号，
   所以不使用 `latest` 之类的滚动 tag；`/releases/latest` 依旧指向最新版本。
 - **版本号变化 → 新增一个 Release**（旧版本保留，可随时回退下载）。
 - **同一版本重新构建 → 原地覆盖该版本的 Release**：资产与说明一并替换，tag 指向产生这些产物的那次提交；
@@ -208,7 +222,10 @@ BOTTOM_SCREEN_CN=1 platform/3ds/build.sh   # 下屏汉化版
 - **Zelda3 引擎**：沿用 **MIT 许可**与版权声明，见
   [`app/jni/src/LICENSE.txt`](app/jni/src/LICENSE.txt)（该文件同时含 Opus 的声明）；
 - **SDL2 / SDL2_mixer 等依赖**：各自保留原有许可；
-- **下屏中文字体**：[Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)，
+- **下屏中文字体**：[GNU Unifont](https://unifoundry.com/unifont/)，按 **SIL OFL 1.1**
+  使用（该字体为 OFL 1.1 与 GPLv2+ 含字体嵌入例外 的双许可），
+  见 [`fonts/unifont-LICENSE.txt`](fonts/unifont-LICENSE.txt)；
+- **备用下屏字体**：[Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)，
   SIL OFL 1.1，见 [`fonts/OFL.txt`](fonts/OFL.txt)。
 
 仓库内容范围：
