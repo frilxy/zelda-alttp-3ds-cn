@@ -10,20 +10,7 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 本仓库**不包含 ROM**。你需要自备一份合法美版 ROM。
 
-> ✅ 当前状态：**对话文本全中文**；**下屏（第二屏）菜单/UI 也已汉化**（在“下屏汉化版”中）。
-
----
-
-## 两个版本
-
-每次构建会同时出**两个版本**（下方下载里都有）：
-
-| 版本 | 内容 |
-|---|---|
-| **标准版** `zelda3-3ds-v3.2.3` | 对话全中文，下屏仍为英文 |
-| **下屏汉化版** `zelda3-3ds-v3.2.3-cn-bottom` | 对话 + **下屏菜单/设置/地图 UI 全中文** |
-
-> 想要下屏中文就用 **`-cn-bottom`** 那个。
+> ✅ 当前状态：**对话文本与下屏（第二屏）菜单/设置/地图 UI 全部中文化**，无需选择版本。
 
 ---
 
@@ -36,7 +23,7 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 - 下屏（第二屏）另外用 **10px Fusion Pixel 位图字体**渲染中文菜单（清晰、无描边）；
   字形表 `app/jni/src/src/ss_cjk_data.h` 由 `tools/secondscreen/gen_cjk_atlas.py`
   扫描下屏源码里的中文字符自动生成（当前 164 字），改文案后重跑该脚本即可；
-- 更新器的状态提示（正在检查更新 / 下载校验失败 …）在下屏汉化版里也一并中文化；
+- 更新器的状态提示（正在检查更新 / 下载校验失败 …）在下屏也一并中文化；
 - 启动时直接复制内置资源，并强制 `Language = cn` → **默认中文**，无需配置。
 
 > 因此游戏逻辑用的是内置资源包；SD 上的美版 ROM 仅用于**建立游戏 profile**，不会再从它提取/汉化。
@@ -112,20 +99,6 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 > 另注：上屏日志用的是 ASCII 定宽字体（`Update_FormatNotes` 会丢弃所有 ≥128 的字节），
 > 因此本仓库的 Release 说明保持英文。
 
-### 关于「更新」提示（有意如此）
-
-版本号就是上游版本号，所以判断逻辑很简单：**版本号没变，游戏内不会提示更新**。
-
-- 装的是 `v3.2.3`，重建同一版本 → 显示 **`已是最新版本`**，按钮只会做「检查更新」，不会重复下载安装；
-- 只有版本号**变大**（上游发布更高的 `3.x`，或我们提升 `platform/3ds/CMakeLists.txt` 里的
-  `ZELDA3_3DS_VERSION`）才会提示「发现新版本」并允许下载安装。
-
-更新器会安装**和你当前所装一致的那个变体**：装的是标准版就装标准版，装的是 `-cn-bottom`
-就装 `-cn-bottom`，不会因为更新把下屏中文弄丢（这一点从 v3.2.3 起修正，
-更早的版本会把 `-cn-bottom` 覆盖成标准版）。
-
-所以「同一版本重编译」的用户不会被反复打扰；要拿新构建直接从 Release 页下载即可
-（同版本会**原地覆盖**那个 Release，所以 `/releases/latest` 永远指向当前发布的最新构建）。
 
 ---
 
@@ -135,10 +108,8 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 | 文件 | 用途 |
 |---|---|
-| `zelda3-3ds-v3.2.3.cia` | 标准版，FBI 安装（对话中文，下屏英文） |
-| `zelda3-3ds-v3.2.3.3dsx` | 标准版，Homebrew Launcher |
-| `zelda3-3ds-v3.2.3-cn-bottom.cia` | **下屏汉化版**，FBI 安装（下屏也中文） |
-| `zelda3-3ds-v3.2.3-cn-bottom.3dsx` | **下屏汉化版**，Homebrew Launcher |
+| `zelda3-3ds-v3.2.3.cia` | FBI 安装（推荐） |
+| `zelda3-3ds-v3.2.3.3dsx` | Homebrew Launcher |
 | `cn_language.bin` | 备用中文语言块（一般无需使用） |
 
 发布规则：
@@ -153,7 +124,7 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 ## 安装（CIA，推荐）
 
-1. 用 FBI 安装下载的 `.cia`（想下屏中文就装 `-cn-bottom` 那个）。
+1. 用 FBI 安装下载的 `.cia`。
 2. 在 SD 卡创建目录 `sdmc:/3ds/Zelda 3DS/`。
 3. 放入**干净美版 ROM**，命名为 `zelda3.sfc`（用于建立游戏 profile）。
    - ⚠️ **只放这一个**，不要放入其它汉化/修改版 ROM。
@@ -171,7 +142,8 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 ### GitHub Actions（自动）
 
-每次 `push` / 手动触发，都会在 devkitARM 容器里**同时编译两个版本（标准 + 下屏汉化）**，并按上面的规则发布 Release（新版本新增、同版本覆盖）。
+每次 `push` / 手动触发都会在 devkitARM 容器里**编译唯一的那个构建**，并按上面的规则发布 Release（新版本新增、同版本覆盖）。
+另有一个轻量 job 在普通 runner 上跑静态检查（头文件可见性、面板适配、图集是否与文案同步）。
 
 CI 会**从源码编译 `makerom`**（[3DSGuy/Project_CTR](https://github.com/3DSGuy/Project_CTR)）和 **`bannertool`**（[Epicpkmn11/bannertool](https://github.com/Epicpkmn11/bannertool)），因此不需要预装 devkitPro 工具。
 
@@ -185,11 +157,10 @@ CI 会**从源码编译 `makerom`**（[3DSGuy/Project_CTR](https://github.com/3D
 
 ```sh
 chmod +x platform/3ds/build.sh
-platform/3ds/build.sh                 # 标准版
-BOTTOM_SCREEN_CN=1 platform/3ds/build.sh   # 下屏汉化版
+platform/3ds/build.sh
 ```
 
-产物在 `build-3ds/game/`（标准版）与 `build-3ds-cn-bottom/game/`（下屏汉化版）下。
+产物在 `build-3ds/game/` 下。
 
 ---
 
@@ -199,7 +170,7 @@ BOTTOM_SCREEN_CN=1 platform/3ds/build.sh   # 下屏汉化版
 - 显示模式：宽屏改版 / 拉伸原版 / 原版比例。
 - 加速倍率：关闭 / ×2 / ×3 / ×4 / ×5（New 3DS 可用 ZL 或 C-Stick 按住）。
 - 下屏设置：`画面` / `加速倍率` / `开发者选项` / `更新` / `重启`。
-- 下屏 `更新`：检查并安装本仓库的最新版本（需 Wi-Fi），会安装与你当前所装一致的变体；
+- 下屏 `更新`：检查并安装本仓库的最新版本（需 Wi-Fi）；
   点版本名可在**上屏**看更新日志。
 - 快速诊断：按 `L + R + A` 生成内存 + 双屏截图转储。
 
