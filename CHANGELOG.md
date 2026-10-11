@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.2.1
+
+- Finished the bottom-screen Chinese: the update banner, the Display Mode and
+  Edge Mode values, the remap "press key" prompt, and the Load State button with
+  its result labels are translated now.
+- The developer overlay and the pad/button names stay English on purpose, so
+  diagnostics keep matching upstream and bug reports stay comparable.
+- The bottom-screen glyph atlas grew from 164 to 176 characters.
+- The Fusion Pixel 10px bitmap face now ships in fonts/, so the atlas can be
+  regenerated without network access; fonts/README.md records its version,
+  licence and checksums.
+
 ## v3.2
 
 - Optimized update downloads and installation.
