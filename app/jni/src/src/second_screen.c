@@ -14,6 +14,7 @@
 #include "messaging.h"
 #include "config.h"
 #include "ss_cjk_data.h"
+#include "ss_latin_data.h"
 #include "zelda_rtl.h"
 #include "snes/ppu.h"
 #include "second_screen_tables.h"
@@ -238,6 +239,25 @@ bool SS_RenderIconSheet(uint32 *px) {
 }
 
 // Glyph sheet: kGlyphCount cells of 8x8, kGlyphCols per row (ss_sheets.h).
+// Digits and A-Z for the bottom screen: 36 cells of 8x16, kSSLatinCount rows of
+// SS_TEXT_COLS, from the atlas baked by tools/secondscreen/gen_latin_sheet.py.
+// Needs no game assets, unlike the tile sheets above.
+bool SS_RenderTextSheet(uint32 *px) {
+  int w = SS_TEXT_COLS * 8, h = ((kSSLatinCount + SS_TEXT_COLS - 1) / SS_TEXT_COLS) * 16;
+  memset(px, 0, (size_t)w * h * 4);
+  for (int i = 0; i < kSSLatinCount; i++) {
+    const uint8_t *g = kSSLatinGlyphs + i * 32;
+    int x0 = (i % SS_TEXT_COLS) * 8, y0 = (i / SS_TEXT_COLS) * 16;
+    for (int y = 0; y < 16; y++)
+      for (int x = 0; x < 8; x++) {
+        int v = (g[y * 2 + x / 4] >> ((3 - (x % 4)) * 2)) & 3;
+        if (v == 1) px[(y0 + y) * w + x0 + x] = 0xff282830u;
+        else if (v == 2) px[(y0 + y) * w + x0 + x] = 0xfff8f8f8u;
+      }
+  }
+  return true;
+}
+
 bool SS_RenderGlyphSheet(uint32 *px) {
   int w = kGlyphCols * 8, h = ((kGlyphCount + kGlyphCols - 1) / kGlyphCols) * 8;
   if (!SS_AssetsReady()) return false;
