@@ -49,7 +49,6 @@ enum Platform3DSCStickMode {
 #include "second_screen_shapes.h"
 #include "ss_textures.h"           // baked theme background tiles (menu/parchment/stone)
 #include "ss_cjk_data.h"           // bottom-screen Simplified-Chinese glyph atlas
-#include "ss_cjk_tab_data.h"       // 10px face for the bottom tab labels
 #include "ss_cjk_title_data.h"     // 8px face for panel titles, drawn at 2x
 #include "ss_tex_triforce.h"       // baked AA triangle mask for the cinema-screen triforce
 
@@ -79,7 +78,6 @@ bool SS_RenderGlyphSheet(uint32_t *px);
 bool SS_RenderLetterSheet(uint32_t *px);
 #ifdef BOTTOM_SCREEN_CN
 bool SS_RenderCjkSheet(uint32_t *px);
-bool SS_RenderCjkTabSheet(uint32_t *px);
 bool SS_RenderCjkTitleSheet(uint32_t *px);
 #endif
 bool SS_RenderWorldMap(uint32_t *px, bool dark);
@@ -193,7 +191,6 @@ static SDL_Texture *tex_map[2], *tex_icons, *tex_glyphs, *tex_letters, *tex_face
 // atlas at the call site.  In the standard build all three stay NULL; CJK strings
 // never reach them (SS_STR returns English) and ASCII uses the game's tile font.
 static SDL_Texture *tex_cjk;        // 12px face, body text
-static SDL_Texture *tex_cjk_tab;    // 10px face, bottom tab labels
 static SDL_Texture *tex_cjk_title;  //  8px face, panel titles drawn at 2x
 static SDL_Texture *tex_floor, *tex_mapicons;
 static SDL_Texture *tex_bg_menu, *tex_bg_parch, *tex_bg_stone;
@@ -639,8 +636,6 @@ static bool try_load_art(void) {
 #ifdef BOTTOM_SCREEN_CN
   SS_RenderCjkSheet(buf);
   tex_cjk = make_tex(16 * 16, ((kSSCjkCount + 15) / 16) * 16, buf, true);
-  SS_RenderCjkTabSheet(buf);
-  tex_cjk_tab = make_tex(16 * 16, ((kSSCjkTabCount + 15) / 16) * 16, buf, true);
   SS_RenderCjkTitleSheet(buf);
   tex_cjk_title = make_tex(16 * 16, ((kSSCjkTitleCount + 15) / 16) * 16, buf, true);
 #endif
@@ -1668,10 +1663,12 @@ static void draw_tab_button(RectFS r, const char *label, bool active) {
   fill_round(r.x + 3 * u, r.y + 3 * u, r.w - 6 * u, r.h - 6 * u, 8 * u,
              active ? COL_GOLD : COL_BOX_BORDER2);
   fill_round(r.x + 7 * u, r.y + 7 * u, r.w - 14 * u, r.h - 14 * u, 6 * u, bg);
+  // Body face and size: the 10px face made these read as too small next to the
+  // rest of the screen, and the 12px face is what the body text and the top
+  // screen's dialogue both use.
   float s = 2 * u;
   if (label)
-    draw_text_tex(label, r.x + r.w / 2 - text_width(label, s) / 2,
-                  r.y + r.h / 2 - 16 * u, s, tex_cjk_tab);
+    draw_text(label, r.x + r.w / 2 - text_width(label, s) / 2, r.y + r.h / 2 - 16 * u, s);
 }
 
 static void draw_tab_bar(float tab_h) {

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Regenerate the bottom-screen Chinese glyph atlases.
 
-Three faces are baked from the same character list, so one glyph index works for
-all of them; only the texture and the draw scale differ:
+Two faces are baked from the same character list, so one glyph index works for
+both; only the texture and the draw scale differ:
 
   ss_cjk_data.h        Fusion Pixel 12px, drawn at 1x  -- body text
-  ss_cjk_tab_data.h    Fusion Pixel 10px, drawn at 1x  -- bottom tab labels
   ss_cjk_title_data.h  Fusion Pixel  8px, drawn at 2x  -- panel titles, 14px ink
 
 The 8px face at 2x is the only way to land a heading between the body's 11px and
@@ -51,9 +50,7 @@ OUTLINE = 1
 # name, font file, native size, x inset, y inset, header, C prefix, purpose
 FACES = [
     ("body", "fusion-pixel-12px-monospaced-zh_hans.ms.bitmap.ttf", 12, 2, 1,
-     "ss_cjk_data.h", "kSSCjk", "body text, drawn at 1x"),
-    ("tab", "fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf", 10, 3, 2,
-     "ss_cjk_tab_data.h", "kSSCjkTab", "bottom tab labels, drawn at 1x"),
+     "ss_cjk_data.h", "kSSCjk", "body text and tab labels, drawn at 1x"),
     ("title", "fusion-pixel-8px-monospaced-zh_hans.ms.bitmap.ttf", 8, 4, 3,
      "ss_cjk_title_data.h", "kSSCjkTitle", "panel titles, drawn at 2x (14px ink)"),
 ]

@@ -11,7 +11,6 @@
 | 文件 | 用途 |
 |---|---|
 | `fusion-pixel-12px-monospaced-zh_hans.ms.bitmap.ttf` | **正文**（下屏正文 + 上屏对话同款） |
-| `fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf` | **底部标签**（9px 墨迹） |
 | `fusion-pixel-8px-monospaced-zh_hans.ms.bitmap.ttf` | **面板标题**，放大 2 倍使用（14px 墨迹） |
 | `fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf` | 旧的 10px 字面，保留以便 `--font` 回退对比 |
 | `OFL.txt` | 该字体及其衍生来源的 SIL Open Font License 1.1 |
@@ -70,13 +69,12 @@ python tools/secondscreen/gen_cjk_atlas.py --font fonts/fusion-pixel-10px-monosp
 
 ## 三级字号（v3.2.5）
 
-`gen_cjk_atlas.py` 一次生成**三张图集**，共用同一字符表与同一墨迹中心 (7,7)，
-所以一个绘制偏移 `y - 4*sc` 对三档都成立、版面常量无需区分：
+`gen_cjk_atlas.py` 一次生成**两张图集**，共用同一字符表与同一墨迹中心 (7,7)，
+所以一个绘制偏移 `y - 4*sc` 对两档都成立、版面常量无需区分：
 
 | 图集 | 字面 | 绘制倍率 | 墨迹 | 用途 |
 |---|---|---|---|---|
 | `ss_cjk_data.h` | 12px | 1× | 11px | 正文 |
-| `ss_cjk_tab_data.h` | 10px | 1× | 9px | 底部标签 |
 | `ss_cjk_title_data.h` | 8px | **2×** | 14px | 面板标题 |
 
 标题为什么是"8px 放大 2 倍"：Fusion Pixel 只有 8/10/12px 原生尺寸，而 12px 字面

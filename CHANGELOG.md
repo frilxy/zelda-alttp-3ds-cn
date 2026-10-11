@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.2.6
+
+- The bottom tab labels (GEAR / MAP / ITEMS) go back to the 12px face at 1x, the
+  same face and size as the body text.  v3.2.5's 10px face read as too small on
+  hardware; these labels sit right next to body-sized rows, so matching them is
+  what looks right.
+- Drops the now-unused 10px atlas and its texture.
+- Panel titles are unchanged at 14px (the 8px face at 2x); that size was confirmed
+  on hardware.
+
 ## v3.2.5
 
 - Body text is back on the Fusion Pixel 12px face, the same face and size the top

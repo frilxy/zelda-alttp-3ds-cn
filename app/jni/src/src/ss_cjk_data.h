@@ -1,7 +1,7 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
-// Bottom-screen Simplified-Chinese glyph atlas -- Fusion Pixel 12px, body text, drawn at 1x.
+// Bottom-screen Simplified-Chinese glyph atlas -- Fusion Pixel 12px, body text and tab labels, drawn at 1x.
 // 16x16 2bpp cell (0=transparent, 1=outline, 2=body), 64 bytes per glyph,
 // in kSSCjkChars order.  The glyph is inset so its ink centre is cell pixel (7,7),
 // the centre every face shares, so one draw offset works for all of them.
