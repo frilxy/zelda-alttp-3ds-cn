@@ -884,7 +884,7 @@ static void draw_dungeon(RectFS r, int link_x, int link_y, int room, int dungeon
 
 static void draw_items(RectFS r) {
   menu_box(r, COL_BOX_BORDER);
-  draw_text(SS_STR("ITEMS","道具"), r.x + r.w / 2 - text_width(SS_STR("ITEMS","道具"), 3 * u) / 2, r.y + 18 * u, 3 * u);
+  draw_text(SS_STR("ITEMS","道具"), r.x + r.w / 2 - text_width(SS_STR("ITEMS","道具"), 4 * u) / 2, r.y + 18 * u, 4 * u);
 
   float cw1 = (r.w - 70 * u) / 5, cw2 = (r.h - 100 * u) / 4;
   float cellW = cw1 < cw2 ? cw1 : cw2;
@@ -1203,12 +1203,12 @@ static void draw_settings_row(RectFS *row, bool armed) {
 }
 
 static void draw_remap_panel(RectFS r) {
-  draw_text(SS_STR("REMAP BUTTONS","按键设置"), r.x + r.w / 2 - text_width(SS_STR("REMAP BUTTONS","按键设置"), 3 * u) / 2,
-            r.y + 18 * u, 3 * u);
+  draw_text(SS_STR("REMAP BUTTONS","按键设置"), r.x + r.w / 2 - text_width(SS_STR("REMAP BUTTONS","按键设置"), 4 * u) / 2,
+            r.y + 18 * u, 4 * u);
   remap_back_r = (RectFS){r.x + 14 * u, r.y + 12 * u, 76 * u, 32 * u};
   draw_settings_row(&remap_back_r, false);
-  draw_text(SS_STR("BACK","返回"), remap_back_r.x + remap_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 1.8f * u) / 2,
-            remap_back_r.y + remap_back_r.h / 2 - 7 * u, 1.8f * u);
+  draw_text(SS_STR("BACK","返回"), remap_back_r.x + remap_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
+            remap_back_r.y + remap_back_r.h / 2 - 7 * u, 2 * u);
 
   // resolve a pending capture from the game thread
   if (remap_arm >= 0) {
@@ -1233,8 +1233,8 @@ static void draw_remap_panel(RectFS r) {
   draw_settings_row(&remap_page_r, false);
   draw_text(remap_first_row == 0 ? SS_STR("MORE","下一页") : SS_STR("TOP","上一页"),
             remap_page_r.x + remap_page_r.w / 2 -
-              text_width(remap_first_row == 0 ? SS_STR("MORE","下一页") : SS_STR("TOP","上一页"), 1.8f * u) / 2,
-            remap_page_r.y + remap_page_r.h / 2 - 7 * u, 1.8f * u);
+              text_width(remap_first_row == 0 ? SS_STR("MORE","下一页") : SS_STR("TOP","上一页"), 2 * u) / 2,
+            remap_page_r.y + remap_page_r.h / 2 - 7 * u, 2 * u);
 
   float row_h = 44 * u, gap = 6 * u;
   float y0 = r.y + 56 * u;
@@ -1246,10 +1246,10 @@ static void draw_remap_panel(RectFS r) {
     bool armed = remap_arm == i;
     draw_settings_row(row, armed);
     float ty = row->y + row->h / 2 - 9 * u;
-    draw_text(kPadCmdNames[i], row->x + 12 * u, ty, 2.1f * u);
+    draw_text(kPadCmdNames[i], row->x + 12 * u, ty, 2 * u);
     const char *v = armed ? SS_STR("PRESS KEY", "请按键")
         : (pad_controls[i] >= 0 && pad_controls[i] < 17 ? kPadButtonLabel[pad_controls[i]] : "----");
-    draw_text(v, row->x + row->w - 12 * u - text_width(v, 2.1f * u), ty, 2.1f * u);
+    draw_text(v, row->x + row->w - 12 * u - text_width(v, 2 * u), ty, 2 * u);
   }
   float bar_x = r.x + r.w - 18 * u;
   float bar_y = y0;
@@ -1289,12 +1289,12 @@ static const char *wide_zoom_label(void) {
 }
 
 static void draw_screen_panel(RectFS r) {
-  draw_text(SS_STR("SCREEN","画面"), r.x + r.w / 2 - text_width(SS_STR("SCREEN","画面"), 3 * u) / 2,
-            r.y + 18 * u, 3 * u);
+  draw_text(SS_STR("SCREEN","画面"), r.x + r.w / 2 - text_width(SS_STR("SCREEN","画面"), 4 * u) / 2,
+            r.y + 18 * u, 4 * u);
   screen_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&screen_back_r, false);
-  draw_text(SS_STR("BACK","返回"), screen_back_r.x + screen_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2.2f * u) / 2,
-            screen_back_r.y + screen_back_r.h / 2 - 9 * u, 2.2f * u);
+  draw_text(SS_STR("BACK","返回"), screen_back_r.x + screen_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
+            screen_back_r.y + screen_back_r.h / 2 - 9 * u, 2 * u);
 
   const char *edge_value = SS_STR("FIXED CAMERA", "固定视角");
 #ifdef __3DS__
@@ -1355,12 +1355,12 @@ static const char *load_result_label(ZeldaDumpStateResult result) {
 }
 
 static void draw_developer_panel(RectFS r) {
-  draw_text(SS_STR("DEVELOPER","开发者选项"), r.x + r.w / 2 - text_width(SS_STR("DEVELOPER","开发者选项"), 3 * u) / 2,
-            r.y + 18 * u, 3 * u);
+  draw_text(SS_STR("DEVELOPER","开发者选项"), r.x + r.w / 2 - text_width(SS_STR("DEVELOPER","开发者选项"), 4 * u) / 2,
+            r.y + 18 * u, 4 * u);
   developer_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&developer_back_r, false);
-  draw_text(SS_STR("BACK","返回"), developer_back_r.x + developer_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2.2f * u) / 2,
-            developer_back_r.y + developer_back_r.h / 2 - 9 * u, 2.2f * u);
+  draw_text(SS_STR("BACK","返回"), developer_back_r.x + developer_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
+            developer_back_r.y + developer_back_r.h / 2 - 9 * u, 2 * u);
 
   bool show_fps = false;
 #ifdef __3DS__
@@ -1397,8 +1397,8 @@ static void draw_developer_panel(RectFS r) {
 static void draw_load_confirmation(RectFS r) {
   const char *title = SS_STR("LOAD STATE", "读取存档");
   draw_text(title,
-            r.x + r.w / 2 - text_width(title, 3 * u) / 2,
-            r.y + 24 * u, 3 * u);
+            r.x + r.w / 2 - text_width(title, 4 * u) / 2,
+            r.y + 24 * u, 4 * u);
   const char *lines[] = {
     SS_STR("LOAD THE LATEST DUMP", "读取最新存档"),
     SS_STR("FOR THIS ROM PROFILE", "当前游戏存档"),
@@ -1429,12 +1429,12 @@ static void draw_load_confirmation(RectFS r) {
 }
 
 static void draw_developer_overlay_panel(RectFS r) {
-  draw_text(SS_STR("OVERLAY","叠加层"), r.x + r.w / 2 - text_width(SS_STR("OVERLAY","叠加层"), 3 * u) / 2,
-            r.y + 18 * u, 3 * u);
+  draw_text(SS_STR("OVERLAY","叠加层"), r.x + r.w / 2 - text_width(SS_STR("OVERLAY","叠加层"), 4 * u) / 2,
+            r.y + 18 * u, 4 * u);
   developer_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&developer_back_r, false);
-  draw_text(SS_STR("BACK","返回"), developer_back_r.x + developer_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2.2f * u) / 2,
-            developer_back_r.y + developer_back_r.h / 2 - 9 * u, 2.2f * u);
+  draw_text(SS_STR("BACK","返回"), developer_back_r.x + developer_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
+            developer_back_r.y + developer_back_r.h / 2 - 9 * u, 2 * u);
 
   char version[32], model[32], fps_now[32], fps_avg[32], core[32],
        display[32], location[48], module[32];
@@ -1495,8 +1495,8 @@ static void draw_developer_overlay_panel(RectFS r) {
 
 static void draw_update_panel(RectFS r) {
   const char *title = SS_STR("UPDATE", "更新");
-  draw_text(title, r.x + r.w / 2 - text_width(title, 3 * u) / 2,
-            r.y + 18 * u, 3 * u);
+  draw_text(title, r.x + r.w / 2 - text_width(title, 4 * u) / 2,
+            r.y + 18 * u, 4 * u);
   update_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&update_back_r, false);
   draw_text(SS_STR("BACK", "返回"), update_back_r.x + 16 * u,
@@ -1583,7 +1583,7 @@ static void draw_settings(RectFS r) {
       draw_developer_panel(r);
     return;
   }
-  draw_text(SS_STR("SETTINGS","设置"), r.x + r.w / 2 - text_width(SS_STR("SETTINGS","设置"), 3 * u) / 2, r.y + 18 * u, 3 * u);
+  draw_text(SS_STR("SETTINGS","设置"), r.x + r.w / 2 - text_width(SS_STR("SETTINGS","设置"), 4 * u) / 2, r.y + 18 * u, 4 * u);
 
   char turbo_value[12];
 #ifdef __3DS__
@@ -1633,8 +1633,8 @@ static void draw_cinema_settings_overlay(void) {
     draw_settings_row(&cinema_back_r, false);
     draw_text(SS_STR("BACK", "返回"),
               cinema_back_r.x + cinema_back_r.w / 2 -
-                text_width(SS_STR("BACK", "返回"), 2.2f * u) / 2,
-              cinema_back_r.y + cinema_back_r.h / 2 - 9 * u, 2.2f * u);
+                text_width(SS_STR("BACK", "返回"), 2 * u) / 2,
+              cinema_back_r.y + cinema_back_r.h / 2 - 9 * u, 2 * u);
   } else {
     cinema_back_r = (RectFS){0, 0, 0, 0};
   }
@@ -2556,7 +2556,7 @@ static void draw_second_screen(int logic_frames) {
     if (update_status.state == UPDATE_AVAILABLE && tab != TAB_SETTINGS) {
       fill_round(18 * u, H - 52 * u, W - 36 * u, 36 * u, 6 * u, COL_BOX);
       const char *notice = SS_STR("UPDATE AVAILABLE - OPEN SETTINGS", "发现新版本 - 打开设置");
-      draw_text(notice, W / 2 - text_width(notice, 1.6f * u) / 2, H - 40 * u, 1.6f * u);
+      draw_text(notice, W / 2 - text_width(notice, 2 * u) / 2, H - 40 * u, 2 * u);
     }
 #endif
     if (tab == TAB_SETTINGS)
