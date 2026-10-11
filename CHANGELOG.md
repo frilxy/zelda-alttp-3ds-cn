@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.2.9
+
+- The gear page title was at `r.y + 12 * u` where the other eight titles use
+  `r.y + 20 * u`, so it sat 4px higher (ink 2..18 instead of 6..22).  Now uniform.
+- Row text on the screen, developer, remap and settings pages used
+  `row->h / 2 - 8 * u` (`- 9 * u` on remap).  Measured against the 12px atlas,
+  whose ink occupies rows 2..12 of the 16px cell with its centre on row 7, that
+  put the ink centre 1 to 1.5px above the row centre.  `- 6 * u` centres it exactly.
+
 ## v3.2.8
 
 - Panel titles and tab labels now use GNU Unifont's native 16px strike drawn at 1x

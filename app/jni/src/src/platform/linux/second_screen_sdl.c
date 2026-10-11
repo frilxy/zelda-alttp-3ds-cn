@@ -934,7 +934,7 @@ static void draw_gear(RectFS r) {
   // tiny font at a non-integer 1.4x, which also made the characters fuzzy).
   draw_text_tex(SS_STR("GEAR","装备"),
                 r.x + r.w / 2 - text_width(SS_STR("GEAR","装备"), 2 * u) / 2,
-                r.y + 12 * u, 2 * u, tex_cjk_large);
+                r.y + 20 * u, 2 * u, tex_cjk_large);
 
   int sword = sram8(0x59), shield = sram8(0x5A);
   int gear_cells[7];
@@ -1262,7 +1262,7 @@ static void draw_remap_panel(RectFS r) {
     *row = (RectFS){r.x + 14 * u, y0 + visible * (row_h + gap), row_w, row_h};
     bool armed = remap_arm == i;
     draw_settings_row(row, armed);
-    float ty = row->y + row->h / 2 - 9 * u;
+    float ty = row->y + row->h / 2 - 6 * u;
     draw_text(kPadCmdNames[i], row->x + 12 * u, ty, 2 * u);
     const char *v = armed ? SS_STR("PRESS KEY", "请按键")
         : (pad_controls[i] >= 0 && pad_controls[i] < 17 ? kPadButtonLabel[pad_controls[i]] : "----");
@@ -1344,7 +1344,7 @@ static void draw_screen_panel(RectFS r) {
       r.w - 56 * u, row_h,
     };
     draw_settings_row(row, false);
-    float ty = row->y + row->h / 2 - 8 * u;
+    float ty = row->y + row->h / 2 - 6 * u;
     draw_text(labels[item], row->x + 16 * u, ty, 2 * u);
     draw_text(values[item],
               row->x + row->w - 16 * u - text_width(values[item], 2 * u),
@@ -1404,7 +1404,7 @@ static void draw_developer_panel(RectFS r) {
     RectFS *row = &developer_row_r[i];
     *row = (RectFS){r.x + 28 * u, y0 + i * (row_h + gap), r.w - 56 * u, row_h};
     draw_settings_row(row, false);
-    float ty = row->y + row->h / 2 - 8 * u;
+    float ty = row->y + row->h / 2 - 6 * u;
     draw_text(labels[i], row->x + 16 * u, ty, 2 * u);
     draw_text(values[i], row->x + row->w - 16 * u - text_width(values[i], 2 * u),
               ty, 2 * u);
@@ -1624,7 +1624,7 @@ static void draw_settings(RectFS r) {
     RectFS *row = &settings_row_r[i];
     *row = (RectFS){r.x + 28 * u, y0 + i * (row_h + gap), r.w - 56 * u, row_h};
     draw_settings_row(row, false);
-    float ty = row->y + row->h / 2 - 8 * u;
+    float ty = row->y + row->h / 2 - 6 * u;
     draw_text(labels[i], row->x + 16 * u, ty, 2 * u);
     if (!values[i]) {
       continue;
