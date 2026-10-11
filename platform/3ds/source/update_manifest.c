@@ -57,26 +57,50 @@ static bool candidate(json_t *o, bool pre, bool homebrew, UpdateRelease *out) {
   char tag[48];
   if (!text(o, "tag_name", tag, sizeof(tag)) || !Update_ValidVersion(tag)) return false;
   const char *v = tag[0] == 'v' ? tag + 1 : tag;
-  char name[96], expected[512];
-  snprintf(name, sizeof(name), "zelda3-3ds-v%s%s.%s", v, UPDATE_ASSET_VARIANT, homebrew ? "3dsx" : "cia");
-  snprintf(expected, sizeof(expected), "https://github.com/" UPDATE_REPOSITORY "/releases/download/%s/%s", tag, name);
-  json_t *assets = json_object_get(o, "assets"), *a; size_t i; bool found = false;
+  // Asset name: zelda3-3ds-v<version>.<ext>, optionally carrying a build suffix
+  // such as the old "-cn-bottom".  Exact name first, then any name that starts
+  // with the same stem and ends with the same extension -- so a suffixed asset is
+  // still found and the release page can carry a single copy of each binary.
+  char stem[96], ext[8];
+  snprintf(stem, sizeof(stem), "zelda3-3ds-v%s", v);
+  snprintf(ext, sizeof(ext), ".%s", homebrew ? "3dsx" : "cia");
+  size_t stem_len = strlen(stem), ext_len = strlen(ext);
+  char plain[96];
+  snprintf(plain, sizeof(plain), "%s%s", stem, ext);
+  json_t *assets = json_object_get(o, "assets"), *a; size_t i;
   if (!json_is_array(assets)) return false;
+  json_t *pick = NULL;
   json_array_foreach(assets, i, a) {
-    char n[96], url[512], digest[80];
-    if (!text(a, "name", n, sizeof(n)) || strcmp(n, name)) continue;
-    if (found || !text(a, "browser_download_url", url, sizeof(url)) || strcmp(url, expected) ||
-        !text(a, "digest", digest, sizeof(digest)) || strlen(digest) != 71 || strncmp(digest, "sha256:", 7)) return false;
-    json_t *s = json_object_get(a, "size");
-    if (!json_is_integer(s) || json_integer_value(s) < 4096 || json_integer_value(s) > UPDATE_MAX_FILE) return false;
+    char n[96];
+    if (!text(a, "name", n, sizeof(n))) continue;
+    if (!strcmp(n, plain)) { pick = a; break; }
+    size_t len = strlen(n);
+    if (!pick && len > stem_len + ext_len && !strncmp(n, stem, stem_len) &&
+        !strcmp(n + len - ext_len, ext)) pick = a;
+  }
+  if (!pick) return false;
+  {
+    char n[96], url[512], digest[80], expected[512];
+    if (!text(pick, "name", n, sizeof(n)) ||
+        !text(pick, "browser_download_url", url, sizeof(url)) ||
+        !text(pick, "digest", digest, sizeof(digest)) || strlen(digest) != 71 ||
+        strncmp(digest, "sha256:", 7)) return false;
+    // The URL must be this repository's download URL for exactly this asset, so a
+    // release cannot redirect the updater at a different host.
+    snprintf(expected, sizeof(expected),
+             "https://github.com/" UPDATE_REPOSITORY "/releases/download/%s/%s", tag, n);
+    if (strcmp(url, expected)) return false;
+    json_t *s = json_object_get(pick, "size");
+    if (!json_is_integer(s) || json_integer_value(s) < 4096 ||
+        json_integer_value(s) > UPDATE_MAX_FILE) return false;
     for (int j = 7; j < 71; j++) if (!isxdigit((unsigned char)digest[j])) return false;
     memset(out, 0, sizeof(*out)); strcpy(out->version, tag); strcpy(out->url, url);
     for (int j = 0; j < 64; j++) out->sha256[j] = tolower((unsigned char)digest[j + 7]);
     json_t *body = json_object_get(o, "body");
     if (json_is_string(body)) snprintf(out->notes, sizeof(out->notes), "%s", json_string_value(body));
-    out->size = (uint32_t)json_integer_value(s); found = true;
+    out->size = (uint32_t)json_integer_value(s);
   }
-  return found;
+  return true;
 }
 int Update_ParseRelease(const char *data, size_t size, bool pre, bool homebrew, UpdateRelease *out) {
   memset(out, 0, sizeof(*out));
