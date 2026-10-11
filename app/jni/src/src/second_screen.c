@@ -243,11 +243,16 @@ bool SS_RenderIconSheet(uint32 *px) {
 // SS_TEXT_COLS, from the atlas baked by tools/secondscreen/gen_latin_sheet.py.
 // Needs no game assets, unlike the tile sheets above.
 bool SS_RenderTextSheet(uint32 *px) {
-  int w = SS_TEXT_COLS * 8, h = ((kSSLatinCount + SS_TEXT_COLS - 1) / SS_TEXT_COLS) * 16;
+  // Kept local rather than using SS_TEXT_COLS from ss_sheets.h: this file is part
+  // of the shared engine and does not include the platform/linux sheet header, the
+  // same reason SS_RenderLetterSheet below uses a literal 16.  Must stay in step
+  // with SS_TEXT_COLS, which is what the SDL side indexes the texture with.
+  const int cols = 16;
+  int w = cols * 8, h = ((kSSLatinCount + cols - 1) / cols) * 16;
   memset(px, 0, (size_t)w * h * 4);
   for (int i = 0; i < kSSLatinCount; i++) {
     const uint8_t *g = kSSLatinGlyphs + i * 32;
-    int x0 = (i % SS_TEXT_COLS) * 8, y0 = (i / SS_TEXT_COLS) * 16;
+    int x0 = (i % cols) * 8, y0 = (i / cols) * 16;
     for (int y = 0; y < 16; y++)
       for (int x = 0; x < 8; x++) {
         int v = (g[y * 2 + x / 4] >> ((3 - (x % 4)) * 2)) & 3;
