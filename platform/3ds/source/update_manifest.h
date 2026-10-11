@@ -11,15 +11,11 @@
 #define UPDATE_MAX_FILE (32u * 1024u * 1024u)
 
 // Every release publishes two builds from the same version: the plain one and
-// "-cn-bottom", which also translates the bottom screen.  A binary has to ask
-// for the variant it is, otherwise updating a -cn-bottom install would silently
 // fetch the standard build and its bottom screen would revert to English.
 // build.sh appends the very same suffix to the asset names.
-#ifdef BOTTOM_SCREEN_CN
-#define UPDATE_ASSET_VARIANT "-cn-bottom"
-#else
+// The bottom screen is always translated now, so there is no variant suffix: one
+// asset pair per release, zelda3-3ds-v<version>.cia / .3dsx.
 #define UPDATE_ASSET_VARIANT ""
-#endif
 typedef struct UpdateRelease {
   char version[48];
   char notes[12289];

@@ -77,15 +77,20 @@ jobs:
           fi
           cat "$GITHUB_ENV"
 
-      - name: Build (3DSX + CIA), both variants
+      - name: Static checks (header visibility, panel fit)
+        run: |
+          python3 tools/secondscreen/check_headers.py
+          python3 tools/secondscreen/check_panel_fit.py
+          python3 tools/secondscreen/gen_cjk_atlas.py --check
+
+      - name: Build (3DSX + CIA)
         env:
           ZELDA3_TOOLS_ROOT: /opt/tools
         run: |
           chmod +x platform/3ds/build.sh
-          echo "== standard (dialogue Chinese, bottom screen English) =="
+          # One artifact pair: the bottom screen is always translated now, so the
+          # old two-variant split and its -cn-bottom suffix are gone.
           platform/3ds/build.sh
-          echo "== bottom-screen Chinese version =="
-          BOTTOM_SCREEN_CN=1 platform/3ds/build.sh
 
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
@@ -94,8 +99,6 @@ jobs:
           path: |
             build-3ds/game/*.cia
             build-3ds/game/*.3dsx
-            build-3ds-cn-bottom/game/*.cia
-            build-3ds-cn-bottom/game/*.3dsx
             cn_language.bin
           if-no-files-found: warn
 
@@ -147,16 +150,13 @@ jobs:
             --notes "Simplified Chinese translation for the 3DS port of A Link to the Past.
 
           Assets: install the .cia with FBI, or copy the .3dsx for the Homebrew Launcher.
-          The *-cn-bottom packages also translate the bottom screen.
+          Both the dialogue and the bottom-screen UI are translated.
 
-          The in-game updater (bottom screen, UPDATE) installs the build matching the one you are running:
-          zelda3-3ds-${TAG}.cia or .3dsx, or the -cn-bottom pair if that is what you installed." \
+          The in-game updater (bottom screen, UPDATE) installs zelda3-3ds-${TAG}.cia or .3dsx." \
             --target "$GITHUB_SHA" \
             --latest
           # Upload build assets separately; splitting create from upload avoids
           # an upload race.
-          for f in build-3ds/game/*.cia build-3ds/game/*.3dsx \
-                   build-3ds-cn-bottom/game/*.cia build-3ds-cn-bottom/game/*.3dsx \
-                   cn_language.bin; do
+          for f in build-3ds/game/*.cia build-3ds/game/*.3dsx cn_language.bin; do
             $GH release upload "$TAG" "$f" --clobber 2>/dev/null || echo "warn: could not upload $f"
           done

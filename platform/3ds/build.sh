@@ -6,13 +6,10 @@ DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
 DEVKITARM="${DEVKITARM:-${DEVKITPRO}/devkitARM}"
 SDL_BUILD="${ROOT}/build-3ds/sdl"
 SDL_PREFIX="${ROOT}/build-3ds/prefix"
-# Build a separate "bottom-screen Chinese" version when BOTTOM_SCREEN_CN=1.
+# The bottom screen is always the Chinese build now: the two-variant split is gone,
+# so there is no -cn-bottom suffix and one artifact pair per release.
 SUFFIX=""
-BSCN_FLAG=OFF
-if [[ "${BOTTOM_SCREEN_CN:-}" == "1" ]]; then
-  SUFFIX="-cn-bottom"
-  BSCN_FLAG=ON
-fi
+BSCN_FLAG=ON
 # The release version has a single source of truth: platform/3ds/CMakeLists.txt.
 # It is compiled into the binary (the in-game updater compares against it) and
 # used for the .3dsx name, so the CIA/3DSX asset names derived from it here can
