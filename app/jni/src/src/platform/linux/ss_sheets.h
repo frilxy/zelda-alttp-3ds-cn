@@ -95,10 +95,3 @@ static const unsigned char kSS_ItemMaxLevel[20] = {4,2,1,1,2,1,1,1,1,1,1,1,3,1,1
 #define SS_GLYPH_MBAR_EMPTY 37
 
 static const unsigned char kSS_LetterCell[26] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25};
-
-// Bottom-screen text sheet (ss_latin_data.h): digits then A-Z, baked from GNU
-// Unifont at 8x16.  Separate from kSS_LetterCell above, which still indexes the
-// game-tile letter sheet that the top-screen updater draws with.
-#define SS_TEXT_COLS 16
-static const unsigned char kSS_TextDigitCell[10]  = {0,1,2,3,4,5,6,7,8,9};
-static const unsigned char kSS_TextLetterCell[26] = {10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35};
