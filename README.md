@@ -185,6 +185,16 @@ BOTTOM_SCREEN_CN=1 platform/3ds/build.sh   # 下屏汉化版
 
 ## 许可与法律
 
+本项目的许可分几层，**这些组件许可都不授予任何任天堂游戏内容的权利**：
+
+- **Zelda3 引擎**：沿用 **MIT 许可**与版权声明，见
+  [`app/jni/src/LICENSE.txt`](app/jni/src/LICENSE.txt)（该文件同时含 Opus 的声明）；
+- **SDL2 / SDL2_mixer 等依赖**：各自保留原有许可；
+- **下屏中文字体**：[Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)，
+  SIL OFL 1.1，见 [`fonts/OFL.txt`](fonts/OFL.txt)。
+
+仓库内容范围：
+
 - 只含源码、构建脚本、可再分发移植资源与补丁/提取逻辑。
 - 不包含 ROM、提取的游戏素材或未经授权的游戏数据。
-- 请自行提供合法获得的美版 ROM。中文翻译与字体遵循其上游开源许可。
+- 请自行提供合法获得的美版 ROM。
