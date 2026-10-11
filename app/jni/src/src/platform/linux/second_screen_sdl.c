@@ -188,11 +188,13 @@ static int           W, H;
 static float         u = 1.0f;
 
 static SDL_Texture *tex_map[2], *tex_icons, *tex_glyphs, *tex_letters, *tex_face;
-#ifdef BOTTOM_SCREEN_CN
+// Declared in every build, not just BOTTOM_SCREEN_CN: draw_text() hands tex_cjk to
+// draw_text_tex() unconditionally, and the titles and tab labels name their own
+// atlas at the call site.  In the standard build all three stay NULL; CJK strings
+// never reach them (SS_STR returns English) and ASCII uses the game's tile font.
 static SDL_Texture *tex_cjk;        // 12px face, body text
 static SDL_Texture *tex_cjk_tab;    // 10px face, bottom tab labels
 static SDL_Texture *tex_cjk_title;  //  8px face, panel titles drawn at 2x
-#endif
 static SDL_Texture *tex_floor, *tex_mapicons;
 static SDL_Texture *tex_bg_menu, *tex_bg_parch, *tex_bg_stone;
 #ifdef __3DS__
