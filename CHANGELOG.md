@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.2.5
+
+- Body text is back on the Fusion Pixel 12px face, the same face and size the top
+  screen's dialogue uses.  v3.2.4's Unifont 16px bought size at the cost of that
+  consistency and is reverted.
+- Panel titles now use the 8px face at 2x (14px of ink).  They were the 12px face
+  at 2x, i.e. 22px, which read as oversized; Fusion Pixel only ships 8/10/12px
+  native cuts and a non-integer scale is fuzzy, so 8px at 2x is the only integer
+  way to land a heading between the body's 11px and 22px.
+- Bottom tab labels now use the 10px face (9px of ink).  They were 3*u = 1.5x,
+  i.e. 16.5px -- too large and fuzzy at the same time.
+- Three non-integer text scales that b17c939 missed are fixed: the map dungeon
+  name (1.5x), the developer overlay rows (1.5x) and the gear page title (1.4x on
+  the 5x7 tiny face).  It only scanned literal scale arguments, and these are
+  variables.
+- All three atlases put the glyph ink centre on cell pixel (7,7), so the existing
+  draw offset and every layout constant still hold.
+
 ## v3.2.4
 
 - The bottom screen now uses GNU Unifont's native 16px bitmap strike for Chinese,
