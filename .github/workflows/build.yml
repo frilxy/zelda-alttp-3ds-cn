@@ -178,34 +178,34 @@ jobs:
             $GH release upload "$TAG" "$f" --clobber 2>/dev/null || echo "warn: could not upload $f"
           done
 
-        - name: Publish the msu preview release
-          # The msu branch is a test branch: it gets its own release so the build
-          # can be sideloaded without touching v<version>, which every installed
-          # copy's in-game updater points at.  The tag deliberately fails
-          # update_manifest.c's parse_version() (`-` must be followed by `E`), so
-          # the updater never offers this preview as an upgrade.
-          if: github.ref == 'refs/heads/msu'
-          env:
-            GH_TOKEN: ${{ github.token }}
-          run: |
-            set -e
-            curl -sL https://github.com/cli/cli/releases/download/v2.98.0/gh_2.98.0_linux_amd64.tar.gz | tar xz -C /tmp
-            GH=/tmp/gh_2.98.0_linux_amd64/bin/gh
-            git config --global --add safe.directory "$GITHUB_WORKSPACE"
-            VERSION="$(platform/3ds/build.sh --print-version)"
-            TAG="v${VERSION}-msu1"
-            echo "publishing preview $TAG"
-            if $GH release view "$TAG" >/dev/null 2>&1; then
-              $GH release delete "$TAG" --yes --cleanup-tag
-            fi
-            if $GH api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
-              $GH api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG"
-            fi
-            $GH release create "$TAG" \
-              --title "Zelda ALTTP 3DS - MSU audio preview ($TAG)" \
-              --notes "Preview build with MSU-1 streaming audio support. Not the regular release." \
-              --target "$GITHUB_SHA" \
-              --prerelease
-            for f in build-3ds-cn-bottom/game/*.cia build-3ds-cn-bottom/game/*.3dsx cn_language.bin; do
-              $GH release upload "$TAG" "$f" --clobber 2>/dev/null || echo "warn: could not upload $f"
-            done
+      - name: Publish the msu preview release
+        # The msu branch is a test branch: it gets its own release so the build
+        # can be sideloaded without touching v<version>, which every installed
+        # copy's in-game updater points at.  The tag deliberately fails
+        # update_manifest.c's parse_version() (`-` must be followed by `E`), so
+        # the updater never offers this preview as an upgrade.
+        if: github.ref == 'refs/heads/msu'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          curl -sL https://github.com/cli/cli/releases/download/v2.98.0/gh_2.98.0_linux_amd64.tar.gz | tar xz -C /tmp
+          GH=/tmp/gh_2.98.0_linux_amd64/bin/gh
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          VERSION="$(platform/3ds/build.sh --print-version)"
+          TAG="v${VERSION}-msu1"
+          echo "publishing preview $TAG"
+          if $GH release view "$TAG" >/dev/null 2>&1; then
+            $GH release delete "$TAG" --yes --cleanup-tag
+          fi
+          if $GH api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            $GH api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG"
+          fi
+          $GH release create "$TAG" \
+            --title "Zelda ALTTP 3DS - MSU audio preview ($TAG)" \
+            --notes "Preview build with MSU-1 streaming audio support. Not the regular release." \
+            --target "$GITHUB_SHA" \
+            --prerelease
+          for f in build-3ds-cn-bottom/game/*.cia build-3ds-cn-bottom/game/*.3dsx cn_language.bin; do
+            $GH release upload "$TAG" "$f" --clobber 2>/dev/null || echo "warn: could not upload $f"
+          done
