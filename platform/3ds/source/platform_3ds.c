@@ -1579,7 +1579,14 @@ static void SetupAudioStart(void) {
   DSP_FlushDataCache(g_setup_music_buffer, music_size);
   DSP_FlushDataCache(g_setup_move_buffer, move_size);
 
-  ndspSetOutputMode(NDSP_OUTPUT_MONO);
+  /* NDSP's output mode is GLOBAL, and the SDL n3ds audio driver never touches
+   * it (it only sets each channel's format). Setting MONO here used to poison
+   * the game's stereo mix for the whole session, because this setup jingle runs
+   * from the ROM selector before SDL opens the audio device.
+   *
+   * The jingle itself stays mono PCM (NDSP_FORMAT_MONO_PCM16 below); a mono
+   * source on a stereo output is legal and plays on both sides. */
+  ndspSetOutputMode(NDSP_OUTPUT_STEREO);
   ndspSetMasterVol(0.75f);
   for (int channel = 0; channel < 2; channel++) {
     float mix[12] = {0};
@@ -3518,10 +3525,39 @@ void Platform3DS_ApplyConfig(struct Config *config) {
     config->features0 |= kFeatures0_ExtendScreen64 |
                          kFeatures0_WidescreenVisualFixes;
   }
-  config->audio_freq = 32000;
-  config->audio_channels = 2;
-  config->audio_samples = 1024;
-  config->enable_msu = 0;
+  /* Audio: stereo, with the sample rate chosen by whether MSU is in use.
+   *
+   * MSU-1 PCM tracks are 44100 Hz 16-bit stereo and the mixer does no rate
+   * conversion, so the output must run at 44100 whenever MSU is in play.
+   *
+   * Cost model: the SPC700 interpreter's work is fixed at 534 samples per frame
+   * regardless of the output rate, so raising the rate only adds DSP resampling
+   * (534 -> 735 output samples, ~+38% on that one stage). Old 3DS has the least
+   * headroom, so it keeps 32000 Hz unless MSU is actually present; New 3DS has
+   * the margin to always run 44100 Hz for the better resampling quality.
+   *
+   * Detection runs here because cwd is already the app folder
+   * (Platform3DS_PrepareStorage chdir'd into it earlier). */
+  {
+    static const char *kMsuProbeTracks[] = { "msu/1.pcm", "msu/0.pcm", "msu1.pcm", "1.pcm" };
+    bool msu_available = false;
+    for (size_t i = 0; i < sizeof(kMsuProbeTracks) / sizeof(kMsuProbeTracks[0]); i++) {
+      if (IsRegularFile(kMsuProbeTracks[i])) {
+        msu_available = true;
+        break;
+      }
+    }
+    /* Old 3DS without MSU keeps the shipped 32000 Hz 3DS rate; everything else
+     * runs 44100 Hz so MSU needs no resampling and plain SPC audio gets the
+     * slightly better ratio. */
+    config->audio_freq = (!msu_available && !g_is_new_3ds) ? 32000 : 44100;
+    config->audio_channels = 2;
+    config->audio_samples = 1024;
+    config->enable_msu = msu_available ? kMsuEnabled_Msu : 0;
+    Platform3DS_LogRuntime("Audio config: %d Hz stereo, MSU %s",
+                           (int)config->audio_freq,
+                           msu_available ? "enabled (track found)" : "disabled (no msu/ track)");
+  }
   config->disable_frame_delay = true;
   Platform3DS_LogRuntime("Runtime settings: display=%d, wide_edge=%d, turbo=%d",
                          (int)g_display_mode,

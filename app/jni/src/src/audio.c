@@ -46,6 +46,15 @@ typedef struct MsuPlayer {
 
 static MsuPlayer g_msu_player;
 
+#ifdef __3DS__
+/* Cap 3DS runtime.log MSU noise: music changes often, and every line is an SD
+ * card open/append. Log the first few transitions only. */
+static int g_msu_log_budget = 24;
+#define g_msu_log (g_msu_log_budget-- > 0)
+#else
+#define g_msu_log 0
+#endif
+
 static void MsuPlayer_Open(MsuPlayer *mp, int orig_track, bool resume_from_snapshot);
 
 static const uint8 kMsuTracksWithRepeat[48] = {
@@ -203,11 +212,35 @@ static void MsuPlayer_Open(MsuPlayer *mp, int orig_track, bool resume_from_snaps
   if (msu_path[0] != '/' && SDL_AndroidGetExternalStoragePath())
     base = SDL_AndroidGetExternalStoragePath();
 #endif
+#ifdef __3DS__
+  /* The 3DS build chdir()s into "sdmc:/3ds/Zelda 3DS" before config parsing, so a
+   * relative msu_path already resolves correctly through fopen(). Absolute
+   * sdmc:/ paths are passed through unchanged. Nothing extra is needed here for
+   * the relative case; keep the branch so an absolute path is never prefixed. */
+  if (msu_path[0] == '/')
+    base = "";
+#endif
   snprintf(fname, sizeof(fname), "%s%s%s%d.%s", base, *base ? "/" : "", msu_path, actual_track, mp->enabled & kMsuEnabled_Opuz ? "opuz" : "pcm");
   printf("Loading MSU %s\n", fname);
+#ifdef __3DS__
+  /* stdout/stderr are not visible in a CIA launch, so also record MSU activity
+   * in the app's runtime.log. This is the primary way to diagnose "MSU does not
+   * start" reports: it shows the exact path that was opened. */
+  if (g_msu_log) {
+    extern void Platform3DS_LogRuntime(const char *format, ...);
+    Platform3DS_LogRuntime("MSU: loading track %d from %s", (int)actual_track, fname);
+  }
+#endif
   mp->f = fopen(fname, "rb");
-  if (mp->f == NULL)
+  if (mp->f == NULL) {
+#ifdef __3DS__
+    if (g_msu_log) {
+      extern void Platform3DS_LogRuntime(const char *format, ...);
+      Platform3DS_LogRuntime("MSU: track %d not found at %s (falling back to SPC)", (int)actual_track, fname);
+    }
+#endif
     goto READ_ERROR;
+  }
   setvbuf(mp->f, NULL, _IOFBF, 16384);
   if (fread(buf, 1, 8, mp->f) != 8) READ_ERROR: {
     fprintf(stderr, "Unable to read MSU file %s\n", fname);
@@ -460,9 +493,36 @@ uint8_t zelda_apu_read(uint32_t adr) {
 void ZeldaRenderAudio(int16 *audio_buffer, int samples, int channels) {
   ZeldaApuLock();
   ZeldaPopApuState();
-  SpcPlayer_GenerateSamples(g_zenv.player);
-  dsp_getSamples(g_zenv.player->dsp, audio_buffer, samples, channels);
-  if (g_msu_player.f && channels == 2)
+
+  /* MsuPlayer_Mix accumulates onto the SPC block rather than replacing it.
+   * While a track is open the game has already paused the SPC player
+   * (zelda_apu_write(APUI00, 0xf0) in ZeldaPlayMsuAudioTrack), so the SPC block
+   * is silent and mixing in place is correct.  We still run
+   * SpcPlayer_GenerateSamples() so SPC700 timers, DSP state and the port
+   * handshake keep advancing for sound effects; only the (silent) DSP synthesis
+   * output is discarded, which is the expensive part.
+   *
+   * MsuPlayer_Mix writes interleaved stereo (dst[i*2+0/1]) unconditionally, so
+   * it must only ever see a stereo buffer.  The 3DS build asks SDL for
+   * AudioChannels = 2, but a driver may still return mono; keep the explicit
+   * guard rather than trusting the request. */
+  const bool msu_owns_output = g_msu_player.f != NULL &&
+                               g_msu_player.state != kMsuState_Idle &&
+                               g_msu_player.state != kMsuState_FinishedPlaying;
+  const bool mix_msu = g_msu_player.f != NULL && channels == 2;
+
+  if (!msu_owns_output || !mix_msu) {
+    SpcPlayer_GenerateSamples(g_zenv.player);
+    dsp_getSamples(g_zenv.player->dsp, audio_buffer, samples, channels);
+  } else {
+    /* Advance SPC700/DSP state for SFX and timers, but skip the resampling
+     * pass: the game already silenced the music, so the buffer would be
+     * silent anyway and MSU only accumulates onto it. */
+    SpcPlayer_GenerateSamples(g_zenv.player);
+    memset(audio_buffer, 0, (size_t)samples * (size_t)channels * sizeof(int16));
+  }
+
+  if (mix_msu)
     MsuPlayer_Mix(&g_msu_player, audio_buffer, samples);
   ZeldaApuUnlock();
 }
