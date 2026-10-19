@@ -3537,7 +3537,10 @@ void Platform3DS_ApplyConfig(struct Config *config) {
    * the margin to always run 44100 Hz for the better resampling quality.
    *
    * Detection runs here because cwd is already the app folder
-   * (Platform3DS_PrepareStorage chdir'd into it earlier). */
+   * (Platform3DS_PrepareStorage chdir'd into it earlier). It only ADDS MSU when
+   * tracks are present: an explicit EnableMSU the user wrote into zelda3.ini is
+   * preserved so `deluxe` still works, and a missing probe file never silently
+   * disables a configured setup. */
   {
     static const char *kMsuProbeTracks[] = { "msu/1.pcm", "msu/0.pcm", "msu1.pcm", "1.pcm" };
     bool msu_available = false;
@@ -3547,16 +3550,30 @@ void Platform3DS_ApplyConfig(struct Config *config) {
         break;
       }
     }
-    /* Old 3DS without MSU keeps the shipped 32000 Hz 3DS rate; everything else
-     * runs 44100 Hz so MSU needs no resampling and plain SPC audio gets the
-     * slightly better ratio. */
-    config->audio_freq = (!msu_available && !g_is_new_3ds) ? 32000 : 44100;
+    if (msu_available && config->enable_msu == 0) {
+      /* No explicit request, but tracks exist: turn plain PCM MSU on. */
+      config->enable_msu = kMsuEnabled_Msu;
+    }
+    /* Opuz needs 48000 Hz, which this port does not use for MSU (see below), so
+     * a leftover opuz flag from a desktop config is dropped rather than played
+     * at the wrong rate. */
+    if (config->enable_msu & kMsuEnabled_Opuz) {
+      config->enable_msu &= (uint8)~kMsuEnabled_Opuz;
+      Platform3DS_LogRuntime("Audio: dropping Opuz flag (3DS plays MSU as 44100 Hz PCM)");
+    }
+
+    const bool msu_active = config->enable_msu != 0;
+    /* Old 3DS without MSU keeps the shipped 32000 Hz rate; everything else runs
+     * 44100 Hz so MSU needs no resampling and plain SPC audio gets the slightly
+     * better ratio. */
+    config->audio_freq = (!msu_active && !g_is_new_3ds) ? 32000 : 44100;
     config->audio_channels = 2;
     config->audio_samples = 1024;
-    config->enable_msu = msu_available ? kMsuEnabled_Msu : 0;
-    Platform3DS_LogRuntime("Audio config: %d Hz stereo, MSU %s",
+    Platform3DS_LogRuntime("Audio config: %d Hz stereo, MSU %s (enable=0x%02X, tracks %s)",
                            (int)config->audio_freq,
-                           msu_available ? "enabled (track found)" : "disabled (no msu/ track)");
+                           msu_active ? "on" : "off",
+                           (unsigned)config->enable_msu,
+                           msu_available ? "found" : "not found");
   }
   config->disable_frame_delay = true;
   Platform3DS_LogRuntime("Runtime settings: display=%d, wide_edge=%d, turbo=%d",

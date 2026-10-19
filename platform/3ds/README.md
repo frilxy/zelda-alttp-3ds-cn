@@ -38,6 +38,33 @@ explicit touch keeps priority. The APT notification thread uses priority0x19
 so HOME/sleep requests can be received while gameplay is busy. Runtime logs
 report the selected priority; other thread priorities are retained.
 
+## MSU audio
+
+MSU-1 tracks replace the SPC music with streamed audio. No tracks ship with
+this port; supply your own pack. Put `1.pcm` … `48.pcm` in
+`sdmc:/3ds/Zelda 3DS/msu/`; `0.pcm` is optional.
+
+Startup probes `msu/1.pcm`, `msu/0.pcm`, `msu1.pcm` and `1.pcm`. Finding one
+enables MSU and runs the output at 44100 Hz stereo. Finding none keeps SPC
+music: Old 3DS stays at 32000 Hz, New 3DS runs 44100 Hz.
+
+- `MSUPath` in `[Sound]` selects the folder and must end in `/`, because the
+  loader appends `<track>.pcm` directly. Detection alone does not set it: with
+  an empty `MSUPath` the loader opens `1.pcm` beside `zelda3.ini`, not
+  `msu/1.pcm`.
+- Each track is an 8-byte header (`MSU1` plus the little-endian repeat sample)
+  followed by 44100 Hz, 16-bit signed, interleaved stereo samples.
+- Detection writes `EnableMSU` at startup, so a hand-written value is replaced;
+  `MSUPath`, `MSUVolume` and `ResumeMSU` are read from the INI.
+- The profile INI wins: every launch restores `zelda3.ini` from
+  `profiles/<rom>-<hash>/zelda3.ini`. Edit that copy to keep a hand-written
+  change; new profiles inherit the bundled `msu/` default.
+- A missing track falls back to its SPC music, so partial packs are usable.
+  `runtime.log` records the chosen rate and the first 24 MSU loads or misses;
+  `tools/check_msu_tracks.py` validates a pack offline.
+
+Setup and troubleshooting: [docs/MSU-AUDIO.md](../../docs/MSU-AUDIO.md).
+
 ## Diagnostics
 
 Press `L + R + A` while the issue is visible and attach the dump from:
