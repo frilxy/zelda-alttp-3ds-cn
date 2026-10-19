@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.2.8
+
+Fix the crackle that v3.2.7 introduced.
+
+v3.2.7 clamped the MSU mix against overflow. The clamp was correct, but it made a
+latent signedness bug audible: the mix helpers kept the volume scale in uint32,
+so a negative sample was promoted to unsigned, became a huge positive value, and
+clamped to +32767. The lower half of every waveform collapsed to full-scale DC.
+
+The previous `dst += ...` hid it, because assigning to int16 truncates modulo
+2^16 and the low bits happen to be the correct signed value. Both scales are
+signed now. The crackle was most audible as a track started, since that is when
+the fade-in uses the ramp path.
+
 ## v3.2.7
 
 Clamp the MSU mix, and make MSU failures always reach the log.
