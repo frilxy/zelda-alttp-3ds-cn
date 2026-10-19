@@ -316,7 +316,13 @@ static void MixToBufferWithVolume(int16 *dst, const int16 *src, size_t n, float 
       dst[i * 2 + 1] = MsuSaturate(dst[i * 2 + 1] + src[i * 2 + 1]);
     }
   } else {
-    uint32 vol = (int32)(65536 * volume);
+    /* vol must stay signed.  As uint32, `src * vol` was promoted to unsigned, and
+     * adding that to a signed dst made the whole expression unsigned: a negative
+     * sample became a huge positive value and saturated to +32767, so the lower
+     * half of every waveform collapsed to full-scale DC -- violent crackle.  The
+     * old `+=` hid this because assigning to int16 truncates modulo 2^16, which
+     * happens to restore the sign. */
+    int32 vol = (int32)(65536 * volume);
     for (size_t i = 0; i < n; i++) {
       dst[i * 2 + 0] = MsuSaturate(dst[i * 2 + 0] + (src[i * 2 + 0] * vol >> 16));
       dst[i * 2 + 1] = MsuSaturate(dst[i * 2 + 1] + (src[i * 2 + 1] * vol >> 16));
@@ -328,7 +334,10 @@ static void MixToBufferWithVolumeRamp(int16 *dst, const int16 *src, size_t n, fl
   int64 vol = volume * 281474976710656.0f;
   int64 step = volume_step * 281474976710656.0f;
   for (size_t i = 0; i < n; i++) {
-    uint32 v = (vol >> 32);
+    /* Signed for the same reason as vol above: this is the fade-in path, so it
+     * is exactly what runs when a track starts, which is when the crackle was
+     * reported. */
+    int32 v = (int32)(vol >> 32);
     dst[i * 2 + 0] = MsuSaturate(dst[i * 2 + 0] + (src[i * 2 + 0] * v >> 16));
     dst[i * 2 + 1] = MsuSaturate(dst[i * 2 + 1] + (src[i * 2 + 1] * v >> 16));
     vol += step;
