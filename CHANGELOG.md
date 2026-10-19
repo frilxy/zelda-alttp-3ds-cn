@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.2.5
+
+Bold bottom-screen titles.
+
+The panel titles and tab labels are drawn in GNU Unifont 16px, which ships one
+weight only; its 1px strokes looked light next to the 12px body text. Unifont has
+no bold cut and no variable axis, so the weight is synthesized with the "shift
+right and overlap" method:
+
+    solid  = shift_right(bitmap) | bitmap
+    shadow = shift_right(solid & ~bitmap)
+    result = solid & ~shadow
+
+Subtracting the added material once more is what keeps counters open -- a plain
+dilate turns dense glyphs into solid blocks. Unifont's CJK ink
+spans x=0..14 of the cell, so the extra pixel fits in the free right column:
+no clipping, no cell resize, no change to panel layout (check_panel_fit passes
+unchanged). Body text keeps the regular cut.
+
 ## v3.2.4
 
 MSU-1 streaming audio.
