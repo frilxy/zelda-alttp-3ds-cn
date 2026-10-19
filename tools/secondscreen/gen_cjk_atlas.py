@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Regenerate the bottom-screen Chinese glyph atlases.
 
-One face is baked, drawn at 1x for body text and 1.5x for the
-panel titles and tab labels:
+Two faces are baked, both drawn at 1x:
 
-  ss_cjk_data.h        Fusion Pixel 12px, drawn at 1x  -- body text
+  ss_cjk_data.h        Fusion Pixel 12px, regular   -- body text
+  ss_cjk_large_data.h  GNU Unifont   16px, bold      -- panel titles and tabs
 
-The 8px face at 2x is the only way to land a heading between the body's 11px and
-22px: Fusion Pixel ships 8/10/12px native sizes only, and any non-integer runtime
-scale of the 12px face puts strokes on fractional pixels -- that is why the old
-1.5x titles looked fuzzy.
+Unifont ships a single weight and its 16px CJK ink already spans x=0..14 of the
+cell, so the titles get a *synthesized* bold: shift the bitmap one pixel right,
+union it with the original, and subtract the added material shifted once more so
+counters stay open (see bold_right_overlap).  That costs exactly the one free
+column on the right, so the ink box and every draw offset stay unchanged.
 
 A cell is 16x16, 2bpp (0 = transparent, 1 = outline, 2 = body), four pixels per
 byte, 64 bytes per glyph.  Each face's glyph is inset so its ink centre lands on
@@ -46,13 +47,15 @@ CELL = 16
 BODY = 2
 OUTLINE = 1
 
-# name, font file, native size, x inset, y inset, header, C prefix, purpose
+# name, font file, native size, x inset, y inset, bold, header, C prefix, purpose
 FACES = [
     ("body", "fusion-pixel-12px-monospaced-zh_hans.ms.bitmap.ttf", 12, 2, 1,
-     "ss_cjk_data.h", "kSSCjk", "body text and tab labels, drawn at 1x"),
+     False, "ss_cjk_data.h", "kSSCjk", "body text and tab labels, drawn at 1x"),
+    # Unifont ships a single weight, so the panel titles get a synthesized bold:
+    # same 16px ink box and the same draw offsets, just 2px strokes instead of 1.
     ("large", "unifont-18.0.01.otf", 16, 0, 0,
-     "ss_cjk_large_data.h", "kSSCjkLarge",
-     "panel titles and tab labels, drawn at 1x (16px ink)"),
+     True, "ss_cjk_large_data.h", "kSSCjkLarge",
+     "panel titles and tab labels, synthesized bold at 1x (16px ink)"),
 ]
 
 
@@ -69,10 +72,52 @@ def used_chars():
     return sorted(seen)
 
 
-def render(font, off_x, off_y, ch):
+def bold_right_overlap(img):
+    """Synthesize a bold face by the "shift right and overlap" method.
+
+    This is the trick pixel-font projects use when a family ships no bold cut:
+    move the bitmap one pixel right, union it with the original, then subtract a
+    copy of the added material shifted once more.  That last step is what keeps
+    counters (the enclosed holes in glyphs like 图 and 备) open -- a naive
+    dilate would fill them in and the glyph turns to mush at 16px.
+
+        solid  = shift_right(bitmap) | bitmap
+        shadow = shift_right(solid & ~bitmap)
+        return   solid & ~shadow
+
+    Unifont's CJK ink spans x=0..14 in a 16px cell, so exactly one column is
+    free on the right: the extra pixel lands inside the cell and nothing is
+    clipped.  Height is untouched, so the existing draw offsets still apply.
+    """
+    from PIL import Image
+
+    def shift(src, dx):
+        # AFFINE with -dx pans the image left by dx, i.e. shifts content right.
+        return src.transform(src.size, Image.AFFINE, (1, 0, -dx, 0, 1, 0),
+                             resample=Image.NEAREST)
+
+    def union(a, b):
+        return Image.frombytes("1", a.size,
+                               bytes(x | y for x, y in zip(a.tobytes(), b.tobytes())))
+
+    def subtract(a, b):
+        return Image.frombytes("1", a.size,
+                               bytes((x & ~y) & 0xFF for x, y in zip(a.tobytes(), b.tobytes())))
+
+    solid = union(shift(img, 1), img)
+    shadow = shift(subtract(solid, img), 1)
+    return subtract(solid, shadow)
+
+
+def render(font, off_x, off_y, ch, bold=False):
     from PIL import Image, ImageDraw
     img = Image.new("L", (CELL, CELL), 0)
     ImageDraw.Draw(img).text((off_x, off_y), ch, font=font, fill=255)
+    if bold:
+        # Threshold to 1-bit, synthesize the bold weight, then back to "on/off"
+        # so the 2bpp packing below sees a clean mask.
+        mask = img.point(lambda v: 255 if v >= 128 else 0).convert("1")
+        img = bold_right_overlap(mask).convert("L").point(lambda v: 255 if v else 0)
     px = img.load()
     out = bytearray(CELL * CELL // 4)
     for y in range(CELL):
@@ -100,12 +145,12 @@ def c_escape(data):
 
 def build(face, chars):
     from PIL import ImageFont
-    name, fname, box, ox, oy, header, prefix, purpose = face
+    name, fname, box, ox, oy, bold, header, prefix, purpose = face
     path = os.path.join(ROOT, "fonts", fname)
     if not os.path.exists(path):
         sys.exit("font not found: %s\nsee fonts/README.md for the download URL" % path)
     font = ImageFont.truetype(path, box)
-    glyphs = [render(font, ox, oy, ch) for ch in chars]
+    glyphs = [render(font, ox, oy, ch, bold) for ch in chars]
     for ch, g in zip(chars, glyphs):
         if not any(g):
             sys.exit("%s: %r rendered empty -- is %d the native size?" % (name, ch, box))
@@ -116,9 +161,10 @@ def build(face, chars):
         "// Bottom-screen Simplified-Chinese glyph atlas -- Fusion Pixel %dpx, %s."
         % (box, purpose),
         "// 16x16 2bpp cell (0=transparent, 1=outline, 2=body), 64 bytes per glyph,",
-        "// in %sChars order.  The glyph is inset so its ink centre is cell pixel (7,7),"
+        "// in %sChars order.  The regular face is inset so its ink centre is cell"
         % prefix,
-        "// the centre every face shares, so one draw offset works for all of them.",
+        "// pixel (7,7); the synthesized bold face runs half a pixel wider (7.5), which",
+        "// every consumer ignores because glyphs are blitted as whole 16px cells.",
         "// Generated by tools/secondscreen/gen_cjk_atlas.py -- do not edit by hand.",
         "enum { %sCount = %d };" % (prefix, len(chars)),
         'static const char %sChars[%sCount*4+1] = "%s";'
@@ -142,7 +188,7 @@ def main():
     faces = [f for f in FACES if args.face is None or f[0] == args.face]
     stale = []
     for face in faces:
-        name, _, _, _, _, header, _, _ = face
+        name, _, _, _, _, _, header, _, _ = face
         out = os.path.join(ROOT, "app", "jni", "src", "src", header)
         text = build(face, chars)
         cur = open(out, encoding="utf-8").read() if os.path.exists(out) else ""

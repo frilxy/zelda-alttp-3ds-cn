@@ -11,7 +11,8 @@
 | 文件 | 用途 |
 |---|---|
 | `fusion-pixel-12px-monospaced-zh_hans.ms.bitmap.ttf` | **正文**（下屏正文 + 上屏对话同款） |
-| `fusion-pixel-8px-monospaced-zh_hans.ms.bitmap.ttf` | **面板标题**，放大 2 倍使用（14px 墨迹） |
+| `unifont-18.0.01.otf` | **面板标题**，16px + 算法加粗 |
+| `fusion-pixel-8px-monospaced-zh_hans.ms.bitmap.ttf` | 旧方案遗留（标题曾用 8px×2），保留以便回退对比 |
 | `fusion-pixel-10px-monospaced-zh_hans.ms.bitmap.ttf` | 旧的 10px 字面，保留以便 `--font` 回退对比 |
 | `OFL.txt` | 该字体及其衍生来源的 SIL Open Font License 1.1 |
 
@@ -67,16 +68,31 @@ python tools/secondscreen/gen_cjk_atlas.py --font fonts/fusion-pixel-10px-monosp
 脚本会自动扫描 `second_screen.c`、`second_screen_sdl.c`、`updater.c` 里的中文字符，
 不需要手工维护字表。
 
-## 三级字号（v3.2.5）
+## 两档字号
 
-`gen_cjk_atlas.py` 一次生成**两张图集**，共用同一字符表与同一墨迹中心 (7,7)，
-所以一个绘制偏移 `y - 4*sc` 对两档都成立、版面常量无需区分：
+`gen_cjk_atlas.py` 一次生成**两张图集**，共用同一字符表，都按 16×16 整格贴图，
+所以一个绘制偏移对两档都成立、版面常量无需区分：
 
-| 图集 | 字面 | 绘制倍率 | 墨迹 | 用途 |
-|---|---|---|---|---|
-| `ss_cjk_data.h` | 12px | 1× | 11px | 正文 |
-| `ss_cjk_title_data.h` | 8px | **2×** | 14px | 面板标题 |
+| 图集 | 字面 | 绘制倍率 | 用途 |
+|---|---|---|---|
+| `ss_cjk_data.h` | Fusion Pixel 12px | 1× | 正文 |
+| `ss_cjk_large_data.h` | GNU Unifont 16px + **算法加粗** | 1× | 面板标题、标签栏 |
 
-标题为什么是"8px 放大 2 倍"：Fusion Pixel 只有 8/10/12px 原生尺寸，而 12px 字面
-放大 2 倍得到 22px（过大）、非整数倍又会发糊，所以 8px×2 是唯一能落在正文 11px
-与 22px 之间的整数方案。
+### 标题的加粗是怎么来的
+
+Unifont 只有 Regular 一个字重，没有 Bold，也没有可变轴。标题的粗体是**合成**的，
+用的是像素字体界的「右移重叠」算法：
+
+```text
+solid  = 右移1px(bitmap) | bitmap
+shadow = 右移1px(solid & ~bitmap)
+result = solid & ~shadow
+```
+
+第三步是关键：把「因为右移而封住的镂空」减回去，所以笔画变粗但**字形内部空隙
+不会被填死**（简单膨胀会把「图」「备」糊成实心）。参考实现见
+[pixel-font-studio/fusion-bold-pixel-font](https://github.com/pixel-font-studio/fusion-bold-pixel-font)。
+
+Unifont 16px 的汉字墨迹占 `x=0..14`，右侧正好空 1px，所以这个算法加出来的
+那 1px 恰好落在格子内，**不溢出、不改格子尺寸、不动渲染偏移**。高度不变，
+墨迹中心从 7 变为 7.5，而图集按整格贴图，这点偏差不影响版面。

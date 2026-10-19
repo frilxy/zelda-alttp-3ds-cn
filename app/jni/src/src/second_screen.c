@@ -276,9 +276,9 @@ bool SS_RenderLetterSheet(uint32 *px) {
 // (16x16 2bpp: 0=transparent, 1=outline, 2=body), matching the bottom-screen
 // letter style (dark outline + white body).
 #define kSS_CjkCols 16
-// Three atlases come out of gen_cjk_atlas.py -- body 12px, tab 10px, title 8px --
-// all over the same character list and all with the glyph ink centred on cell
-// pixel (7,7), so one draw offset keeps every face on the same baseline.
+// Two atlases come out of gen_cjk_atlas.py -- body Fusion Pixel 12px and title
+// Unifont 16px with a synthesized bold -- over the same character list.  Both are
+// blitted as whole 16px cells, so one draw offset keeps them on the same baseline.
 static bool render_cjk_sheet(uint32 *px, const uint8_t *glyphs, int count) {
   int w = kSS_CjkCols * 16, h = ((count + kSS_CjkCols - 1) / kSS_CjkCols) * 16;
   memset(px, 0, (size_t)w * h * 4);
