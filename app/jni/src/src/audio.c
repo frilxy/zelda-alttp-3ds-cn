@@ -513,33 +513,22 @@ void ZeldaRenderAudio(int16 *audio_buffer, int samples, int channels) {
   ZeldaApuLock();
   ZeldaPopApuState();
 
-  /* MsuPlayer_Mix accumulates onto the SPC block rather than replacing it.
-   * While a track is open the game has already paused the SPC player
-   * (zelda_apu_write(APUI00, 0xf0) in ZeldaPlayMsuAudioTrack), so the SPC block
-   * is silent and mixing in place is correct.  We still run
-   * SpcPlayer_GenerateSamples() so SPC700 timers, DSP state and the port
-   * handshake keep advancing for sound effects; only the (silent) DSP synthesis
-   * output is discarded, which is the expensive part.
+  /* MSU music is mixed over the SPC block, which stays in the path: pausing the
+   * SPC player (zelda_apu_write(APUI00, 0xf0) in ZeldaPlayMsuAudioTrack) only
+   * silences the *music* channels.  Sound effects are separate SPC700 voices fed
+   * through APUI01/02/03 every NMI (sound_effect_ambient / _1 / _2 in nmi.c), so
+   * the S-DSP has to keep synthesising and resampling or every pickup, footstep
+   * and splash goes silent -- the whole point of mixing MSU in rather than
+   * replacing the block.
    *
-   * MsuPlayer_Mix writes interleaved stereo (dst[i*2+0/1]) unconditionally, so
-   * it must only ever see a stereo buffer.  The 3DS build asks SDL for
+   * MsuPlayer_Mix writes interleaved stereo (dst[i*2+0/1]) unconditionally, so it
+   * must only ever see a stereo buffer.  The 3DS build asks SDL for
    * AudioChannels = 2, but a driver may still return mono; keep the explicit
    * guard rather than trusting the request. */
-  const bool msu_owns_output = g_msu_player.f != NULL &&
-                               g_msu_player.state != kMsuState_Idle &&
-                               g_msu_player.state != kMsuState_FinishedPlaying;
   const bool mix_msu = g_msu_player.f != NULL && channels == 2;
 
-  if (!msu_owns_output || !mix_msu) {
-    SpcPlayer_GenerateSamples(g_zenv.player);
-    dsp_getSamples(g_zenv.player->dsp, audio_buffer, samples, channels);
-  } else {
-    /* Advance SPC700/DSP state for SFX and timers, but skip the resampling
-     * pass: the game already silenced the music, so the buffer would be
-     * silent anyway and MSU only accumulates onto it. */
-    SpcPlayer_GenerateSamples(g_zenv.player);
-    memset(audio_buffer, 0, (size_t)samples * (size_t)channels * sizeof(int16));
-  }
+  SpcPlayer_GenerateSamples(g_zenv.player);
+  dsp_getSamples(g_zenv.player->dsp, audio_buffer, samples, channels);
 
   if (mix_msu)
     MsuPlayer_Mix(&g_msu_player, audio_buffer, samples);
