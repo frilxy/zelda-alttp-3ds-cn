@@ -1,5 +1,41 @@
 # Changelog
 
+## v3.2.4
+
+MSU-1 streaming audio.
+
+Put `1.pcm` … `35.pcm` (44.1 kHz, 16-bit, stereo, 8-byte `MSU1` header) in
+`sdmc:/3ds/Zelda 3DS/msu/` and the orchestrally arranged tracks replace the SPC
+music. No configuration is needed: startup probes `msu/1.pcm`, `msu/0.pcm`,
+`msu1.pcm` and `1.pcm`, and a hit turns MSU on, fills in the directory and moves
+the output to 44100 Hz. MSU is skipped entirely when no track is found.
+
+Sample rate follows the same decision. MSU PCM is 44100 Hz and the mixer does no
+resampling, so MSU playback has to run at 44100. The SPC700 interpreter's cost is
+fixed at 534 samples per frame regardless of output rate, so raising it only adds
+DSP resampling work -- and with MSU supplying the music that resampling pass is
+skipped, which makes MSU playback cheaper than the SPC path it replaces. Old 3DS
+without MSU keeps the previous 32000 Hz.
+
+Two fixes found while wiring this up:
+
+  stereo   SetupAudioStart() asked NDSP for a mono output. NDSP's output mode is
+           global and the SDL driver never sets it, so the request is now for
+           STEREO; today ndspExit() resets it before SDL reopens the device, but
+           nothing should rely on that. runtime.log reports the negotiated
+           channel count either way.
+
+  settings EnsureProfileReady() copied the per-ROM profile ini over the working
+           directory's zelda3.ini on every launch, silently discarding edits --
+           including every MSU key. It now seeds the file only when missing,
+           matching what MigrateWideDefaults() already did for the same file.
+
+`tools/check_msu_tracks.py` validates a pack before copying it to the SD card
+(header, sizing, duration sanity, numbering gaps). `docs/MSU-AUDIO.md` is the
+full guide; the README has the short version plus the track-number table.
+
+Track packs are not distributed with this project.
+
 ## v3.2.3
 
 This is the final bottom-screen rework, released as one artifact per platform
