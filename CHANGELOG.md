@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.2.7
+
+Clamp the MSU mix, and make MSU failures always reach the log.
+
+MSU audio is added on top of the S-DSP output and both are full-scale 16-bit, so
+a loud track under a loud sound effect could wrap past the int16 range and crackle
+instead of merely clipping. All three accumulation sites now saturate.
+
+Diagnostics: successful track loads drew from the same 24-line budget as
+failures, so a long session could exhaust it and hide a "track not found" line.
+Failures are now logged regardless of the budget.
+
 ## v3.2.6
 
 Fix sound effects being silent while MSU music plays.
