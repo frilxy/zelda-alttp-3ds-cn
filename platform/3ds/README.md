@@ -41,17 +41,27 @@ report the selected priority; other thread priorities are retained.
 ## MSU audio
 
 MSU-1 tracks replace the SPC music with streamed audio. No tracks ship with
-this port; supply your own pack. Put `1.pcm` … `48.pcm` in
-`sdmc:/3ds/Zelda 3DS/msu/`; `0.pcm` is optional.
+this port; supply your own pack. Put it in `sdmc:/3ds/Zelda 3DS/msu/` using the
+naming stock packs ship with (`alttp_msu-1.pcm` … `alttp_msu-35.pcm`);
+`alttp_msu-0.pcm` is optional.
 
-Startup probes `msu/1.pcm`, `msu/0.pcm`, `msu1.pcm` and `1.pcm`. Finding one
-turns MSU on and runs the output at 44100 Hz stereo. Finding none keeps SPC
-music: Old 3DS stays at 32000 Hz, New 3DS runs 44100 Hz.
+`MSUPath` is a **prefix**, not a folder: the loader appends the track number and
+`.pcm`. Startup probes these prefixes in order and adopts the first whose
+`<prefix>1.pcm` exists:
 
-- `MSUPath` in `[Sound]` selects the folder and must end in `/`, because the
-  loader appends `<track>.pcm` directly. Detection alone does not set it: with
-  an empty `MSUPath` the loader opens `1.pcm` beside `zelda3.ini`, not
-  `msu/1.pcm`.
+1. `msu/alttp_msu-` — stock MSU pack naming (Snes9x/bsnes)
+2. `msu/` — plain numbers in the subfolder
+3. `alttp_msu-` — loose files in the working directory
+4. (empty) — bare numbers
+
+Finding one turns MSU on, points `MSUPath` at that prefix, and runs the output at
+44100 Hz stereo. No renaming is needed. Finding none keeps SPC music: Old 3DS
+stays at 32000 Hz, New 3DS runs 44100 Hz.
+
+- `MSUPath` in `[Sound]` is the path prefix placed directly before the track
+  number, with no separator inserted. The default `msu/alttp_msu-` reads
+  `msu/alttp_msu-1.pcm`; use `msu/` for plain numbers, or leave it empty to read
+  `1.pcm` beside `zelda3.ini`.
 - Each track is an 8-byte header (`MSU1` plus the little-endian repeat sample)
   followed by 44100 Hz, 16-bit signed, interleaved stereo samples.
 - Detection only fills in a disabled `EnableMSU`. An explicit `EnableMSU` in the

@@ -163,7 +163,7 @@ make_pcm "$NAMES/intro.pcm" 6   # 非数字文件名
 make_pcm "$NAMES/7.PCM" 6      # 大写扩展名也能识别
 expect 0 "命名问题只是警告（退出码 0）" python3 "$CHECKER" "$NAMES"
 contains "重复编号被指出" "编号 2 重复"
-contains "非规范文件名被指出" "不是规范编号"
+contains "非规范文件名被指出" "不是规范命名"
 contains "非数字文件名被指出" "不是数字编号"
 contains "大写扩展名被识别" "7.PCM"
 

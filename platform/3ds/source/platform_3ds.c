@@ -3547,35 +3547,35 @@ void Platform3DS_ApplyConfig(struct Config *config) {
    * preserved so `deluxe` still works, and a missing probe file never silently
    * disables a configured setup. */
   {
-    /* Each probe is a path plus the directory prefix the loader must use when
-     * that probe hits.  The loader builds "<msu_path><track>.pcm", so finding
-     * msu/1.pcm without also setting msu_path made it look for "1.pcm" and fail
-     * with "track not found" -- detection and loading have to agree. */
-    static const struct {
-      const char *probe;
-      const char *dir;
-    } kMsuProbes[] = {
-      { "msu/1.pcm", "msu/" },
-      { "msu/0.pcm", "msu/" },
-      { "msu1.pcm", "" },
-      { "1.pcm", "" },
+    /* MSUPath is a *prefix*, not a directory: the loader concatenates it with
+     * the track number, so "msu/alttp_msu-" + 1 + ".pcm" is how stock MSU packs
+     * are addressed (the engine's switch ini documents msu/alttp_msu-*.pcm).
+     * Probe the prefixes packs actually ship under, and remember which one hit
+     * so the loader opens the same file that detection found. */
+    static const char *kMsuPrefixes[] = {
+      "msu/alttp_msu-",   /* Snes9x/bsnes naming, what stock packs use */
+      "msu/",             /* plain numbers in a subfolder */
+      "alttp_msu-",       /* loose files in the working directory */
+      "",                 /* bare numbers, legacy layout */
     };
-    const char *msu_dir = NULL;
-    for (size_t i = 0; i < sizeof(kMsuProbes) / sizeof(kMsuProbes[0]); i++) {
-      if (IsRegularFile(kMsuProbes[i].probe)) {
-        msu_dir = kMsuProbes[i].dir;
+    const char *msu_prefix = NULL;
+    for (size_t i = 0; i < sizeof(kMsuPrefixes) / sizeof(kMsuPrefixes[0]); i++) {
+      char probe[512];
+      snprintf(probe, sizeof(probe), "%s1.pcm", kMsuPrefixes[i]);
+      if (IsRegularFile(probe)) {
+        msu_prefix = kMsuPrefixes[i];
         break;
       }
     }
-    const bool msu_available = msu_dir != NULL;
+    const bool msu_available = msu_prefix != NULL;
     if (msu_available && config->enable_msu == 0) {
       /* No explicit request, but tracks exist: turn plain PCM MSU on. */
       config->enable_msu = kMsuEnabled_Msu;
     }
     if (msu_available && (config->msu_path == NULL || config->msu_path[0] == '\0')) {
       /* No MSUPath in zelda3.ini (older installs predate the key): adopt the
-       * directory the probe actually found, so loading matches detection. */
-      config->msu_path = msu_dir;
+       * prefix the probe actually found, so loading matches detection. */
+      config->msu_path = msu_prefix;
     }
     /* Opuz needs 48000 Hz, which this port does not use for MSU (see below), so
      * a leftover opuz flag from a desktop config is dropped rather than played

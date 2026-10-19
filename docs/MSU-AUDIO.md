@@ -1,5 +1,13 @@
-# MSU 音频使用指南
-
+# MSU 音频使用指南```
+sdmc:/3ds/Zelda 3DS/
+  ├── zelda3.ini
+  ├── zelda3_assets.dat
+  └── msu/
+      ├── alttp_msu-0.pcm     (可选，菜单曲)
+      ├── alttp_msu-1.pcm
+      ├── alttp_msu-2.pcm
+      └── ...
+```
 本指南面向最终用户，说明如何在本移植版中启用 MSU-1 音频：把音轨放好即可，
 程序会在启动时自动检测并切换采样率。**MSU 音轨不随发布包提供**，需要你自行准备。
 
@@ -119,10 +127,13 @@ sdmc:/3ds/Zelda 3DS/
 
 要点：
 
-- **编号就是文件名**，必须是 `1.pcm`、`2.pcm`……不能是 `01.pcm`、`track1.pcm`。
+- **标准包直接用原命名**（`alttp_msu-1.pcm`），不需要改名。
+- `MSUPath` 是**路径前缀**，不是目录：代码按 `<前缀><编号>.pcm` 拼接。
+  默认 `msu/alttp_msu-` → `msu/alttp_msu-1.pcm`；纯数字命名用 `msu/`。
+- 编号前不要补零（`alttp_msu-01.pcm` 会匹配不到）。
   （检测与加载都只认纯数字文件名，扩展名请用小写 `.pcm`。）
 - `0.pcm` 可选的菜单曲；不放也没关系。
-- 目录名按 `msu` 书写，与 `MSUPath = msu/` 保持一致。
+- 目录名按 `msu` 书写，与默认 `MSUPath = msu/alttp_msu-` 保持一致。
 
 ### 3.4 确认生效
 
@@ -149,7 +160,7 @@ MSU: loading track 1 from msu/1.pcm
 ```ini
 [Sound]
 EnableMSU = false
-MSUPath = msu/
+MSUPath = msu/alttp_msu-
 ResumeMSU = 0
 MSUVolume = 100%
 ```
@@ -164,7 +175,7 @@ MSUVolume = 100%
 上面 3.3 节的图就是完整布局。补充说明：
 
 - 程序启动时 `chdir()` 到 `sdmc:/3ds/Zelda 3DS/`，所有相对路径都以此为基准。
-- `MSUPath = msu/` 是相对这个工作目录的，因此实际读取
+- `MSUPath = msu/alttp_msu-` 是相对这个工作目录的前缀，因此实际读取
   `sdmc:/3ds/Zelda 3DS/msu/1.pcm`。
 - `runtime.log` 位于工作目录根部，不在 `msu/` 内。
 
@@ -177,7 +188,7 @@ MSUVolume = 100%
 | 键 | 取值 | 默认 | 作用 |
 |---|---|---|---|
 | `EnableMSU` | `true` / `1` / `false` / `0` / `deluxe` / `opuz` / `deluxe-opuz` | `false` | 是否启用 MSU，以及变体 |
-| `MSUPath` | 目录路径，**以 `/` 结尾** | `msu/` | 音轨所在目录，相对工作目录 |
+| `MSUPath` | 路径前缀（直接拼编号） | `msu/alttp_msu-` | 音轨路径前缀，相对工作目录 |
 | `MSUVolume` | `0%` ~ `100%` | `100%` | MSU 混音音量 |
 | `ResumeMSU` | `0` / `1` | `0` | 离开又回到大地图时，续播还是从头播放 |
 
@@ -201,8 +212,10 @@ MSUVolume = 100%
 
 ```ini
 [Sound]
-MSUPath = msu/
+MSUPath = msu/alttp_msu-
 ```
+
+用纯数字命名（`msu/1.pcm`）时写 `MSUPath = msu/`。
 
 `AudioFreq` / `AudioChannels` 在本移植版中由程序按机型与 MSU 状态自动设定，
 写在 ini 里不会生效，保留只是为了与其他平台的 `zelda3.ini` 保持一致。
@@ -259,18 +272,17 @@ MSUPath = msu/
 
 按顺序排查：
 
-1. **文件真的在 `msu/` 里吗？** 必须是 `sdmc:/3ds/Zelda 3DS/msu/1.pcm`。
+1. **文件在探测列表的某个位置吗？** 程序依次尝试
+   `msu/alttp_msu-1.pcm`、`msu/1.pcm`、`alttp_msu-1.pcm`、`1.pcm`。
    多套一层目录（`msu/alttp/1.pcm`）检测不到。
-2. **文件名是纯数字吗？** `01.pcm`、`1.PCM`、`Track 1.pcm` 都不会被加载。
-3. **`MSUPath` 有没有尾斜杠？** 程序直接拼接 `<MSUPath><编号>.pcm`，
-   `MSUPath = msu`（缺 `/`）会拼成 `msu1.pcm`，读不到。
-4. **是不是老 profile？** 这是最容易踩的坑：启动时会用
-   `profiles/<rom>-<hash>/zelda3.ini` 覆盖根目录的 `zelda3.ini`。
-   升级前建立的 profile 里没有 `MSUPath`，于是检测虽然成功（因为 `msu/1.pcm`
-   存在），加载却按空路径去找 `1.pcm`，结果回退原版音乐。
-   **解决**：编辑 `profiles/<rom>-<hash>/zelda3.ini`，在 `[Sound]` 段加上
-   `MSUPath = msu/`。若该 profile 没有自定义设置，也可以删掉这份 ini，
-   下次启动会从内置默认配置重建（会丢失该 profile 的画质等选项）。
+2. **文件名匹配前缀吗？** `alttp_msu-01.pcm`（补零）、`1.PCM`（大写）、
+   `Track 1.pcm` 都不会被加载。
+3. **`MSUPath` 和你的命名对得上吗？** 它直接拼在编号前面，不补任何分隔符：
+   默认 `msu/alttp_msu-` 读 `msu/alttp_msu-1.pcm`；纯数字命名要写 `msu/`。
+4. **是不是老 profile？** profile 的 `zelda3.ini` 会覆盖根目录那份。
+   老 profile 里没有 `MSUPath` 时，检测到音轨后会自动把探测到的前缀填进去，
+   所以通常无需手动处理。若你手写过错误的 `MSUPath`，删掉那一行即可让
+   自动探测接管。
 5. **只有某一首没音乐？** 那个编号的文件缺失或损坏，属于正常回退。
    用第 3.2 节的脚本确认。
 6. **`dspfirm.cdc` 在吗？** 缺失时游戏根本启动不到这一步，会有明确提示。
@@ -320,7 +332,7 @@ MSU 是边玩边从 SD 卡读的，切曲瞬间会有一次文件打开和缓冲
 
 **Q：换了 ROM 之后 MSU 怎么配？**
 每个 ROM profile 有自己的 `zelda3.ini`。新 profile 会从内置配置复制，
-默认已带 `MSUPath = msu/`；老 profile 需按 7.1 第 4 条手动补上。
+默认已带 `MSUPath = msu/alttp_msu-`；老 profile 会自动补齐前缀。
 
 **Q：可以在游戏里开关 MSU 吗？**
 不能。下屏设置只有画面、加速倍率、开发者选项、更新、重启。
@@ -329,7 +341,7 @@ MSU 是边玩边从 SD 卡读的，切曲瞬间会有一次文件打开和缓冲
 **Q：`EnableMSU` 我写了 `true`，为什么日志还是 `MSU off`？**
 因为 `MSU on` 需要音轨真的存在：探测路径没有文件时，启用也加载不出音轨，
 启动阶段就不会把 MSU 标记为开启。请先确认 7.1 的第 1–3 条，再检查
-`MSUPath` 指向的目录里确实有对应编号的文件。
+`MSUPath` 前缀拼出来的路径里确实有对应编号的文件。
 
 **Q：`deluxe` 和 `opuz` 能用吗？**
 `deluxe` 是 MSU Deluxe 变体，需要对应的音轨包；手写的 `EnableMSU = deluxe`

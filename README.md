@@ -82,19 +82,24 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 ```
 sdmc:/3ds/Zelda 3DS/msu/
-  ├── 1.pcm      ← 曲目编号 1..35
-  ├── 2.pcm
+  ├── alttp_msu-1.pcm    ← 标准 MSU 包命名
+  ├── alttp_msu-2.pcm
   └── ...
 ```
 
-**放好即可，无需改配置。** 启动时会自动探测 `msu/1.pcm`、`msu/0.pcm`、
-`msu1.pcm`、`1.pcm`，命中就自动开启 MSU 并把输出切到 44100 Hz。
+**放好即可，无需改配置。** 启动时按以下顺序探测，命中就自动开启 MSU
+并把输出切到 44100 Hz：
+
+1. `msu/alttp_msu-1.pcm` ← 标准 MSU 包（Snes9x/bsnes 通用命名）
+2. `msu/1.pcm` ← 纯数字放在 msu 子目录
+3. `alttp_msu-1.pcm` ← 散放在工作目录
+4. `1.pcm` ← 纯数字散放
 
 ### 音轨格式
 
 - **MSU-1 PCM**：44.1 kHz、16-bit、立体声
 - 每个文件前 8 字节是 `"MSU1"` + repeat_position（小端 uint32）
-- 文件名必须是**纯数字**（`1.pcm`，不能是 `alttp_msu-1.pcm`）
+- 标准包直接用 `alttp_msu-1.pcm` 这种命名即可，**不需要改名**
 
 ### 曲目编号
 
@@ -128,13 +133,14 @@ sdmc:/3ds/Zelda 3DS/msu/
 `zelda3.ini` 的 `[Sound]` 段：
 
 ```ini
-MSUPath = msu/       # 音轨目录（相对 sdmc:/3ds/Zelda 3DS/，建议带尾斜杠）
+MSUPath = msu/alttp_msu-   # 路径前缀，后接编号和 .pcm（不是目录！）
 EnableMSU = true     # true/1 = PCM；deluxe = Deluxe 变体
 MSUVolume = 100%     # 混音音量
 ResumeMSU = 0        # 1 = 离开再回场景时续播
 ```
 
-- 不写 `MSUPath` 也可以：探测到音轨会自动补上目录。
+- 不写 `MSUPath` 也可以：探测到音轨会自动补上前缀。
+- 用纯数字命名时写 `MSUPath = msu/`。
 - `opuz` 变体在 3DS 上会被忽略（它要求 48 kHz，本版固定 44.1 kHz）。
 
 ### 验证
@@ -143,7 +149,7 @@ ResumeMSU = 0        # 1 = 离开再回场景时续播
 
 ```
 Audio config: 44100 Hz stereo, MSU on (enable=0x01, tracks found)
-MSU: loading track 1 from msu/1.pcm
+MSU: loading track 1 from msu/alttp_msu-1.pcm
 ```
 
 若出现 `MSU off (tracks not found)`，说明路径或文件名不对。

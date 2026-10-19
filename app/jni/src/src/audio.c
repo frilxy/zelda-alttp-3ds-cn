@@ -220,26 +220,7 @@ static void MsuPlayer_Open(MsuPlayer *mp, int orig_track, bool resume_from_snaps
   if (msu_path[0] == '/')
     base = "";
 #endif
-  /* msu_path is concatenated directly with the track number, so it must end in a
-   * separator. "MSUPath = msu" would otherwise build "msu1.pcm". Append the
-   * separator here rather than relying on the user (or a future ini writer) to
-   * remember it. */
-  char msu_dir[480];
-  {
-    size_t len = strlen(msu_path);
-    if (len >= sizeof(msu_dir)) {
-      len = sizeof(msu_dir) - 1;
-    }
-    memcpy(msu_dir, msu_path, len);
-    msu_dir[len] = '\0';
-    if (len != 0 && msu_dir[len - 1] != '/' && msu_dir[len - 1] != '\\') {
-      if (len + 1 < sizeof(msu_dir)) {
-        msu_dir[len] = '/';
-        msu_dir[len + 1] = '\0';
-      }
-    }
-  }
-  snprintf(fname, sizeof(fname), "%s%s%s%d.%s", base, *base ? "/" : "", msu_dir, actual_track, mp->enabled & kMsuEnabled_Opuz ? "opuz" : "pcm");
+  snprintf(fname, sizeof(fname), "%s%s%s%d.%s", base, *base ? "/" : "", msu_path, actual_track, mp->enabled & kMsuEnabled_Opuz ? "opuz" : "pcm");
   printf("Loading MSU %s\n", fname);
 #ifdef __3DS__
   /* stdout/stderr are not visible in a CIA launch, so also record MSU activity

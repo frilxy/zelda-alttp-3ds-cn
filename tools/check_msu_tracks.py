@@ -167,11 +167,24 @@ def format_number_list(numbers: Sequence[int], limit: int = 16) -> str:
     return shown
 
 
+# Prefixes the 3DS build probes for, in order; the number follows one of them.
+TRACK_PREFIXES = ("alttp_msu-", "msu-", "")
+
+
 def parse_track_number(name: str) -> Optional[int]:
-    """从文件名解析编号；游戏只认纯 ASCII 数字（"1.pcm"）。"""
+    """Parse the track number from a file name.
+
+    Stock MSU packs (Snes9x/bsnes naming) use "alttp_msu-1.pcm"; plain packs use
+    "1.pcm". The 3DS build probes both, so accept either here and require the
+    remainder to be ASCII digits with no leading zero.
+    """
     stem = Path(name).stem
-    if stem.isascii() and stem.isdigit():
-        return int(stem)
+    for prefix in TRACK_PREFIXES:
+        if prefix and not stem.startswith(prefix):
+            continue
+        rest = stem[len(prefix):]
+        if rest.isascii() and rest.isdigit():
+            return int(rest)
     return None
 
 
@@ -319,10 +332,14 @@ def check_numbering(tracks: Sequence[TrackResult], ext: str) -> Dict[int, List[s
             )
             continue
         by_number.setdefault(number, []).append(track)
-        if track.path.stem != str(number):
+        # Accepted: "<n>.<ext>" or "alttp_msu-<n>.<ext>" -- the prefixes the 3DS
+        # build probes.  Padding ("007.pcm") or a stray prefix parses to the right
+        # number but will not be found at runtime.
+        canonical = {f"{number}.{ext}", f"alttp_msu-{number}.{ext}"}
+        if track.name not in canonical:
             track.warnings.append(
-                f"文件名“{track.name}”不是规范编号，游戏会查找 "
-                f"{number}.{ext}"
+                f"文件名“{track.name}”不是规范命名，游戏会查找 "
+                f"{number}.{ext} 或 alttp_msu-{number}.{ext}"
             )
 
     duplicates: Dict[int, List[str]] = {
