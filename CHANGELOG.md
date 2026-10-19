@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.2.6
+
+Fix sound effects being silent while MSU music plays.
+
+Pausing the SPC player for MSU only stops the music channels: pickups,
+footsteps and water splashes are separate SPC700 voices written through
+APUI01/APUI02/APUI03 every NMI, and they are synthesized by the same S-DSP. An
+earlier build skipped the DSP resampling pass while MSU owned the output on the
+assumption that the SPC block was silent, which silenced every effect too.
+
+MSU is mixed over the S-DSP output again. That keeps the resampling cost while
+MSU plays, so the audio load is about +19% over the 32000 Hz baseline rather
+than the -31% the skipped pass had suggested.
+
 ## v3.2.5
 
 Bold bottom-screen titles.
