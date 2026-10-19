@@ -72,6 +72,94 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 ---
 
+## MSU-1 高音质音乐（可选）
+
+本版支持 **MSU-1 流式音轨**，用 CD 音质音乐替换原版 SPC 音乐。
+
+### 启用
+
+把音轨放进 SD 卡：
+
+```
+sdmc:/3ds/Zelda 3DS/msu/
+  ├── 1.pcm      ← 曲目编号 1..35
+  ├── 2.pcm
+  └── ...
+```
+
+**放好即可，无需改配置。** 启动时会自动探测 `msu/1.pcm`、`msu/0.pcm`、
+`msu1.pcm`、`1.pcm`，命中就自动开启 MSU 并把输出切到 44100 Hz。
+
+### 音轨格式
+
+- **MSU-1 PCM**：44.1 kHz、16-bit、立体声
+- 每个文件前 8 字节是 `"MSU1"` + repeat_position（小端 uint32）
+- 文件名必须是**纯数字**（`1.pcm`，不能是 `alttp_msu-1.pcm`）
+
+### 曲目编号
+
+编号对应游戏场景，主流 MSU 包通用：
+
+| 编号 | 场景 | 编号 | 场景 |
+|---|---|---|---|
+| 1 | 标题画面 | 19 | 击败加农 |
+| 2 | 光之世界 | 20 | 教堂 |
+| 3 | 开场雨景 | 21 | Boss 战 |
+| 4 | 暗世界（兔子） | 22 | 暗世界地牢 |
+| 5 | 迷途森林 | 23 | 占卜屋 |
+| 6 | 开场故事 | 24 | 洞穴 |
+| 7 | 卡卡利科村 | 25 | 救塞尔达 |
+| 8 | 传送音效 | 26 | 贤者水晶 |
+| 9 | 暗之世界 | 27 | 妖精泉 |
+| 10 | 大师之剑 | 28 | 加农主题 |
+| 11 | 存档画面 | 29 | 加农现影 |
+| 12 | 士兵警报 | 30 | 最终对峙 |
+| 13 | 斯卡尔森林 | 31 | 加农决战 |
+| 14 | 迷你游戏 | 32-34 | 结局 |
+| 15 | 未使用 | 35 | 视频音轨 |
+| 16 | 海拉尔城堡 | | |
+| 17 | 光之世界地牢 | | |
+| 18 | 洞穴 | | |
+
+> 缺少某号只会让那个场景回到原版音乐，不会报错。
+
+### 手动配置（可选）
+
+`zelda3.ini` 的 `[Sound]` 段：
+
+```ini
+MSUPath = msu/       # 音轨目录（相对 sdmc:/3ds/Zelda 3DS/，建议带尾斜杠）
+EnableMSU = true     # true/1 = PCM；deluxe = Deluxe 变体
+MSUVolume = 100%     # 混音音量
+ResumeMSU = 0        # 1 = 离开再回场景时续播
+```
+
+- 不写 `MSUPath` 也可以：探测到音轨会自动补上目录。
+- `opuz` 变体在 3DS 上会被忽略（它要求 48 kHz，本版固定 44.1 kHz）。
+
+### 验证
+
+启动后退出，在 `sdmc:/3ds/Zelda 3DS/runtime.log` 里找：
+
+```
+Audio config: 44100 Hz stereo, MSU on (enable=0x01, tracks found)
+MSU: loading track 1 from msu/1.pcm
+```
+
+若出现 `MSU off (tracks not found)`，说明路径或文件名不对。
+
+### 关于音轨来源
+
+音轨包**不随本项目分发**（版权原因）。社区有多个免费包
+（如 JUD6MENT 的 Orchestral 2023、TheRetromancer 的原曲风格管弦乐等），
+可在 [Zeldix MSU1 数据库](https://www.zeldix.net/f55-the-legend-of-zelda-iii-a-link-to-the-past)
+找到。
+
+> 注意：标 **Deluxe** 的包需要给 ROM 打 ASM 补丁，本移植版**不支持**；
+> 请用标准 MSU-1 包（33-35 首）。
+
+---
+
 ## 构建
 
 ### GitHub Actions（自动）
