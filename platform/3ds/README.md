@@ -45,7 +45,7 @@ this port; supply your own pack. Put `1.pcm` … `48.pcm` in
 `sdmc:/3ds/Zelda 3DS/msu/`; `0.pcm` is optional.
 
 Startup probes `msu/1.pcm`, `msu/0.pcm`, `msu1.pcm` and `1.pcm`. Finding one
-enables MSU and runs the output at 44100 Hz stereo. Finding none keeps SPC
+turns MSU on and runs the output at 44100 Hz stereo. Finding none keeps SPC
 music: Old 3DS stays at 32000 Hz, New 3DS runs 44100 Hz.
 
 - `MSUPath` in `[Sound]` selects the folder and must end in `/`, because the
@@ -54,8 +54,11 @@ music: Old 3DS stays at 32000 Hz, New 3DS runs 44100 Hz.
   `msu/1.pcm`.
 - Each track is an 8-byte header (`MSU1` plus the little-endian repeat sample)
   followed by 44100 Hz, 16-bit signed, interleaved stereo samples.
-- Detection writes `EnableMSU` at startup, so a hand-written value is replaced;
-  `MSUPath`, `MSUVolume` and `ResumeMSU` are read from the INI.
+- Detection only fills in a disabled `EnableMSU`. An explicit `EnableMSU` in the
+  INI is preserved, so `deluxe` keeps working and a custom `MSUPath` can be
+  selected with `EnableMSU = true` even when the probe paths are empty. The
+  Opuz flag is dropped on 3DS (it needs 48000 Hz; this port plays MSU at 44100),
+  and that is logged at startup.
 - The profile INI wins: every launch restores `zelda3.ini` from
   `profiles/<rom>-<hash>/zelda3.ini`. Edit that copy to keep a hand-written
   change; new profiles inherit the bundled `msu/` default.

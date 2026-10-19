@@ -19,13 +19,12 @@
 | 音源 | SPC700 实时合成 | 44100 Hz / 16-bit 立体声 PCM |
 | 音质 | 受 SNES 采样内存限制 | 高音质，接近原始编曲 |
 | 体积 | 极小（在 `zelda3_assets.dat` 内） | 每分钟约 10 MB |
-| 音效 | 引擎合成 | 不变，仍是引擎合成 |
+| 音效 | 引擎合成 | 引擎合成，MSU 只提供音乐轨 |
 | 曲目 | 内置 | `1.pcm` ~ `48.pcm`，按编号对应 |
 
 两点常被误解：
 
-- **只替换音乐，不替换音效。** 挥剑、开箱、受伤等音效仍由 SPC700 产生，
-  所以换用 MSU 后音效风格不会改变。
+- **MSU 只提供音乐。** 挥剑、开箱、受伤等音效仍由游戏引擎负责，不由音轨提供。
 - **可以只放一部分。** 缺哪个编号，那一首就自动回退到原版音乐，不会静音、
   也不会卡住。
 
@@ -130,15 +129,16 @@ sdmc:/3ds/Zelda 3DS/
 启动游戏后，用文本编辑器打开 `sdmc:/3ds/Zelda 3DS/runtime.log`，搜索 `MSU`：
 
 ```text
-Audio config: 44100 Hz stereo, MSU enabled (track found)
+Audio config: 44100 Hz stereo, MSU on (enable=0x01, tracks found)
 Audio initialized: 44100 Hz, 2 channels, 1024 samples
 MSU: loading track 1 from msu/1.pcm
 ```
 
-- 第一行出现 `enabled (track found)` → 自动检测成功。
-- 出现 `disabled (no msu/ track)` → 没找到音轨，仍在用原版音乐。
-- 出现 `MSU: track N not found at ... (falling back to SPC)` → 检测到了，
-  但这个编号的文件在 `MSUPath` 指向的位置打不开。
+- 第一行出现 `MSU on ... tracks found` → 自动检测成功，采样率已切到 44100。
+- 出现 `MSU off ... tracks not found` → 四个探测位置都没找到音轨。
+- 出现 `MSU: track N not found at ... (falling back to SPC)` → 第 N 首打不开，
+  已回退原版音乐（可能是 `MSUPath` 指错，见 7.1）。
+- 出现 `Audio: dropping Opuz flag` → ini 里的 `opuz` 已被清除，按 PCM 播放。
 
 `runtime.log` **每次启动都会重建**，所以只看最近一次运行。
 
@@ -148,8 +148,8 @@ MSU: loading track 1 from msu/1.pcm
 
 ```ini
 [Sound]
-MSUPath = msu/
 EnableMSU = false
+MSUPath = msu/
 ResumeMSU = 0
 MSUVolume = 100%
 ```
@@ -181,13 +181,14 @@ MSUVolume = 100%
 | `MSUVolume` | `0%` ~ `100%` | `100%` | MSU 混音音量 |
 | `ResumeMSU` | `0` / `1` | `0` | 离开又回到大地图时，续播还是从头播放 |
 
-需要知道的三个行为：
+需要知道的四个行为：
 
 1. **`EnableMSU` 只被自动检测"补开"，不会被强制覆盖。** 程序读 ini 之后做一次
    探测：如果 `EnableMSU` 是关闭状态（`0`/`false`）而探测到了音轨文件，就自动
    设为普通 PCM（`1`）；如果 ini 里已经写明 `deluxe`，这个值会被保留。
-   反过来，手写 `EnableMSU = true` 但一个音轨文件都没有时，游戏会尝试加载失败并
-   回退到原版 SPC 音乐（日志里能看到 `MSU: track N not found`）。
+   反过来，手写 `EnableMSU = true` 但一个音轨文件都没有时，启动仍按 MSU 处理
+   （输出 44100 Hz），每首曲子会打开失败并回退原版 SPC 音乐，
+   日志里能看到 `MSU: track N not found`。
 2. **`opuz` 变体在 3DS 上会被丢弃。** Opuz 要求 48000 Hz 输出，而本移植版在有
    MSU 时固定 44100 Hz，所以启动时会把 `opuz` 标志清掉（保留普通 PCM / deluxe）
    并写一条日志。3DS 上请使用 `.pcm` 音轨。
@@ -214,26 +215,27 @@ MSUPath = msu/
 
 ## 6. 采样率与性能
 
-程序在启动时按以下规则决定输出采样率：
+程序在启动时按以下规则决定输出采样率（判定依据是 **MSU 是否启用**，
+即自动检测到的结果或 ini 里显式写下的值）：
 
-| 机型 | 未检测到音轨 | 检测到音轨 |
+| 机型 | MSU 未启用 | MSU 已启用 |
 |---|---|---|
 | Old 3DS | 32000 Hz | 44100 Hz |
 | New 3DS | 44100 Hz | 44100 Hz |
 
 为什么不是一律 44100：
 
-- MSU-1 PCM 是 44100 Hz，而混音器**不做重采样**，所以有 MSU 时必须 44100，
+- MSU-1 PCM 是 44100 Hz，而混音器**不做重采样**，所以启用 MSU 时必须 44100，
   否则会变速变调。
 - SPC700 解释器的工作量固定为每帧 534 个采样，与输出采样率无关；提高输出
   采样率只增加 DSP 重采样这一步（534 → 735 个输出采样，约 +38%）。
-- Old 3DS 余量最小，所以没有 MSU 时保持 32000 Hz；New 3DS 余量足够，
+- Old 3DS 余量最小，所以 MSU 关闭时保持 32000 Hz；New 3DS 余量足够，
   一律 44100 Hz，重采样比更"整"。
 - MSU 真正播放时，音乐直接来自 PCM，DSP 合成与重采样那一步被跳过
-  （SPC700 仍继续推进，以保证音效和计时器正常）。
+  （SPC700 状态仍继续推进，音效与计时器依赖它）。
 
-实际听感：Old 3DS 上启用 MSU 后音乐音质明显提升，音效路径的负载与平时接近；
-若在复杂场景出现掉帧，可试着只放关键曲目，而不是整套 48 首。
+实际听感：Old 3DS 上启用 MSU 后音乐音质明显提升；新增负载主要是 SD 读取，
+而被跳过的 DSP 合成本身也是原先最贵的一环。
 
 ---
 
@@ -244,8 +246,9 @@ MSUPath = msu/
 
 | 日志 | 含义 |
 |---|---|
-| `Audio config: ... MSU enabled (track found)` | 检测成功，采样率已切到 44100 |
-| `Audio config: ... MSU disabled (no msu/ track)` | 四个探测位置都没找到文件 |
+| `Audio config: ... MSU on ... (enable=0x01, tracks found)` | 已启用，采样率切到 44100 |
+| `Audio config: ... MSU off ... (enable=0x00, tracks not found)` | 未启用，仍用原版音乐 |
+| `Audio: dropping Opuz flag ...` | ini 里的 `opuz` 被清除，按 PCM 播放 |
 | `MSU: loading track N from <路径>` | 正在打开第 N 首，`<路径>` 就是实际拼出的位置 |
 | `MSU: track N not found at <路径> (falling back to SPC)` | 第 N 首打不开，已回退原版音乐 |
 
@@ -323,21 +326,23 @@ MSU 是边玩边从 SD 卡读的，切曲瞬间会有一次文件打开和缓冲
 不能。下屏设置只有画面、加速倍率、开发者选项、更新、重启。
 开关 MSU 的方式是放/删 `msu/` 里的文件，然后重启游戏。
 
-**Q：`EnableMSU` 我写了 `true`，为什么日志还是 `disabled`？**
-因为启动检测会覆盖这个值。检测不到音轨文件时，MSU 不会启用。
-请先确认 7.1 的第 1–3 条。
+**Q：`EnableMSU` 我写了 `true`，为什么日志还是 `MSU off`？**
+因为 `MSU on` 需要音轨真的存在：探测路径没有文件时，启用也加载不出音轨，
+启动阶段就不会把 MSU 标记为开启。请先确认 7.1 的第 1–3 条，再检查
+`MSUPath` 指向的目录里确实有对应编号的文件。
 
 **Q：`deluxe` 和 `opuz` 能用吗？**
-`deluxe` 是 MSU Deluxe 变体，需要对应的音轨包；但当前 3DS 启动检测只启用
-普通 PCM 模式，变体取值会被重置。`opuz` 需要 48000 Hz，与本移植版固定的
-44100 Hz 冲突，**不可用**。
+`deluxe` 是 MSU Deluxe 变体，需要对应的音轨包；手写的 `EnableMSU = deluxe`
+会被保留（启动检测只补开关闭状态，不覆盖它）。`opuz` 需要 48000 Hz 输出，
+与本移植版固定的 44100 Hz 冲突，启动时该标志会被清除并记一条日志，
+所以 3DS 上**请用 `.pcm` 音轨**。
 
 **Q：用了 MSU 会更耗电 / 掉帧吗？**
 音轨解码与 SD 读取会多一点负载，但音乐不再经过 DSP 合成，总体接近。
 Old 3DS 在复杂场景若掉帧，可减少曲目数量。
 
 **Q：音效听起来还是老的，正常吗？**
-正常，见第 1 节：MSU 只替换音乐，音效仍由引擎合成。
+正常，音效不由 MSU 音轨提供，见第 1 节。
 
 ---
 
