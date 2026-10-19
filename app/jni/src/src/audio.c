@@ -253,7 +253,9 @@ static void MsuPlayer_Open(MsuPlayer *mp, int orig_track, bool resume_from_snaps
   mp->f = fopen(fname, "rb");
   if (mp->f == NULL) {
 #ifdef __3DS__
-    if (g_msu_log) {
+    /* Not budgeted: a run that plays 24 tracks fine must still be able to report
+     * the one that is missing, which is the whole reason this logging exists. */
+    {
       extern void Platform3DS_LogRuntime(const char *format, ...);
       Platform3DS_LogRuntime("MSU: track %d not found at %s (falling back to SPC)", (int)actual_track, fname);
     }
@@ -299,17 +301,25 @@ static void MsuPlayer_Open(MsuPlayer *mp, int orig_track, bool resume_from_snaps
   }
 }
 
+/* MSU is mixed on top of the S-DSP output, and both are full-scale int16, so a
+ * plain += can wrap past 32767 and turn a loud moment into audible crackle.  The
+ * DSP clamps its own mix but cannot know about this second stage, so saturate
+ * here.  Cheap enough to sit in the audio callback: one compare and select. */
+static inline int16 MsuSaturate(int v) {
+  return v < -0x8000 ? -0x8000 : (v > 0x7fff ? 0x7fff : v);
+}
+
 static void MixToBufferWithVolume(int16 *dst, const int16 *src, size_t n, float volume) {
   if (volume == 1.0f) {
     for (size_t i = 0; i < n; i++) {
-      dst[i * 2 + 0] += src[i * 2 + 0];
-      dst[i * 2 + 1] += src[i * 2 + 1];
+      dst[i * 2 + 0] = MsuSaturate(dst[i * 2 + 0] + src[i * 2 + 0]);
+      dst[i * 2 + 1] = MsuSaturate(dst[i * 2 + 1] + src[i * 2 + 1]);
     }
   } else {
     uint32 vol = (int32)(65536 * volume);
     for (size_t i = 0; i < n; i++) {
-      dst[i * 2 + 0] += src[i * 2 + 0] * vol >> 16;
-      dst[i * 2 + 1] += src[i * 2 + 1] * vol >> 16;
+      dst[i * 2 + 0] = MsuSaturate(dst[i * 2 + 0] + (src[i * 2 + 0] * vol >> 16));
+      dst[i * 2 + 1] = MsuSaturate(dst[i * 2 + 1] + (src[i * 2 + 1] * vol >> 16));
     }
   }
 }
@@ -319,8 +329,8 @@ static void MixToBufferWithVolumeRamp(int16 *dst, const int16 *src, size_t n, fl
   int64 step = volume_step * 281474976710656.0f;
   for (size_t i = 0; i < n; i++) {
     uint32 v = (vol >> 32);
-    dst[i * 2 + 0] += src[i * 2 + 0] * v >> 16;
-    dst[i * 2 + 1] += src[i * 2 + 1] * v >> 16;
+    dst[i * 2 + 0] = MsuSaturate(dst[i * 2 + 0] + (src[i * 2 + 0] * v >> 16));
+    dst[i * 2 + 1] = MsuSaturate(dst[i * 2 + 1] + (src[i * 2 + 1] * v >> 16));
     vol += step;
   }
 }
