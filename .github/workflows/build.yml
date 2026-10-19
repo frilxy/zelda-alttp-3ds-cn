@@ -5,8 +5,12 @@ on:
   # release in place (delete + recreate + --cleanup-tag), so an unfiltered
   # `push` meant that pushing any work-in-progress branch would overwrite the
   # release that every installed copy's in-game updater points at.
+  #
+  # `msu` is listed because its work only ships after review: pushes there build
+  # and upload the Actions artifact, while the publish step's main-only guard
+  # keeps the release untouched.  Drop the entry once the branch is merged.
   push:
-    branches: [main]
+    branches: [main, msu]
   # Pull requests build too, so branch work is verifiable without touching a
   # release: for a pull_request ref the publish step's main-only guard skips.
   pull_request:
