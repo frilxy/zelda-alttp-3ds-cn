@@ -1579,10 +1579,11 @@ static void SetupAudioStart(void) {
   DSP_FlushDataCache(g_setup_music_buffer, music_size);
   DSP_FlushDataCache(g_setup_move_buffer, move_size);
 
-  /* NDSP's output mode is GLOBAL, and the SDL n3ds audio driver never touches
-   * it (it only sets each channel's format). Setting MONO here used to poison
-   * the game's stereo mix for the whole session, because this setup jingle runs
-   * from the ROM selector before SDL opens the audio device.
+  /* NDSP's output mode is global state. This setup jingle only needs it to not
+   * be left on something narrower than the game will want later, so ask for
+   * STEREO here rather than MONO: if ndspExit() ever stops resetting the mode
+   * (it does today -- EndSetupConsole() tears NDSP down before SDL reopens it),
+   * the game's stereo mix would otherwise inherit MONO for the whole session.
    *
    * The jingle itself stays mono PCM (NDSP_FORMAT_MONO_PCM16 below); a mono
    * source on a stereo output is legal and plays on both sides. */
