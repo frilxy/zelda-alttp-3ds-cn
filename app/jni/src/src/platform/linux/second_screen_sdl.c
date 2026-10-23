@@ -468,10 +468,10 @@ static void draw_text(const char *s, float x, float y, float sc) {
 // label (remap, screen, developer, overlay, update, cinema overlay) go through
 // here so they are nudged by the same amount and cannot drift apart.
 //
-// The nudge is two pixels of the bottom-screen surface.  On 3DS u is clamped to
-// 0.5 for the 320x240 screen, so 4u is exactly 2px; the desktop preview is the
-// same 2px at its own scale.
-#define SS_BACK_LABEL_DROP (4.0f * u)
+// The nudge is one pixel of the bottom-screen surface.  On 3DS u is clamped to
+// 0.5 for the 320x240 screen, so 2u is exactly 1px; the desktop preview is the
+// same 1px at its own scale.  Two pixels overshot the plate's optical centre.
+#define SS_BACK_LABEL_DROP (2.0f * u)
 
 static void draw_back_label(float x, float y, float sc) {
   draw_text(SS_STR("BACK", "返回"), x, y + SS_BACK_LABEL_DROP, sc);
