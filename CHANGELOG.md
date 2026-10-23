@@ -2,13 +2,13 @@
 
 ## v3.2.9
 
-Nudge the bottom screen's BACK label down by two pixels.
+Nudge the bottom screen's BACK label down by one pixel.
 
 The settings panels place the label from the plate's centre, but the 16px
 Unifont cell's ink centre sits above that point, so every BACK plate read a
 little high. All six places that draw it -- remap, screen, developer, overlay,
 update and the cinema overlay -- now go through one helper that adds a fixed
-two-pixel drop, so the panels cannot drift apart again.
+one-pixel drop, so the panels cannot drift apart again.
 
 ## v3.2.8
 
