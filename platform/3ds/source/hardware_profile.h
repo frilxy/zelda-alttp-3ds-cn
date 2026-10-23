@@ -15,8 +15,11 @@ static inline const Platform3DSHardwareProfile *Platform3DS_ProfileForModel(bool
   static const Platform3DSHardwareProfile old_profile = {
     "Old 3DS E16", true, true, true, true
   };
+  /* Test build: force the E16/PICA path on New 3DS too. That renderer is the
+   * one the stereo code lives in; the trade-off is that New 3DS gives up the
+   * E6 CPU renderer's image quality. */
   static const Platform3DSHardwareProfile new_profile = {
-    "New 3DS E6 renderer", false, true, false, true
+    "New 3DS E16 (stereo test)", true, true, false, true
   };
   return is_new ? &new_profile : &old_profile;
 }

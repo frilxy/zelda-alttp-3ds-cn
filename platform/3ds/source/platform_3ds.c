@@ -989,7 +989,7 @@ bool Platform3DS_InitTopPresenter(void) {
     Platform3DS_CanUseCore1PpuWorker() ? "" : "unavailable/",
     g_core1_time_limit_percent,
     (unsigned long)g_c2d_flush_size);
-  if (!g_is_new_3ds) PpuGpuInit();
+  PpuGpuInit();  /* stereo test: also on New 3DS */
   Platform3DS_BlankScreens();
   return gfxGetScreenFormat(GFX_TOP) == GSP_RGB565_OES;
 }
@@ -1153,7 +1153,7 @@ void Platform3DS_PresentTopFrame(const uint8_t *pixels, int pitch,
   bool began = C3D_FrameBegin(0);
   g_last_gpu_begin_us = (uint32_t)((svcGetSystemTick() - begin_start) * 1000000ull / SYSCLOCK_ARM11);
   if (!began) return;
-  bool gpu_image = !g_is_new_3ds && PpuGpuOutputActive();
+  bool gpu_image = PpuGpuOutputActive();  /* stereo test: also on New 3DS */
   const float slider = osGet3DSliderState();
   const bool stereo_wanted =
     g_top_target_right && g_stereo_depth > 0 && slider > 0.02f;

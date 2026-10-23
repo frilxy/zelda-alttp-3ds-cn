@@ -6,7 +6,7 @@ project(zelda3_3ds VERSION 3.2.11 LANGUAGES C)
 # binary (the in-game updater compares against it), used for the .3dsx name, and
 # read back by build.sh and .github/workflows/build.yml to name the CIA,
 # the release tag and the release assets.  Bump it here and nowhere else.
-set(ZELDA3_3DS_VERSION "3.2.11-E1")
+set(ZELDA3_3DS_VERSION "3.2.11-E3")
 
 set(ZELDA3_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
 set(ZELDA3_NATIVE "${ZELDA3_ROOT}/app/jni/src")

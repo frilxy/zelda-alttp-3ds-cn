@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.2.11-E3
+
+Experimental stereoscopic 3D on New 3DS (test build only).
+
+- Same stereo code as v3.2.11-E1 (upstream PR #53, layer parallax), but the
+  E16/PICA200 renderer is now forced on New 3DS as well, because that is the
+  renderer the stereo path lives in. New 3DS therefore gives up the E6 CPU
+  renderer's image quality in exchange for real per-eye rendering.
+- 3D slider drives the separation; `Stereo3D` = Off / Low / Medium / High
+  (this test build defaults to Medium).
+- Not a release; no tag, CI artifact only.
+
+
 ## v3.2.11-E1
 
 Experimental stereoscopic 3D: layer parallax, from upstream PR #53 (bheppe).
