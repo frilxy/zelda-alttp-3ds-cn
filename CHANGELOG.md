@@ -15,6 +15,9 @@ torn down, so stdout is inert for the rest of the session. The default console
 template is left alone, so a later consoleInit() still restores the setup
 screens. Diagnostics keep going to runtime.log.
 
+Also drop the four bottom-screen tab captions (装备/道具/地图 and the settings
+cog plate) by one pixel: they read a touch high inside their plates.
+
 ## v3.2.9
 
 Nudge the bottom screen's BACK label down by one pixel.

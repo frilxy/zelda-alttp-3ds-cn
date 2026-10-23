@@ -1680,10 +1680,12 @@ static void draw_tab_button(RectFS r, const char *label, bool active) {
   // Unifont 16px at 1x, same face and size as the panel titles.  The cell is
   // 16px and its ink fills it, so centring the cell in the button centres the
   // text: cell_top = (r.h - 16) / 2, and draw_text puts the cell at y - 4*sc.
+  // The labels then sit 1px low: the four captions read a touch high inside
+  // their plates, so they get a flat +1px (2u) drop.
   float s = 2 * u;
   if (label)
     draw_text_tex(label, r.x + r.w / 2 - text_width(label, s) / 2,
-                  r.y + r.h / 2 - 8 * u, s, tex_cjk_large);
+                  r.y + r.h / 2 - 6 * u, s, tex_cjk_large);
 }
 
 static void draw_tab_bar(float tab_h) {
