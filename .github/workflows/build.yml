@@ -160,7 +160,7 @@ jobs:
           # The top screen renders the changelog with an ASCII-only font and
           # Update_FormatNotes strips every byte >= 128, so keep the notes ASCII.
           $GH release create "$TAG" \
-            --title "Zelda ALTTP 3DS - Simplified Chinese ($TAG)" \
+            --title "$TAG" \
             --notes "Simplified Chinese translation for the 3DS port of A Link to the Past.
 
           Assets: install the .cia with FBI, or copy the .3dsx for the Homebrew Launcher.
