@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(zelda3_3ds VERSION 3.2.11-E2 LANGUAGES C)
+project(zelda3_3ds VERSION 3.2.11 LANGUAGES C)
 
 # Single source of truth for the released version.  It is compiled into the
 # binary (the in-game updater compares against it), used for the .3dsx name, and
