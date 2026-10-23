@@ -32,6 +32,14 @@ GAME_BUILD="${ROOT}/build-3ds${SUFFIX}/game"
 OUT_BASE="zelda3-3ds-v${VERSION}${SUFFIX}"
 TOOLS_ROOT="${ZELDA3_TOOLS_ROOT:-${ROOT}/../../Tools/bin}"
 
+# Side-by-side test installs: a distinct title ID (and SMDH name) makes this
+# CIA its own HOME menu entry instead of replacing the release. The SD data
+# directory (sdmc:/3ds/Zelda 3DS) stays shared on purpose.
+TITLE_ID="${ZELDA3_TITLE_ID:-0x5A13E3}"
+PRODUCT_CODE="${ZELDA3_PRODUCT_CODE:-CTR-P-Z3D3}"
+TITLE_NAME="${ZELDA3_TITLE_NAME:-Zelda 3D E3}"
+SHORT_TITLE="${ZELDA3_SHORT_TITLE:-Zelda 3D E3}"
+
 export DEVKITPRO DEVKITARM
 
 if [[ ! -f "${SDL_PREFIX}/lib/cmake/SDL2/SDL2Config.cmake" ]]; then
@@ -74,8 +82,8 @@ if [[ ! -x "${MAKEROM}" || ! -x "${BANNERTOOL}" ]]; then
 fi
 
 "${BANNERTOOL}" makesmdh \
-  -s "The Legend of Zelda" \
-  -l "A Link to the Past 3DS port" \
+  -s "${SHORT_TITLE}" \
+  -l "${TITLE_NAME}" \
   -p "EstebanPdN" \
   -i "${ROOT}/platform/3ds/assets/icon.png" \
   -f visible,nosavebackups \
@@ -86,13 +94,21 @@ fi
   -a "${ROOT}/platform/3ds/assets/banner.wav" \
   -o "${GAME_BUILD}/zelda3-3ds.bnr"
 
+# The RSF carries the title identity; substitute it so test builds install
+# alongside the release instead of replacing it.
+TITLE_RSF="${GAME_BUILD}/zelda3-title.rsf"
+sed -e "s|^  Title: .*|  Title: \"${TITLE_NAME}\"|" \
+    -e "s|^  ProductCode: .*|  ProductCode: \"${PRODUCT_CODE}\"|" \
+    -e "s|^  UniqueId: .*|  UniqueId: ${TITLE_ID}|" \
+    "${ROOT}/platform/3ds/cia/zelda3.rsf" > "${TITLE_RSF}"
+
 (
   cd "${ROOT}"
   "${MAKEROM}" \
     -f cia \
     -o "${GAME_BUILD}/${OUT_BASE}.cia" \
     -DAPP_ROMFS="build-3ds${SUFFIX}/game/romfs" \
-    -rsf platform/3ds/cia/zelda3.rsf \
+    -rsf "${TITLE_RSF}" \
     -target t \
     -exefslogo \
     -elf "build-3ds${SUFFIX}/game/zelda3-3ds.elf" \
