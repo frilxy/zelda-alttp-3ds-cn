@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.2.10
+
+Stop the top-left corner flashing the MSU track name on every music change.
+
+libctru's consoleInit() attaches STDOUT to a devoptab that renders characters
+into the console framebuffer, and it only does that once. The setup screens then
+call gfxExit(), which frees that framebuffer, but the devoptab stays attached. So
+every later printf painted glyphs over the game: the MSU loader's "Loading MSU
+<file>" did it on each track change, which read as the track name flashing up.
+
+The live console's PrintChar hook now swallows output once the setup console is
+torn down, so stdout is inert for the rest of the session. The default console
+template is left alone, so a later consoleInit() still restores the setup
+screens. Diagnostics keep going to runtime.log.
+
 ## v3.2.9
 
 Nudge the bottom screen's BACK label down by one pixel.

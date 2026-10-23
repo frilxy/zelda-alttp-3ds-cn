@@ -1670,11 +1670,48 @@ static void PresentSetupStable(void (*draw)(void *context), void *context) {
   PresentSetupConsole();
 }
 
+/* libctru's consoleInit() points STDOUT/STDERR at a devoptab that renders each
+ * character straight into the console's framebuffer, and only ever installs it
+ * once (its firstConsoleInit flag). EndSetupConsole() then calls gfxExit(), so
+ * that framebuffer pointer is stale -- but the devoptab stays attached. Any
+ * later printf therefore paints a few glyphs over the game's top-left corner:
+ * the MSU loader's "Loading MSU <file>" did exactly that on every music change,
+ * which users saw as the track name flashing up.
+ *
+ * Swallowing every character makes stdout a no-op without tearing the console
+ * down. consolePrintChar() calls the PrintChar callback before any cursor or
+ * newline handling, so returning true there makes printf inert for every byte.
+ * Only the live console is touched, never the defaultConsole template: a later
+ * consoleInit() copies that template over the live console and restores normal
+ * rendering for the setup screens. Runtime diagnostics belong in runtime.log
+ * via Platform3DS_LogRuntime(). */
+static bool SwallowConsoleChar(void *console, int c) {
+  (void)console;
+  (void)c;
+  return true;
+}
+
+static void DetachConsoleStdio(void) {
+  /* consoleGetDefault() is the template; the live console is libctru's copy of
+   * it. consoleSelect() is the only accessor, so swap in the template to read
+   * the current pointer and put it straight back. */
+  PrintConsole *template = consoleGetDefault();
+  if (template == NULL)
+    return;
+  PrintConsole *live = consoleSelect(template);
+  consoleSelect(live);
+  if (live == NULL || live == template)
+    return;
+  live->PrintChar = SwallowConsoleChar;
+  consoleDebugInit(debugDevice_SVC);
+}
+
 static void EndSetupConsole(void) {
   if (!g_setup_console_active)
     return;
   PresentSetupConsole();
   SetupAudioStop();
+  DetachConsoleStdio();
   g_startup_lcd_black = true;
   GSPGPU_SetLcdForceBlack(1);
   gfxExit();
