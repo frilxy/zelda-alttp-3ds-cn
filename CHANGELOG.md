@@ -15,8 +15,9 @@ torn down, so stdout is inert for the rest of the session. The default console
 template is left alone, so a later consoleInit() still restores the setup
 screens. Diagnostics keep going to runtime.log.
 
-Also drop the 装备/道具/设置 panel titles by one pixel: they read a touch high
-inside their frames. The map view has no title, so only those three move.
+Also centre the 装备/道具/设置 panel titles between the frame's inner edge and
+the first row (16px cell, 9u above / 55u below => 24u). The map view has no
+title, so only those three move.
 
 ## v3.2.9
 

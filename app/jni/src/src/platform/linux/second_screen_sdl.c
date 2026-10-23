@@ -913,7 +913,9 @@ static void draw_dungeon(RectFS r, int link_x, int link_y, int room, int dungeon
 
 static void draw_items(RectFS r) {
   menu_box(r, COL_BOX_BORDER);
-  draw_text_tex(SS_STR("ITEMS","道具"), r.x + r.w / 2 - text_width(SS_STR("ITEMS","道具"), 2 * u) / 2, r.y + 22 * u, 2 * u, tex_cjk_large);
+  // Title cell centred between the frame's inner edge (r.y + 9u) and the
+  // first row (r.y + 55u): (9u + 55u - 16) / 2 = 24u.
+  draw_text_tex(SS_STR("ITEMS","道具"), r.x + r.w / 2 - text_width(SS_STR("ITEMS","道具"), 2 * u) / 2, r.y + 24 * u, 2 * u, tex_cjk_large);
 
   float cw1 = (r.w - 70 * u) / 5, cw2 = (r.h - 100 * u) / 4;
   float cellW = cw1 < cw2 ? cw1 : cw2;
@@ -949,7 +951,7 @@ static void draw_gear(RectFS r) {
   // tiny font at a non-integer 1.4x, which also made the characters fuzzy).
   draw_text_tex(SS_STR("GEAR","装备"),
                 r.x + r.w / 2 - text_width(SS_STR("GEAR","装备"), 2 * u) / 2,
-                r.y + 22 * u, 2 * u, tex_cjk_large);
+                r.y + 24 * u, 2 * u, tex_cjk_large);
 
   int sword = sram8(0x59), shield = sram8(0x5A);
   int gear_cells[7];
@@ -1615,7 +1617,7 @@ static void draw_settings(RectFS r) {
       draw_developer_panel(r);
     return;
   }
-  draw_text_tex(SS_STR("SETTINGS","设置"), r.x + r.w / 2 - text_width(SS_STR("SETTINGS","设置"), 2 * u) / 2, r.y + 22 * u, 2 * u, tex_cjk_large);
+  draw_text_tex(SS_STR("SETTINGS","设置"), r.x + r.w / 2 - text_width(SS_STR("SETTINGS","设置"), 2 * u) / 2, r.y + 24 * u, 2 * u, tex_cjk_large);
 
   char turbo_value[12];
 #ifdef __3DS__
