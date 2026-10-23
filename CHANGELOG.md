@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.2.11-E1
+
+Experimental stereoscopic 3D: layer parallax, from upstream PR #53 (bheppe).
+
+- The 3D slider drives per-eye parallax; zelda3.ini `Stereo3D` = Off / Low /
+  Medium / High (default Medium).
+- Depth comes from SNES layer priority, plus object lean: character upper
+  bodies, trees/roofs/bushes, HUD and dialog boxes, water, and a gentle tilt on
+  the Mode 7 world map. Every knob has an ini key with a default.
+- Old 3DS PICA200 path only. New 3DS/2DS get a flat shift (2DS: none).
+- Test build: not a release, no tag, published only as a CI artifact.
+
+
 ## v3.2.10
 
 Stop the top-left corner flashing the MSU track name on every music change.
