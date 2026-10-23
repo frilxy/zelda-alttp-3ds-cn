@@ -462,6 +462,21 @@ static void draw_text(const char *s, float x, float y, float sc) {
   draw_text_tex(s, x, y, sc, tex_cjk);
 }
 
+// The settings panels' BACK label sits a touch high inside its plate: the 16px
+// cell's ink centre is above the plate's optical centre, and the per-panel
+// `h / 2 - 9u` style shifts only approximated it.  All six places that draw the
+// label (remap, screen, developer, overlay, update, cinema overlay) go through
+// here so they are nudged by the same amount and cannot drift apart.
+//
+// The nudge is two pixels of the bottom-screen surface.  On 3DS u is clamped to
+// 0.5 for the 320x240 screen, so 4u is exactly 2px; the desktop preview is the
+// same 2px at its own scale.
+#define SS_BACK_LABEL_DROP (4.0f * u)
+
+static void draw_back_label(float x, float y, float sc) {
+  draw_text(SS_STR("BACK", "返回"), x, y + SS_BACK_LABEL_DROP, sc);
+}
+
 
 static const uint8_t *tiny_letter(char ch) {
   static const uint8_t letters[26][7] = {
@@ -1224,8 +1239,8 @@ static void draw_remap_panel(RectFS r) {
             r.y + 20 * u, 2 * u, tex_cjk_large);
   remap_back_r = (RectFS){r.x + 14 * u, r.y + 12 * u, 76 * u, 32 * u};
   draw_settings_row(&remap_back_r, false);
-  draw_text(SS_STR("BACK","返回"), remap_back_r.x + remap_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
-            remap_back_r.y + remap_back_r.h / 2 - 7 * u, 2 * u);
+  draw_back_label(remap_back_r.x + remap_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
+                  remap_back_r.y + remap_back_r.h / 2 - 7 * u, 2 * u);
 
   // resolve a pending capture from the game thread
   if (remap_arm >= 0) {
@@ -1310,8 +1325,8 @@ static void draw_screen_panel(RectFS r) {
             r.y + 20 * u, 2 * u, tex_cjk_large);
   screen_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&screen_back_r, false);
-  draw_text(SS_STR("BACK","返回"), screen_back_r.x + screen_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
-            screen_back_r.y + screen_back_r.h / 2 - 9 * u, 2 * u);
+  draw_back_label(screen_back_r.x + screen_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
+                  screen_back_r.y + screen_back_r.h / 2 - 9 * u, 2 * u);
 
   const char *edge_value = SS_STR("FIXED CAMERA", "固定视角");
 #ifdef __3DS__
@@ -1376,8 +1391,8 @@ static void draw_developer_panel(RectFS r) {
             r.y + 20 * u, 2 * u, tex_cjk_large);
   developer_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&developer_back_r, false);
-  draw_text(SS_STR("BACK","返回"), developer_back_r.x + developer_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
-            developer_back_r.y + developer_back_r.h / 2 - 9 * u, 2 * u);
+  draw_back_label(developer_back_r.x + developer_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
+                  developer_back_r.y + developer_back_r.h / 2 - 9 * u, 2 * u);
 
   bool show_fps = false;
 #ifdef __3DS__
@@ -1450,8 +1465,8 @@ static void draw_developer_overlay_panel(RectFS r) {
             r.y + 20 * u, 2 * u, tex_cjk_large);
   developer_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&developer_back_r, false);
-  draw_text(SS_STR("BACK","返回"), developer_back_r.x + developer_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
-            developer_back_r.y + developer_back_r.h / 2 - 9 * u, 2 * u);
+  draw_back_label(developer_back_r.x + developer_back_r.w / 2 - text_width(SS_STR("BACK","返回"), 2 * u) / 2,
+                  developer_back_r.y + developer_back_r.h / 2 - 9 * u, 2 * u);
 
   char version[32], model[32], fps_now[32], fps_avg[32], core[32],
        display[32], location[48], module[32];
@@ -1516,8 +1531,8 @@ static void draw_update_panel(RectFS r) {
             r.y + 20 * u, 2 * u, tex_cjk_large);
   update_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
   draw_settings_row(&update_back_r, false);
-  draw_text(SS_STR("BACK", "返回"), update_back_r.x + 16 * u,
-            update_back_r.y + 10 * u, 2 * u);
+  draw_back_label(update_back_r.x + 16 * u,
+                  update_back_r.y + 10 * u, 2 * u);
 #ifdef __3DS__
   UpdateStatus st; Updater_GetStatus(&st);
   update_channel_r = (RectFS){r.x + 28 * u, r.y + 62 * u, r.w - 56 * u, 44 * u};
@@ -1648,10 +1663,9 @@ static void draw_cinema_settings_overlay(void) {
   if (!screen_mode && !remap_mode && !developer_mode && !update_mode) {
     cinema_back_r = (RectFS){r.x + 20 * u, r.y + 12 * u, 90 * u, 38 * u};
     draw_settings_row(&cinema_back_r, false);
-    draw_text(SS_STR("BACK", "返回"),
-              cinema_back_r.x + cinema_back_r.w / 2 -
-                text_width(SS_STR("BACK", "返回"), 2 * u) / 2,
-              cinema_back_r.y + cinema_back_r.h / 2 - 9 * u, 2 * u);
+    draw_back_label(cinema_back_r.x + cinema_back_r.w / 2 -
+                      text_width(SS_STR("BACK", "返回"), 2 * u) / 2,
+                    cinema_back_r.y + cinema_back_r.h / 2 - 9 * u, 2 * u);
   } else {
     cinema_back_r = (RectFS){0, 0, 0, 0};
   }

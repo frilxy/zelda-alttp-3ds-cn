@@ -129,9 +129,10 @@ read its changelog on the top screen, with Prev/Next below for more pages.
 Choose Download Update and confirm installation, then reopen the game.
 Save in-game before installing. Startup checks also indicate newer releases.
 
-Version [v3.2.8](https://github.com/frilxy/zelda-alttp-3ds-cn/releases/tag/v3.2.8)
-is the latest stable release. Select the Stable channel to install it. It fixes Restart retaining stale game RAM after ROM
-reselection, which could leave gameplay black and silent.
+Version [v3.2.9](https://github.com/frilxy/zelda-alttp-3ds-cn/releases/tag/v3.2.9)
+is the latest stable release. Select the Stable channel to install it. It drops
+the BACK label on every settings panel by two pixels so it sits centred in its
+plate.
 
 Settings is Screen, Turbo Speed, Developer, Update, Restart. Restart opens
 the ROM selector and starts the selected ROM fresh; existing saves remain.

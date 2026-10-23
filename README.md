@@ -42,13 +42,13 @@ Nintendo 3DS 双屏移植版《塞尔达传说：众神的三角力量》，本 
 
 | 文件 | 用途 |
 |---|---|
-| `zelda3-3ds-v3.2.8-cn-bottom.cia` | FBI 安装（推荐） |
-| `zelda3-3ds-v3.2.8-cn-bottom.3dsx` | Homebrew Launcher |
+| `zelda3-3ds-v3.2.9-cn-bottom.cia` | FBI 安装（推荐） |
+| `zelda3-3ds-v3.2.9-cn-bottom.3dsx` | Homebrew Launcher |
 | `cn_language.bin` | 备用中文语言块（一般无需使用） |
 
 发布规则：
 
-- Release 的 tag 就是编译进程序的版本号（当前 `v3.2.8`）——游戏内更新器只认这种合法版本号，
+- Release 的 tag 就是编译进程序的版本号（当前 `v3.2.9`）——游戏内更新器只认这种合法版本号，
   所以不使用 `latest` 之类的滚动 tag；`/releases/latest` 依旧指向最新版本。
 - **版本号变化 → 新增一个 Release**（旧版本保留，可随时回退下载）。
 - **同一版本重新构建 → 原地覆盖该版本的 Release**：资产与说明一并替换，tag 指向产生这些产物的那次提交；
