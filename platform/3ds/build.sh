@@ -35,7 +35,7 @@ TOOLS_ROOT="${ZELDA3_TOOLS_ROOT:-${ROOT}/../../Tools/bin}"
 # Side-by-side test installs: a distinct title ID (and SMDH name) makes this
 # CIA its own HOME menu entry instead of replacing the release. The SD data
 # directory (sdmc:/3ds/Zelda 3DS) stays shared on purpose.
-TITLE_ID="${ZELDA3_TITLE_ID:-0x5A13E1}"
+TITLE_ID="${ZELDA3_TITLE_ID:-0x5A13F}"
 PRODUCT_CODE="${ZELDA3_PRODUCT_CODE:-CTR-P-Z3D1}"
 TITLE_NAME="${ZELDA3_TITLE_NAME:-Zelda 3D E1}"
 SHORT_TITLE="${ZELDA3_SHORT_TITLE:-Zelda 3D E1}"
