@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.2.11-E2
+
+Experimental stereoscopic 3D: terrain depth, from upstream PR #52 (djaysan).
+Only the 3D parts are included; that PR's bottom-screen restyle and GUIDE tab
+are not.
+
+- Depth comes from a height field solved from the game's collision data
+  (overworld map8 table, dungeon attribute table), sampled per tile corner, so
+  plateaus, ledges and stairs sit at different heights. `Stereo3DTerrain = 0`
+  falls back to plain layer depth.
+- The solve runs on core 1; without core-1 time it falls back to an inline
+  solve every eighth frame.
+- 3D slider drives the separation; `Stereo3D` = Off / Low / Medium / High
+  (this test build defaults to Medium).
+- Old 3DS PICA200 path only; New 3DS and 2DS stay mono.
+- Test build: not a release, no tag, published only as a CI artifact.
+
+
 ## v3.2.10
 
 Stop the top-left corner flashing the MSU track name on every music change.

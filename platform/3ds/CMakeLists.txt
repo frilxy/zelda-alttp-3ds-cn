@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(zelda3_3ds VERSION 3.2.10 LANGUAGES C)
+project(zelda3_3ds VERSION 3.2.11-E2 LANGUAGES C)
 
 # Single source of truth for the released version.  It is compiled into the
 # binary (the in-game updater compares against it), used for the .3dsx name, and
 # read back by build.sh and .github/workflows/build.yml to name the CIA,
 # the release tag and the release assets.  Bump it here and nowhere else.
-set(ZELDA3_3DS_VERSION "3.2.10")
+set(ZELDA3_3DS_VERSION "3.2.11-E2")
 
 set(ZELDA3_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
 set(ZELDA3_NATIVE "${ZELDA3_ROOT}/app/jni/src")
@@ -41,6 +41,9 @@ set(ZELDA3_3DS_SOURCES
   "${CMAKE_CURRENT_LIST_DIR}/source/update_manifest.c"
   "${CMAKE_CURRENT_LIST_DIR}/source/ppu_gpu.c"
   "${CMAKE_CURRENT_LIST_DIR}/source/ppu_gpu_model.c"
+  "${CMAKE_CURRENT_LIST_DIR}/source/stereo_terrain.c"
+  "${CMAKE_CURRENT_LIST_DIR}/source/stereo_terrain_source.c"
+  "${CMAKE_CURRENT_LIST_DIR}/source/stereo_terrain_worker.c"
 )
 
 ctr_add_shader_library(alttp_pica_shader source/ppu_gpu.v.pica)
