@@ -1012,7 +1012,10 @@ static void draw_gear(RectFS r) {
   }
 
   float cyC = y1 + 49.0f;
-  draw_tiny_text(SS_STR("CRYSTALS","水晶"), x0, cyC - 12.0f, 1.0f, COL(250, 250, 250));
+  // The 16px CJK cell is blitted at y - 4 and its ink centre is cell row 7,
+  // so the drawn ink centre is y + 3. Pass cyC - 3 to line that centre up with
+  // the crystal circles' centre (cyC) on the right.
+  draw_tiny_text(SS_STR("CRYSTALS","水晶"), x0, cyC - 3.0f, 1.0f, COL(250, 250, 250));
   float crystal_start = x0 + 78.0f;
   float crystal_step = 23.0f;
   int owned7 = sram8(0x7A) & 0x7F, n_owned = 0;
@@ -1025,7 +1028,9 @@ static void draw_gear(RectFS r) {
   }
 
   float yp = cyC + 25.0f;
-  draw_glyph(SS_GLYPH_HEART_FULL, x0, yp - 3.0f, 1.7f);
+  // Grow the heart to twice its old size (1.7 -> 3.4) with the cell's top-left
+  // pinned at (x0, yp - 3), so it expands right and down only.
+  draw_glyph(SS_GLYPH_HEART_FULL, x0, yp - 3.0f, 3.4f);
   int pieces = sram8(0x6B) & 3;
   for (int i = 0; i < 4; i++) {
     float gx = x0 + 34.0f + i * 25.0f, gy = yp;
