@@ -1028,9 +1028,10 @@ static void draw_gear(RectFS r) {
   }
 
   float yp = cyC + 25.0f;
-  // Grow the heart to twice its old size (1.7 -> 3.4) with the cell's top-left
-  // pinned at (x0, yp - 3), so it expands right and down only.
-  draw_glyph(SS_GLYPH_HEART_FULL, x0, yp - 3.0f, 3.4f);
+  // Match the heart to the heart-piece box beside it: the box's gold outer
+  // square is 20px, so the 8px glyph is drawn at 2.5 (8 * 2.5 = 20). The cell's
+  // top-left stays at (x0, yp - 3); only the size changes.
+  draw_glyph(SS_GLYPH_HEART_FULL, x0, yp - 3.0f, 2.5f);
   int pieces = sram8(0x6B) & 3;
   for (int i = 0; i < 4; i++) {
     float gx = x0 + 34.0f + i * 25.0f, gy = yp;
