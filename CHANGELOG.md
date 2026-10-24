@@ -1,5 +1,16 @@
 # Changelog
 
+## v3.2.11
+
+Two small fixes on the bottom screen's gear page.
+
+- The 水晶 label sat 9px above the crystal circles it names. The 16px CJK cell
+  is blitted at `y - 4` and its ink centre is cell row 7, so the label is now
+  drawn at `cyC - 3`: its ink centre lands exactly on the circles' centre line.
+- The heart in front of the heart-piece row is drawn at 2x (1.7 -> 3.4). Its
+  cell top-left stays at the old (x0, yp - 3), so it grows right and down only.
+
+
 ## v3.2.10
 
 Stop the top-left corner flashing the MSU track name on every music change.
