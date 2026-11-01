@@ -67,27 +67,21 @@ def gb2312_level1() -> list[str]:
 
 
 def render(font: ImageFont.FreeTypeFont, ch: str, size: int) -> list[int]:
-    """One glyph as rows of bits, most significant bit leftmost, ink centred."""
-    box = size + size // 2
-    image = Image.new('L', (box, box), 0)
+    """One glyph as rows of bits, most significant bit leftmost.
+
+    Drawn on the font's own baseline inside a size x size cell: a character
+    fills its square, and punctuation (, and .) sits at the bottom where it
+    belongs instead of being centred like an ideograph.
+    """
+    image = Image.new('L', (size, size), 0)
     draw = ImageDraw.Draw(image)
-    draw.text((box // 4, box // 4), ch, font=font, fill=255, anchor='lt')
-    ink = image.getbbox()
-    if ink is None:
-        return [0] * size
-    image = image.crop(ink)
-    width = min(image.width, size)
-    height = min(image.height, size)
-    left = (size - width) // 2
-    top = (size - height) // 2
+    draw.text((0, 0), ch, font=font, fill=255, anchor='la')
     rows = []
     for y in range(size):
         bits = 0
-        if 0 <= y - top < height:
-            for x in range(size):
-                if 0 <= x - left < width:
-                    if image.getpixel((x - left, y - top)) > 127:
-                        bits |= 1 << (size - 1 - x)
+        for x in range(size):
+            if image.getpixel((x, y)) > 127:
+                bits |= 1 << (size - 1 - x)
         rows.append(bits)
     return rows
 

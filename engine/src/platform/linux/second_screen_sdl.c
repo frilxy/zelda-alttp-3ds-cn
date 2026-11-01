@@ -456,6 +456,21 @@ static float tiny_text_width(const char *s, float sc) {
   return UiFontWidth(s, (int)fmaxf(1, floorf(sc + 0.5f)));
 }
 
+// The 16x16 glyphs are drawn straight into the frame: an atlas of the whole
+// wide set would be several megabytes of texture for the few characters a
+// title or a value needs.
+static void draw_cjk_runs(const uint16_t *glyph, int size, int x, int y, uint32_t color) {
+  for (int row = 0; row < size; row++) {
+    uint32_t bits = glyph[row];
+    for (int col = 0; col < size; ) {
+      if (!(bits & (1u << (size - 1 - col)))) { col++; continue; }
+      int start = col;
+      while (col < size && (bits & (1u << (size - 1 - col)))) col++;
+      fill_rect(x + start, y + row, col - start, 1, color);
+    }
+  }
+}
+
 // Chinese glyphs, one texture per size (see ui_font_cjk.h). Built on first
 // use like the Latin atlases, and only when the UI strings actually carry
 // Chinese, so a build without the language never allocates them.
@@ -472,6 +487,8 @@ static SDL_Texture *cjk_texture(int size) {
     return NULL;
   for (int i = 0; i < UiCjk_SmallCount(); i++) {
     const uint16_t *glyph = UiCjk_SmallRows(i, size);
+    if (!glyph)
+      continue;
     int bx = (i % 16) * size, by = (i / 16) * size;
     for (int y = 0; y < size; y++)
       for (int x = 0; x < size; x++)
@@ -525,9 +542,15 @@ static void draw_tiny_text(const char *s, float x, float y, float sc, uint32_t c
   while (*s) {
     const char *before = s;
     uint32_t codepoint = UiFont_DecodeUtf8(&s);
+    int size = UiCjk_SizeForScale(scale);
+    if (size == 16) {
+      const uint16_t *glyph = UiCjk_WideRows(codepoint);
+      if (glyph) draw_cjk_runs(glyph, 16, (int)lroundf(cx), cy - 2 * scale, c);
+      cx += 16;
+      continue;
+    }
     int cjk = UiCjk_SmallIndex(codepoint);
     if (cjk >= 0) {
-      int size = UiCjk_SizeForScale(scale);
       SDL_Texture *atlas = cjk_texture(size);
       if (atlas) {
         SDL_SetTextureColorMod(atlas, (c>>16)&255, (c>>8)&255, c&255);

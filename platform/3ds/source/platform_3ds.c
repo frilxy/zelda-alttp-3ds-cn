@@ -4805,7 +4805,7 @@ static void SetupMenuText(gfxScreen_t target,const char *text,int x,int y,int sc
       // Chinese is baked at one size, 16x16, and centred against the line the
       // Latin patterns occupy.
       int rows=scale==3?15:scale==2?21:11;
-      int top=y-(scale==3?3:2*scale)+(rows-16)/2;
+      int top=y-(scale==3?4:2*scale)+(rows-16)/2;
       for(int yy=0;yy<16;yy++)for(int xx=0;xx<16;xx++)
         if(cjk[yy]&(1u<<(15-xx)))SetupPutPixel(target,x+xx,top+yy,color);
       x+=16;
