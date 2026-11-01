@@ -1,4 +1,5 @@
 #include "messaging.h"
+#include "dialogue_cjk.h"
 #include "zelda_rtl.h"
 #include "test_scenarios.h"
 #include "rando/rando.h"  // Phase B Slice 1 — Rando_OnGameSave
@@ -2571,6 +2572,12 @@ uint32 Text_DecodeCmd(uint8 a, const uint8 *src) {
       return TEXTCMD_MK(0, a - kTextCommandStart_US, 0);
   } else {
     // EU encoding
+    // A language with CJK glyphs (dialogue_flags bit 2) names a glyph with an
+    // escape prefix and an index byte instead of a letter code.
+    uint32 cjk_char;
+    if ((g_zenv.dialogue_flags & kDialogueCjkFlag) &&
+        DialogueCjk_DecodeEscape(a, *src, &cjk_char))
+      return TEXTCMD_MK(cjk_char, kTextCmd_IsLetter, 1);
     if (a < 0x7f)
       return TEXTCMD_MK(a, kTextCmd_IsLetter, 0);
     static const uint8 kSoundLut[] = {45};
@@ -2941,7 +2948,24 @@ void VWF_RenderSingle(int c) {  // 8ecab8
     vwf_var1 = kVWF_RenderCharacter_linePositions[vwf_curline>>1];
     vwf_flag_next_line = 0;
   }
-  
+
+  // A CJK glyph is 16x16 and cannot go through the letter path below, which
+  // would look its width up in the 99-letter table. The language block keeps
+  // the glyphs behind those letters and their widths behind the letters'.
+  if ((g_zenv.dialogue_flags & kDialogueCjkFlag) && DialogueCjk_IsGlyph(c)) {
+    DialogueCjkTarget target = {
+      .buf = (uint8 *)messaging_buf,
+      .arr = vwf_arr,
+      .pen = &vwf_var1,
+      .line = vwf_line_ptr,
+      .glyphs = FindIndexInMemblk(g_zenv.dialogue_font_blk, 0).ptr +
+                kDialogueCjkFontOffset,
+      .widths = FindIndexInMemblk(g_zenv.dialogue_font_blk, 1).ptr,
+    };
+    DialogueCjk_Render(&target, c - kDialogueCjkFirstChar);
+    return;
+  }
+
   const uint8 *kFontData = FindIndexInMemblk(g_zenv.dialogue_font_blk, 0).ptr;
   uint8 width = FindIndexInMemblk(g_zenv.dialogue_font_blk, 1).ptr[c];
   assert(width <= 8);
