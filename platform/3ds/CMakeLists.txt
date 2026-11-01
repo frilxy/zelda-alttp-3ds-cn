@@ -147,14 +147,19 @@ configure_file(
 
 configure_file("${CMAKE_CURRENT_LIST_DIR}/romfs/update-ca.pem" "${ZELDA3_ROMFS}/update-ca.pem" COPYONLY)
 
-# Language patches (romfs:/languages/<code>.bps), USA ROM -> translation; see
-# romfs/languages/README.md. A language whose patch is missing is offered but
-# reports itself unavailable when chosen.
+# Language data (romfs:/languages/<code>): patches (`.bps`, USA ROM ->
+# translation) and packs (`.bin`, text and font for a language that is not a
+# ROM hack); see romfs/languages/README.md. A language whose file is missing is
+# offered but reports itself unavailable when chosen.
 file(REMOVE_RECURSE "${ZELDA3_ROMFS}/languages")
-file(GLOB ZELDA3_LANGUAGE_PATCHES "${CMAKE_CURRENT_LIST_DIR}/romfs/languages/*.bps")
-file(COPY ${ZELDA3_LANGUAGE_PATCHES} DESTINATION "${ZELDA3_ROMFS}/languages")
-list(LENGTH ZELDA3_LANGUAGE_PATCHES ZELDA3_LANGUAGE_PATCH_COUNT)
-message(STATUS "Language patches in the RomFS: ${ZELDA3_LANGUAGE_PATCH_COUNT}")
+file(GLOB ZELDA3_LANGUAGE_FILES
+  "${CMAKE_CURRENT_LIST_DIR}/romfs/languages/*.bps"
+  "${CMAKE_CURRENT_LIST_DIR}/romfs/languages/*.bin")
+if(ZELDA3_LANGUAGE_FILES)
+  file(COPY ${ZELDA3_LANGUAGE_FILES} DESTINATION "${ZELDA3_ROMFS}/languages")
+endif()
+list(LENGTH ZELDA3_LANGUAGE_FILES ZELDA3_LANGUAGE_FILE_COUNT)
+message(STATUS "Language files in the RomFS: ${ZELDA3_LANGUAGE_FILE_COUNT}")
 
 # Mods built into the RomFS (romfs:/mods/<mod>/), listed with those of the SD
 # card: ZELDA3_BUNDLED_MODS is a folder of mod folders, each with its mod.ini.

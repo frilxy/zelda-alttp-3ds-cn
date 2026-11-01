@@ -67,6 +67,18 @@ jobs:
           fi
           cat "$GITHUB_ENV"
 
+      - name: Install the Chinese language pack
+        run: |
+          # The pack carries translated game text, so this branch does not
+          # commit it; the release branch carries the same file. Without it the
+          # build still compiles, but the artifact would have no Chinese in it.
+          git fetch --depth 1 origin main
+          git show FETCH_HEAD:cn_language.bin > platform/3ds/romfs/languages/zh.bin
+          ls -l platform/3ds/romfs/languages/zh.bin
+          if command -v python3 >/dev/null; then
+            python3 tools/languages/check_language_pack.py platform/3ds/romfs/languages/zh.bin
+          fi
+
       - name: Build 3DSX and CIA
         env:
           ZELDA3_TOOLS_ROOT: /opt/tools
