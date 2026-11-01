@@ -2,15 +2,11 @@
 """Generate engine/src/ui_glyphs_cjk.h: the Chinese glyphs the port's own
 screens draw.
 
-Two sets, because the two screens have different needs:
-
-  all characters   GB2312 level 1 plus every character the UI strings use.
-                   16x16 only (GNU Unifont) - the setup views and the update
-                   notes draw at one size, and the notes carry arbitrary text
-                   fetched at runtime, so the set has to be broad.
-  UI characters    the characters the port's own strings use, at the three
-                   sizes the bottom screen draws: 10 and 12 px Fusion Pixel,
-                   16 px GNU Unifont.
+One set: exactly the characters the port's strings use, at the three sizes the
+screens draw (10 and 12 px Fusion Pixel, 16 px GNU Unifont). Text the port does
+not own - a release note fetched from GitHub, a mod's description - is not
+covered; add its characters to the strings (or extend this tool's sources) and
+bake again.
 
 The fonts are OFL and are not committed (several megabytes); pass --font-dir:
 
@@ -54,18 +50,6 @@ def collect_ui_chars(root: Path) -> list[str]:
     return sorted(chars)
 
 
-def gb2312_level1() -> list[str]:
-    """The 3755 common characters GB2312 level 1 holds (rows 16..55)."""
-    chars = []
-    for hi in range(0xB0, 0xD8):
-        for lo in range(0xA1, 0xFF):
-            try:
-                chars.append(bytes([hi, lo]).decode('gb2312'))
-            except UnicodeDecodeError:
-                pass
-    return chars
-
-
 def render(font: ImageFont.FreeTypeFont, ch: str, size: int) -> list[int]:
     """One glyph as rows of bits, most significant bit leftmost.
 
@@ -107,7 +91,7 @@ def main() -> None:
     ui_chars = collect_ui_chars(root)
     if not ui_chars:
         raise SystemExit('no Chinese characters found in the UI strings')
-    wide_chars = sorted(set(ui_chars) | set(gb2312_level1()))
+    wide_chars = ui_chars
 
     paths = dict(SMALL_SIZES)
     paths[WIDE_SIZE] = WIDE_FONT
@@ -127,30 +111,19 @@ def main() -> None:
         '#pragma once',
         '#include <stdint.h>',
         '',
-        f'// {len(wide_chars)} characters at 16x16 (16 px GNU Unifont): GB2312 level 1',
-        '// plus everything the UI strings use. Sorted by codepoint.',
-        f'#define kUiCjkGlyphCount {len(wide_chars)}',
+        f'// {len(ui_chars)} characters, sorted by codepoint: exactly what the port\'s',
+        '// own strings use, at the sizes its screens draw.',
+        f'#define kUiCjkGlyphCount {len(ui_chars)}',
         f'#define kUiCjkFirstCodepoint 0x{FIRST_CJK:X}',
         '',
         'static const uint32_t kUiCjkCodepoints[kUiCjkGlyphCount] = {',
-        *[f'  0x{ord(ch):04x},' for ch in wide_chars],
-        '};',
-        '',
-    ]
-    emit_table(out, 'uint16_t', 'kUiCjk16', 16, wide_chars, wide)
-
-    out += [
-        f'// {len(ui_chars)} characters the port\'s own strings use, at the sizes the',
-        '// bottom screen draws (10 and 12 px Fusion Pixel).',
-        f'#define kUiCjkSmallCount {len(ui_chars)}',
-        '',
-        'static const uint32_t kUiCjkSmallCodepoints[kUiCjkSmallCount] = {',
         *[f'  0x{ord(ch):04x},' for ch in ui_chars],
         '};',
         '',
     ]
-    for size in (10, 12):
-        emit_table(out, 'uint16_t', f'kUiCjk{size}', size, ui_chars, narrow[size])
+    for size in (10, 12, 16):
+        glyphs = narrow[size] if size in narrow else wide
+        emit_table(out, 'uint16_t', f'kUiCjk{size}', size, ui_chars, glyphs)
 
     rendered = '\n'.join(out).rstrip('\n') + '\n'
     target = root / 'engine/src/ui_glyphs_cjk.h'

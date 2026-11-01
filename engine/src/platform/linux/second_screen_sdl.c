@@ -456,37 +456,17 @@ static float tiny_text_width(const char *s, float sc) {
   return UiFontWidth(s, (int)fmaxf(1, floorf(sc + 0.5f)));
 }
 
-// The 16x16 glyphs are drawn straight into the frame: an atlas of the whole
-// wide set would be several megabytes of texture for the few characters a
-// title or a value needs.
-static void draw_cjk_runs(const uint16_t *glyph, int size, int x, int y, uint32_t color) {
-  for (int row = 0; row < size; row++) {
-    uint32_t bits = glyph[row];
-    for (int col = 0; col < size; ) {
-      if (!(bits & (1u << (size - 1 - col)))) { col++; continue; }
-      int start = col;
-      while (col < size && (bits & (1u << (size - 1 - col)))) col++;
-      fill_rect(x + start, y + row, col - start, 1, color);
-    }
-  }
-}
-
-// Chinese glyphs, one texture per size (see ui_font_cjk.h). Built on first
-// use like the Latin atlases, and only when the UI strings actually carry
-// Chinese, so a build without the language never allocates them.
-static SDL_Texture *g_cjk_textures[3];
-
 static SDL_Texture *cjk_texture(int size) {
   int slot = size == 16 ? 2 : size == 12 ? 1 : 0;
   if (g_cjk_textures[slot])
     return g_cjk_textures[slot];
-  int rows = (UiCjk_SmallCount() + 15) / 16;
+  int rows = (UiCjk_GlyphCount() + 15) / 16;
   int w = 16 * size, h = rows * size;
   uint32_t *pixels = calloc((size_t)w * (size_t)h, sizeof(*pixels));
   if (!pixels)
     return NULL;
-  for (int i = 0; i < UiCjk_SmallCount(); i++) {
-    const uint16_t *glyph = UiCjk_SmallRows(i, size);
+  for (int i = 0; i < UiCjk_GlyphCount(); i++) {
+    const uint16_t *glyph = UiCjk_Rows(i, size);
     if (!glyph)
       continue;
     int bx = (i % 16) * size, by = (i / 16) * size;
@@ -543,15 +523,8 @@ static void draw_tiny_text(const char *s, float x, float y, float sc, uint32_t c
     const char *before = s;
     uint32_t codepoint = UiFont_DecodeUtf8(&s);
     int size = UiCjk_SizeForScale(scale);
-    if (size == 16) {
-      const uint16_t *glyph = UiCjk_WideRows(codepoint);
-      if (glyph) draw_cjk_runs(glyph, 16, (int)lroundf(cx),
-                               cy + UiCjk_TopOffset(scale, 16), c);
-      cx += 16;
-      continue;
-    }
-    int cjk = UiCjk_SmallIndex(codepoint);
-    if (cjk >= 0) {
+    int cjk = UiCjk_Index(codepoint);
+    if (cjk >= 0 && size) {
       SDL_Texture *atlas = cjk_texture(size);
       if (atlas) {
         SDL_SetTextureColorMod(atlas, (c>>16)&255, (c>>8)&255, c&255);

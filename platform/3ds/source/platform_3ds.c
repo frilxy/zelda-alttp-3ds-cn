@@ -2275,7 +2275,7 @@ static uint8_t SetupGlyph(uint32_t code, int row) {
 static int SetupTextWidth(const char *text, int scale) {
   int width = 0;
   while (text && *text)
-    width += UiCjk_WideRows(SetupNextChar(&text)) ? 16 : 6 * scale;
+    width += UiCjk_RowsFor(SetupNextChar(&text)) ? 16 : 6 * scale;
   return width;
 }
 
@@ -2283,7 +2283,7 @@ static void SetupDrawChar(gfxScreen_t screen, uint32_t c, int x, int y,
                           int scale, uint16_t color) {
   if (c == ' ')
     return;
-  const uint16_t *cjk = UiCjk_WideRows(c);
+  const uint16_t *cjk = UiCjk_RowsFor(c);
   if (cjk) {
     int top = y - 2 * scale + (11 * scale - 16) / 2;
     for (int row = 0; row < 16; row++) {
@@ -2315,7 +2315,7 @@ static void SetupDrawText(gfxScreen_t screen, const char *text, int x, int y,
   int last = x + max_width;
   while (*text) {
     uint32_t c = SetupNextChar(&text);
-    int advance = UiCjk_WideRows(c) ? 16 : 6 * scale;
+    int advance = UiCjk_RowsFor(c) ? 16 : 6 * scale;
     if (max_width > 0 && cursor + advance > last)
       break;
     SetupDrawChar(screen, c, cursor, y, scale, color);
@@ -4739,7 +4739,7 @@ static bool SetupCanDraw(const char *text) {
     uint32_t c = SetupNextChar(&text);
     if (c == ' ')
       continue;
-    if (UiCjk_WideRows(c))
+    if (UiCjk_RowsFor(c))
       continue;
     bool drawn = false;
     for (int row = -2; row < 9 && !drawn; row++)
@@ -4800,7 +4800,7 @@ static void SetupMenuText(gfxScreen_t target,const char *text,int x,int y,int sc
   while(*text) {
     const char *before=text;
     uint32_t codepoint=UiFont_DecodeUtf8(&text);
-    const uint16_t *cjk=UiCjk_WideRows(codepoint);
+    const uint16_t *cjk=UiCjk_RowsFor(codepoint);
     if(cjk) {
       // Chinese is baked at one size, 16x16, and centred against the line the
       // Latin patterns occupy.
@@ -4875,7 +4875,7 @@ static int SetupWrap(gfxScreen_t target,const char *text,int x,int y,int width,i
       if(UiFontWidth(line,face)>width)break;
       // A space breaks before itself, one Chinese character after itself.
       if(*end==' ')space=end;
-      else if(UiCjk_WideRows(codepoint))space=next;
+      else if(UiCjk_RowsFor(codepoint))space=next;
       end=next;length=n;
     }
     if(*end&&space&&space>text){end=space;length=end-text;}

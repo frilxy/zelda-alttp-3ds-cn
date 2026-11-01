@@ -20,13 +20,17 @@ uint32_t UiFont_DecodeUtf8(const char **text) {
   return '?';
 }
 
-static int Lookup(const uint32_t *codepoints, int count, uint32_t codepoint) {
-  if (count <= 0 || codepoint < kUiCjkFirstCodepoint)
+int UiCjk_GlyphCount(void) {
+  return kUiCjkGlyphCount;
+}
+
+int UiCjk_Index(uint32_t codepoint) {
+  if (codepoint < kUiCjkFirstCodepoint)
     return -1;
-  int lo = 0, hi = count - 1;
+  int lo = 0, hi = kUiCjkGlyphCount - 1;
   while (lo <= hi) {
     int mid = (lo + hi) / 2;
-    uint32_t value = codepoints[mid];
+    uint32_t value = kUiCjkCodepoints[mid];
     if (value == codepoint)
       return mid;
     if (value < codepoint)
@@ -37,20 +41,8 @@ static int Lookup(const uint32_t *codepoints, int count, uint32_t codepoint) {
   return -1;
 }
 
-int UiCjk_GlyphCount(void) {
-  return kUiCjkGlyphCount;
-}
-
 bool UiCjk_HasGlyph(uint32_t codepoint) {
-  return Lookup(kUiCjkCodepoints, kUiCjkGlyphCount, codepoint) >= 0;
-}
-
-int UiCjk_SmallCount(void) {
-  return kUiCjkSmallCount;
-}
-
-int UiCjk_SmallIndex(uint32_t codepoint) {
-  return Lookup(kUiCjkSmallCodepoints, kUiCjkSmallCount, codepoint);
+  return UiCjk_Index(codepoint) >= 0;
 }
 
 int UiCjk_SizeForScale(int scale) {
@@ -59,18 +51,19 @@ int UiCjk_SizeForScale(int scale) {
   return scale == 2 ? 16 : scale == 3 ? 12 : 10;
 }
 
-const uint16_t *UiCjk_SmallRows(int index, int size) {
-  if (index < 0 || index >= kUiCjkSmallCount)
+const uint16_t *UiCjk_Rows(int index, int size) {
+  if (index < 0 || index >= kUiCjkGlyphCount)
     return 0;
   switch (size) {
+  case 16: return kUiCjk16[index];
   case 12: return kUiCjk12[index];
   case 10: return kUiCjk10[index];
   default: return 0;
   }
 }
 
-const uint16_t *UiCjk_WideRows(uint32_t codepoint) {
-  int index = Lookup(kUiCjkCodepoints, kUiCjkGlyphCount, codepoint);
+const uint16_t *UiCjk_RowsFor(uint32_t codepoint) {
+  int index = UiCjk_Index(codepoint);
   return index < 0 ? 0 : kUiCjk16[index];
 }
 
@@ -80,7 +73,7 @@ int UiCjk_TopOffset(int scale, int size) {
 }
 
 int UiCjk_WidthFor(uint32_t codepoint, int scale) {
-  if (UiCjk_SmallIndex(codepoint) < 0)
+  if (!UiCjk_HasGlyph(codepoint))
     return 0;
   return UiCjk_SizeForScale(scale);
 }
