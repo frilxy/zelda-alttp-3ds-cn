@@ -545,7 +545,8 @@ static void draw_tiny_text(const char *s, float x, float y, float sc, uint32_t c
     int size = UiCjk_SizeForScale(scale);
     if (size == 16) {
       const uint16_t *glyph = UiCjk_WideRows(codepoint);
-      if (glyph) draw_cjk_runs(glyph, 16, (int)lroundf(cx), cy - 2 * scale, c);
+      if (glyph) draw_cjk_runs(glyph, 16, (int)lroundf(cx),
+                               cy + UiCjk_TopOffset(scale, 16), c);
       cx += 16;
       continue;
     }
@@ -556,9 +557,8 @@ static void draw_tiny_text(const char *s, float x, float y, float sc, uint32_t c
         SDL_SetTextureColorMod(atlas, (c>>16)&255, (c>>8)&255, c&255);
         SDL_SetTextureAlphaMod(atlas, c>>24);
         SDL_Rect src = {(cjk % 16) * size, (cjk / 16) * size, size, size};
-        // The Latin glyphs sit two pixels (times the scale) above the box's
-        // top edge, so the Chinese squares line up with them.
-        SDL_Rect dst = {cx, cy - 2 * scale, size, size};
+        // Centred in the same line box the Latin patterns use.
+        SDL_Rect dst = {cx, cy + UiCjk_TopOffset(scale, size), size, size};
         SDL_RenderCopy(ss_r, atlas, &src, &dst);
         SDL_SetTextureColorMod(atlas, 255, 255, 255);
         SDL_SetTextureAlphaMod(atlas, 255);

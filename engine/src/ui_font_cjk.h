@@ -38,4 +38,10 @@ const uint16_t *UiCjk_WideRows(uint32_t codepoint);
 // not one of the characters that screen draws.
 int UiCjk_WidthFor(uint32_t codepoint, int scale);
 
+// Vertical offset from a text line's y to the top of a `size`-pixel Chinese
+// glyph, centring the square in the Latin line box of that scale. Both the
+// bottom screen and the setup views use it, so a label sits the same way in
+// either.
+int UiCjk_TopOffset(int scale, int size);
+
 #endif  // ZELDA3_UI_FONT_CJK_H_

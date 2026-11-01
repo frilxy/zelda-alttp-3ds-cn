@@ -88,22 +88,14 @@ static inline int UiFontCenteredY(const char *text, int scale, int top, int heig
   while (*text) {
     const char *before=text;
     uint32_t codepoint=UiFont_DecodeUtf8(&text);
-    if (UiCjk_HasGlyph(codepoint)) {
-      int rows=scale==3?15:scale==2?21:11;
-      int offset=-(scale==3?3:2*scale)+(rows-16)/2;
-      const uint16_t *glyph=UiCjk_WideRows(codepoint);
-      for (int y=0;y<16;y++) if (glyph[y]) { if(y+offset<first)first=y+offset; if(y+offset>last)last=y+offset; }
-      continue;
-    }
     int index=UiCjk_SmallIndex(codepoint);
-    if (index>=0) {
-      int size=UiCjk_SizeForScale(scale);
-      const uint16_t *rows=UiCjk_SmallRows(index,size);
+    int size=index>=0?UiCjk_SizeForScale(scale):UiCjk_HasGlyph(codepoint)?16:0;
+    if (size) {
+      int offset=UiCjk_TopOffset(scale,size);
+      const uint16_t *rows=index>=0?UiCjk_SmallRows(index,size):UiCjk_WideRows(codepoint);
       for (int y=0;y<size;y++) if (rows[y]) {
-        // The glyph is drawn two pixels (times the scale) above y, like the
-        // Latin patterns.
-        if(y-2*scale<first)first=y-2*scale;
-        if(y-2*scale>last)last=y-2*scale;
+        if(y+offset<first)first=y+offset;
+        if(y+offset>last)last=y+offset;
       }
       continue;
     }

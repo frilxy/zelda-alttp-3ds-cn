@@ -74,6 +74,11 @@ const uint16_t *UiCjk_WideRows(uint32_t codepoint) {
   return index < 0 ? 0 : kUiCjk16[index];
 }
 
+int UiCjk_TopOffset(int scale, int size) {
+  int latin = scale == 3 ? 15 : scale == 2 ? 21 : 11;
+  return -2 * scale + (latin - size) / 2;
+}
+
 int UiCjk_WidthFor(uint32_t codepoint, int scale) {
   if (UiCjk_SmallIndex(codepoint) < 0)
     return 0;
