@@ -28,8 +28,11 @@ def pack_memblk(blocks):
 
 
 def build_pack(glyph_count=8, message_count=397, width=16, letter_width=6):
-    dictionary = pack_memblk([b'\x00' * 8, b'\x01' * 12])
-    message_blocks = [b'\x6f' + bytes([i % 256]) + b'\x7f' for i in range(message_count)]
+    # The real pack's dictionary is a single empty block and its messages carry
+    # no terminator, so the tests build it the same way.
+    dictionary = pack_memblk([b''])
+    message_blocks = [b'' if i == 0 else b'\x6f' + bytes([i % 256])
+                      for i in range(message_count)]
     messages = pack_memblk(message_blocks)
     glyphs = b'\x00' * (pack.LETTER_TILES * pack.LETTER_TILE_BYTES)
     glyphs += b'\xff' * (pack.GLYPH_BYTES * glyph_count)

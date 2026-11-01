@@ -90,15 +90,13 @@ def check_pack(data: bytes) -> dict:
     dictionary, messages = dialogue
     # Both are memblks themselves: the dictionary holds the words, the messages
     # one block per message (the engine looks a message up by its index).
-    words = unpack_memblk(dictionary, 'dictionary')
+    # The Chinese pack carries no dictionary words at all: its block is empty.
+    words = unpack_memblk(dictionary, 'dictionary') if dictionary else []
     entries = unpack_memblk(messages, 'messages')
-    if not words:
-        raise PackError('the dictionary is empty')
     if not entries:
         raise PackError('the messages are empty')
-    for i, message in enumerate(entries):
-        if not message or message[-1] != 0x7f:
-            raise PackError(f'message {i} does not end with the 0x7f terminator')
+    # Messages are stored without their 0x7f terminator, and the first one may
+    # be empty (the game numbers them, it does not read them in order).
 
     if len(font) != 2:
         raise PackError(f'font block holds {len(font)} parts, expected the '
