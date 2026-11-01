@@ -1210,33 +1210,6 @@ static int draw_wrapped_center(const char *text, RectFS area, int scale, uint32_
   float y = area.y;
   const int line_h = scale==3?16:scale==2?20:11;
   int lines=0;
-  if (vertical_center) {
-    // Count the lines first (same walk, no drawing), then start low enough for
-    // the block's middle to land on the area's middle.
-    const char *scan = text;
-    int count = 0;
-    while (*scan) {
-      const char *last_break = NULL, *next = scan;
-      size_t length = 0;
-      while (*next && length + 4 < sizeof(line)) {
-        const char *step = next;
-        uint32_t codepoint = wrap_next(&step);
-        size_t bytes = (size_t)(step - scan);
-        memcpy(line, scan, bytes); line[bytes] = 0;
-        if (text_width(line, scale) > area.w) break;
-        if (*next == ' ') last_break = next;
-        else if (codepoint >= 0x2E80) last_break = step;
-        next = step; length = bytes;
-      }
-      if (*next && last_break) next = last_break;
-      if (next == scan) break;
-      count++;
-      scan = next;
-      while (*scan == ' ') scan++;
-    }
-    float block = (float)count * line_h;
-    if (block < area.h) y = area.y + floorf((area.h - block) / 2);
-  }
   while (*start) {
     const char *last_space = NULL;
     size_t length = 0;
@@ -1275,6 +1248,33 @@ static int draw_wrapped_left_ex(const char *text, RectFS area, int scale,
   float y = area.y;
   const int line_h = scale==3?16:scale==2?20:11;
   int lines=0;
+  if (vertical_center) {
+    // Count the lines first (same walk, no drawing), then start low enough for
+    // the block's middle to land on the area's middle.
+    const char *scan = text;
+    int count = 0;
+    while (*scan) {
+      const char *last_break = NULL, *next = scan;
+      size_t length = 0;
+      while (*next && length + 4 < sizeof(line)) {
+        const char *step = next;
+        uint32_t codepoint = wrap_next(&step);
+        size_t bytes = (size_t)(step - scan);
+        memcpy(line, scan, bytes); line[bytes] = 0;
+        if (text_width(line, scale) > area.w) break;
+        if (*next == ' ') last_break = next;
+        else if (codepoint >= 0x2E80) last_break = step;
+        next = step; length = bytes;
+      }
+      if (*next && last_break) next = last_break;
+      if (next == scan) break;
+      count++;
+      scan = next;
+      while (*scan == ' ') scan++;
+    }
+    float block = (float)count * line_h;
+    if (block < area.h) y = area.y + floorf((area.h - block) / 2);
+  }
   while (*start) {
     const char *last_space = NULL;
     size_t length = 0;
