@@ -28,7 +28,7 @@ static const GameLanguage kGameLanguages[] = {
   // a 16x16 glyph font, so it ships as a prebuilt pack instead of a patch.
   // The port's own screens are not translated yet (menu = -1) and the selector
   // falls back to English for them.
-  { "zh", -1,                     "Simplified Chinese", NULL, "romfs:/languages/zh.bin" },
+  { "zh", kUiLanguage_Chinese,    "Simplified Chinese", NULL, "romfs:/languages/zh.bin" },
 };
 
 enum {
@@ -66,10 +66,10 @@ static const char *const kLanguageSelectorText[kGameLanguageCount][kSelCount] = 
   { "ЯЗЫК", "A: ВЫБРАТЬ", "START: ВЫХОД", "Y: МОДЫ",
     "ПОДГОТОВКА...", "ROM USA НЕ НАЙДЕН", "СКОПИРУЙТЕ В /3DS/ZELDA 3DS/",
     "ПОКА НЕДОСТУПНО", "ОШИБКА ПОДГОТОВКИ" },
-  // Chinese has no selector text of its own yet: the setup font draws Latin
-  // letters only, so these lines stay English until it can draw the pack's
-  // glyphs (the same fallback LanguageText() would apply).
-  { "LANGUAGE", "PRESS A TO SELECT", "PRESS START TO QUIT", "PRESS Y FOR MODS",
-    "PREPARING...", "USA ROM NOT FOUND", "COPY IT TO /3DS/ZELDA 3DS/",
-    "NOT AVAILABLE YET", "PREPARATION FAILED" },
+  // Chinese selector text. The setup views still draw Latin letters only, so
+  // LanguageText() falls back to English for these lines until they can draw
+  // the pack's glyphs.
+  { "语言", "按 A 选择", "按 START 退出", "按 Y 查看模组",
+    "准备中...", "未找到 USA ROM", "请复制到 /3DS/ZELDA 3DS/",
+    "暂不可用", "准备失败" },
 };

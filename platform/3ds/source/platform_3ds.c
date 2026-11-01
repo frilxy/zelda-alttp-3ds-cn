@@ -4755,9 +4755,14 @@ static void SetupPurpleBackground(bool language_frame) {
 static const char *SetupUiText(int language,int id) {
   int previous=UI_GetLanguage();
   // A language whose menus are not translated yet (menu < 0) shows English.
-  UI_SetLanguage(kGameLanguages[language].menu >= 0 ? kGameLanguages[language].menu
-                                                    : kUiLanguage_English);
+  int wanted=kGameLanguages[language].menu >= 0 ? kGameLanguages[language].menu
+                                                : kUiLanguage_English;
+  UI_SetLanguage(wanted);
   const char *text=UI_Text(id);
+  // The setup views draw Latin letters only (the bottom screen has the Chinese
+  // glyphs), so a translated line they cannot draw falls back to English
+  // instead of drawing blank boxes.
+  if(wanted!=kUiLanguage_English&&!SetupCanDraw(text)){UI_SetLanguage(kUiLanguage_English);text=UI_Text(id);}
   UI_SetLanguage(previous);
   return text;
 }

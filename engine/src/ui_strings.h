@@ -9,6 +9,9 @@ enum UiLanguage {
   kUiLanguage_English = 0,
   kUiLanguage_French = 1,
   kUiLanguage_Spanish, kUiLanguage_Portuguese, kUiLanguage_Italian, kUiLanguage_German, kUiLanguage_Russian,
+  // Chinese is drawn with the CJK glyphs baked from the translation (see
+  // ui_font_cjk.h); it is last so the other languages keep their values.
+  kUiLanguage_Chinese,
   kUiLanguageCount,
 };
 

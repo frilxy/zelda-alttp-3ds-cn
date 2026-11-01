@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include "generated_ui_sprites.h"
+#include "ui_font_cjk.h"
 
 // Deterministic Latin and Cyrillic UI glyphs. Decode once per character; accented letters
 // use the same editable 5x7 base and an explicit accent, never byte fragments.
@@ -58,8 +59,16 @@ static inline char UiFontNext(const char **text, int *accent) {
 
 static inline int UiFontWidth(const char *text, int scale) {
   int width=0, accent;
-  char c;
-  while ((c=UiFontNext(&text,&accent))) width += scale==3 ? (c==' '?5:8) : (c==' ' ? 4 : 6)*scale;
+  while (*text) {
+    const char *before=text;
+    uint32_t codepoint=UiFont_DecodeUtf8(&text);
+    int cjk=UiCjk_WidthFor(codepoint, scale);
+    if (cjk>0) { width+=cjk; continue; }
+    text=before;
+    char c=UiFontNext(&text,&accent);
+    if (!c) break;
+    width += scale==3 ? (c==' '?5:8) : (c==' ' ? 4 : 6)*scale;
+  }
   return width;
 }
 
@@ -74,8 +83,18 @@ static inline unsigned UiFontNextCode(const char **text) {
 // padded texture rectangle. draw_tiny_text positions that rectangle at y-2*scale.
 static inline int UiFontCenteredY(const char *text, int scale, int top, int height) {
   int first=10000,last=-10000;
-  unsigned code;
-  while ((code=UiFontNextCode(&text))) {
+  while (*text) {
+    const char *before=text;
+    uint32_t codepoint=UiFont_DecodeUtf8(&text);
+    int index=UiCjk_GlyphIndex(codepoint);
+    if (index>=0) {
+      int size=UiCjk_SizeForScale(scale);
+      const uint16_t *rows=UiCjk_GlyphRows(index,size);
+      for (int y=0;y<size;y++) if (rows[y]) { if(y<first)first=y; if(y>last)last=y; }
+      continue;
+    }
+    text=before;
+    unsigned code=UiFontNextCode(&text);
     int rows=scale==3?15:scale==2?21:11;
     for(int y=0;y<rows;y++) {
       unsigned bits=scale==3?kNativeUiMediumGlyphs[code][y]:scale==2?kNativeUiLargeGlyphs[code][y]:kNativeUiGlyphs[code][y];
