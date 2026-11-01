@@ -88,11 +88,19 @@ static inline int UiFontCenteredY(const char *text, int scale, int top, int heig
   while (*text) {
     const char *before=text;
     uint32_t codepoint=UiFont_DecodeUtf8(&text);
+    // The glyph rows and their size come from the same table: the small one at
+    // 10/12 px, the wide one at 16 (which is also all scale 2 draws).
+    int size=UiCjk_SizeForScale(scale);
+    const uint16_t *rows=NULL;
     int index=UiCjk_SmallIndex(codepoint);
-    int size=index>=0?UiCjk_SizeForScale(scale):UiCjk_HasGlyph(codepoint)?16:0;
-    if (size) {
+    if (size!=16&&index>=0) {
+      rows=UiCjk_SmallRows(index,size);
+    } else {
+      rows=UiCjk_WideRows(codepoint);
+      size=16;
+    }
+    if (rows) {
       int offset=UiCjk_TopOffset(scale,size);
-      const uint16_t *rows=index>=0?UiCjk_SmallRows(index,size):UiCjk_WideRows(codepoint);
       for (int y=0;y<size;y++) if (rows[y]) {
         if(y+offset<first)first=y+offset;
         if(y+offset>last)last=y+offset;
@@ -101,8 +109,8 @@ static inline int UiFontCenteredY(const char *text, int scale, int top, int heig
     }
     text=before;
     unsigned code=UiFontNextCode(&text);
-    int rows=scale==3?15:scale==2?21:11;
-    for(int y=0;y<rows;y++) {
+    int glyph_rows=scale==3?15:scale==2?21:11;
+    for(int y=0;y<glyph_rows;y++) {
       unsigned bits=scale==3?kNativeUiMediumGlyphs[code][y]:scale==2?kNativeUiLargeGlyphs[code][y]:kNativeUiGlyphs[code][y];
       if(!bits) continue;
       int a=scale==3?y-3:(scale==2?y:y*scale)-2*scale;
