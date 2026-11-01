@@ -4704,6 +4704,7 @@ static int LanguageFromSystem(void) {
   static const struct { u8 system; const char *code; } kMap[] = {
     {CFG_LANGUAGE_ES, "es"}, {CFG_LANGUAGE_PT, "pt"}, {CFG_LANGUAGE_IT, "it"},
     {CFG_LANGUAGE_FR, "fr"}, {CFG_LANGUAGE_DE, "de"}, {CFG_LANGUAGE_RU, "ru"},
+    {CFG_LANGUAGE_ZH, "zh"}, {CFG_LANGUAGE_TW, "zh"},
     {CFG_LANGUAGE_JP, "ja"},
   };
   for (size_t i = 0; i < countof(kMap); i++)
@@ -4711,6 +4712,13 @@ static int LanguageFromSystem(void) {
       for (int j = 0; j < kGameLanguageCount; j++)
         if (!strcmp(kGameLanguages[j].code, kMap[i].code))
           return j;
+  // A build that carries a language pack opens in that language: the pack is
+  // the reason the build exists (a Chinese release), and the console's own
+  // language is not one the port speaks. A build without packs, or with a
+  // console language the map above covers, keeps its usual first boot.
+  for (int j = 0; j < kGameLanguageCount; j++)
+    if (kGameLanguages[j].block && IsRegularFile(kGameLanguages[j].block))
+      return j;
   return 0;
 }
 
