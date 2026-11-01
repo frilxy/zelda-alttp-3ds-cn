@@ -36,7 +36,8 @@ static inline bool IniEdit_SetValue(const char *path, const char *section,
   char *out = malloc(capacity);
   if (!out) { free(buf); return false; }
   size_t olen = 0;
-  bool done = false, in_section = false;
+  bool done = false, in_section = false, have_section = false, pending_insert = false;
+  size_t section_insert = 0;
   const char *line = buf;
   while (*line) {
     const char *nl = strchr(line, '\n');
@@ -47,6 +48,10 @@ static inline bool IniEdit_SetValue(const char *path, const char *section,
       const char *close = memchr(t, ']', end - t);
       in_section = close && (size_t)(close - t + 1) == slen &&
                    !strncasecmp(t, section, slen);
+      // A key that has to be added goes right after this header: appending a
+      // second [Section] at the end of the file left two blocks with the same
+      // name, and a reader that keeps the first one never saw the key.
+      if (in_section && !have_section) pending_insert = true;
     } else if (in_section && (size_t)(end - t) >= klen &&
                !strncasecmp(t, key, klen)) {
       const char *after = t + klen;
@@ -60,11 +65,25 @@ static inline bool IniEdit_SetValue(const char *path, const char *section,
     }
     memcpy(out + olen, line, len);
     olen += len;
+    if (pending_insert) {
+      have_section = true;
+      section_insert = olen;
+      pending_insert = false;
+    }
     line = end;
   }
   if (!done) {
-    if (olen && out[olen - 1] != '\n') out[olen++] = '\n';
-    olen += snprintf(out + olen, capacity - olen, "%s\n%s = %s\n", section, key, value);
+    char entry[512];
+    int entry_len = snprintf(entry, sizeof(entry), "%s = %s\n", key, value);
+    if (have_section && entry_len > 0 && section_insert + (size_t)entry_len <= capacity) {
+      memmove(out + section_insert + entry_len, out + section_insert,
+              olen - section_insert);
+      memcpy(out + section_insert, entry, (size_t)entry_len);
+      olen += (size_t)entry_len;
+    } else {
+      if (olen && out[olen - 1] != '\n') out[olen++] = '\n';
+      olen += snprintf(out + olen, capacity - olen, "%s\n%s = %s\n", section, key, value);
+    }
   }
   bool saved = FileStore_Write(path, out, olen);
   free(out);
