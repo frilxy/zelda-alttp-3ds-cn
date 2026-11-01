@@ -1186,6 +1186,21 @@ static void draw_option(RectFS *row,const char *label,const char *value) {
   draw_option_selected(row,label,value,false);
 }
 
+// Advances one character the way the text routines do: a UTF-8 sequence for
+// Chinese, the Latin/Cyrillic decoder otherwise (it also consumes the second
+// byte of an accented letter).
+static uint32_t wrap_next(const char **text) {
+  const char *p = *text;
+  uint32_t codepoint = UiFont_DecodeUtf8(&p);
+  if (codepoint < 0x2E80) {
+    int accent;
+    p = *text;
+    UiFontNext(&p, &accent);
+  }
+  *text = p;
+  return codepoint;
+}
+
 static int draw_wrapped_center(const char *text, RectFS area, int scale, uint32_t color) {
   char line[256] = {0};
   const char *start = text, *end = text;
@@ -1198,12 +1213,13 @@ static int draw_wrapped_center(const char *text, RectFS area, int scale, uint32_
     end = start;
     while (*end && length + 4 < sizeof(line)) {
       const char *next = end;
-      int accent;
-      UiFontNext(&next, &accent);
+      uint32_t codepoint = wrap_next(&next);
       size_t bytes = (size_t)(next - start);
       memcpy(line, start, bytes); line[bytes] = 0;
       if (text_width(line, scale) > area.w) break;
+      // A space breaks before itself, one Chinese character after itself.
       if (*end == ' ') last_space = end;
+      else if (codepoint >= 0x2E80) last_space = next;
       end = next; length = bytes;
     }
     if (*end && last_space) end = last_space;
@@ -1230,12 +1246,13 @@ static int draw_wrapped_left(const char *text, RectFS area, int scale, uint32_t 
     end = start;
     while (*end && length + 4 < sizeof(line)) {
       const char *next = end;
-      int accent;
-      UiFontNext(&next, &accent);
+      uint32_t codepoint = wrap_next(&next);
       size_t bytes = (size_t)(next - start);
       memcpy(line, start, bytes); line[bytes] = 0;
       if (text_width(line, scale) > area.w) break;
+      // A space breaks before itself, one Chinese character after itself.
       if (*end == ' ') last_space = end;
+      else if (codepoint >= 0x2E80) last_space = next;
       end = next; length = bytes;
     }
     if (*end && last_space) end = last_space;
