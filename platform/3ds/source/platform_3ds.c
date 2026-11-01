@@ -4668,6 +4668,11 @@ static bool ApplyProfileLanguage(void) {
   bool has_dialogue = language->patch || language->block;
   ok &= IniEdit_SetValue("zelda3.ini", "[General]", "Language",
                          has_dialogue ? language->code : "");
+  // A pack language is the one that was chosen; do not leave the game's text
+  // depending on whether the ini round-trip survived. This runs before the
+  // engine reads the config, so it wins over a stale or unparsed file.
+  if (language->block && !language->patch)
+    g_config.language = language->code;
   ok &= IniEdit_SetValue("zelda3.ini", "[General]", "MenuLanguage",
                          UI_LanguageCode(g_profile_menu_language ? g_profile_menu_language->menu :
                                          language->menu >= 0 ? language->menu : kUiLanguage_English));
