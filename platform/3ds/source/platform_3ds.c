@@ -5538,8 +5538,14 @@ void Platform3DS_ApplyConfig(struct Config *config) {
   // pin the pack's language: the file may be stale, carry a second [General]
   // block, or sit somewhere the engine does not read, and the text still has
   // to come out in the language the player chose.
-  if (g_build_language && g_build_language->block && !g_build_language->patch)
+  if (g_build_language && g_build_language->block && !g_build_language->patch) {
     config->language = g_build_language->code;
+    // The port's own screens follow the same choice: their language comes from
+    // the ini too, and a stale file used to leave them English while the game
+    // spoke Chinese.
+    if (g_build_language->menu >= 0)
+      UI_SetLanguage(g_build_language->menu);
+  }
   config->autosave = g_autosave;
   // Preserve the user's Sound/PannedSoundEffects setting (defaulted by the INI).
   config->window_width = 400;
