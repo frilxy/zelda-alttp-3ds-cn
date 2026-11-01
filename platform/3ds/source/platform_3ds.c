@@ -3030,26 +3030,25 @@ static bool RomLooksJapanese(const uint8 *rom, size_t rom_size) {
 
 // only_language: the assets carry no dialogue yet (the French Canadian
 // cartridge's own build) and this one becomes dialogue 0, the only one.
-static bool AddTranslatedLanguageToAssets(const uint8 *assets_data,
-                                          size_t assets_size,
-                                          const uint8 *rom,
-                                          size_t rom_size,
-                                          const char *language_code,
-                                          bool only_language,
-                                          uint8 **out_data,
-                                          size_t *out_size) {
+//
+// The new language lands at the end of the dialogue, font and language tables,
+// so the indices the engine already uses keep their meaning. Takes ownership of
+// the two blocks: they are freed here, and dropped into the assets when it
+// succeeds.
+static bool AppendLanguageToAssets(const uint8 *assets_data,
+                                   size_t assets_size,
+                                   OwnedBlock *language_dialogue,
+                                   OwnedBlock *language_font,
+                                   const char *language_code,
+                                   uint8 dialogue_flags,
+                                   bool only_language,
+                                   uint8 **out_data,
+                                   size_t *out_size) {
   *out_data = NULL;
   *out_size = 0;
-  OwnedBlock language_dialogue = {0};
-  OwnedBlock language_font = {0};
-  const RomTextLayout *layout = ExtractTranslationLanguage(rom, rom_size,
-                                                           &language_dialogue,
-                                                           &language_font);
-  if (!layout)
-    return false;
   if (assets_size < 88) {
-    FreeBlocks(&language_dialogue, 1);
-    FreeBlocks(&language_font, 1);
+    FreeBlocks(language_dialogue, 1);
+    FreeBlocks(language_font, 1);
     return false;
   }
   static const uint8 signature[] = { kAssets_Sig };
@@ -3058,15 +3057,15 @@ static bool AddTranslatedLanguageToAssets(const uint8 *assets_data,
   if (memcmp(assets_data, signature, sizeof(signature)) != 0 ||
       asset_count != kNumberOfAssets ||
       assets_size < 88 + asset_count * 4 + names_size) {
-    FreeBlocks(&language_dialogue, 1);
-    FreeBlocks(&language_font, 1);
+    FreeBlocks(language_dialogue, 1);
+    FreeBlocks(language_font, 1);
     return false;
   }
 
   OwnedBlock *assets = calloc(asset_count, sizeof(*assets));
   if (!assets) {
-    FreeBlocks(&language_dialogue, 1);
-    FreeBlocks(&language_font, 1);
+    FreeBlocks(language_dialogue, 1);
+    FreeBlocks(language_font, 1);
     return false;
   }
   bool ok = true;
@@ -3116,10 +3115,10 @@ static bool AddTranslatedLanguageToAssets(const uint8 *assets_data,
       dialogue_count++;
       font_count++;
       map_count++;
-      dialogues[index] = language_dialogue;
-      fonts[index] = language_font;
-      language_dialogue.data = NULL;
-      language_font.data = NULL;
+      dialogues[index] = *language_dialogue;
+      fonts[index] = *language_font;
+      language_dialogue->data = NULL;
+      language_font->data = NULL;
       OwnedBlock map_parts[2] = {0};
       OwnedBlock packed_map_entry = {0};
       uint8 name[8];
@@ -3129,7 +3128,7 @@ static bool AddTranslatedLanguageToAssets(const uint8 *assets_data,
       }
       if (ok)
         memcpy(name, language_code, name_size);
-      uint8 conf[] = { (uint8)index, (uint8)index, layout->dialogue_flags };
+      uint8 conf[] = { (uint8)index, (uint8)index, dialogue_flags };
       ok = ok &&
            CopyBlock(&map_parts[0], name, name_size) &&
            CopyBlock(&map_parts[1], conf, sizeof(conf)) &&
@@ -3182,8 +3181,8 @@ static bool AddTranslatedLanguageToAssets(const uint8 *assets_data,
     }
   }
 
-  FreeBlocks(&language_dialogue, 1);
-  FreeBlocks(&language_font, 1);
+  FreeBlocks(language_dialogue, 1);
+  FreeBlocks(language_font, 1);
   FreeBlocks(dialogues, dialogue_count);
   FreeBlocks(fonts, font_count);
   FreeBlocks(map, map_count);
@@ -3196,6 +3195,71 @@ static bool AddTranslatedLanguageToAssets(const uint8 *assets_data,
   FreeBlocks(assets, asset_count);
   free(assets);
   return ok;
+}
+
+// The dialogue flags a language pack's text needs: EU command encoding (bit
+// 0), text that is not the USA one (bit 1) and 16x16 CJK glyphs (bit 2, see
+// dialogue_cjk.h). A Chinese pack always has all three.
+enum { kLanguagePackDialogueFlags = 1 | 2 | 4 };
+
+// A language the port builds from the USA cartridge: the BPS patch turns it
+// into the translated cartridge, whose text and font are then read as from any
+// translated cartridge.
+static bool AddTranslatedLanguageToAssets(const uint8 *assets_data,
+                                          size_t assets_size,
+                                          const uint8 *rom,
+                                          size_t rom_size,
+                                          const char *language_code,
+                                          bool only_language,
+                                          uint8 **out_data,
+                                          size_t *out_size) {
+  OwnedBlock dialogue = {0};
+  OwnedBlock font = {0};
+  const RomTextLayout *layout = ExtractTranslationLanguage(rom, rom_size,
+                                                           &dialogue, &font);
+  if (!layout)
+    return false;
+  return AppendLanguageToAssets(assets_data, assets_size, &dialogue, &font,
+                                language_code, layout->dialogue_flags,
+                                only_language, out_data, out_size);
+}
+
+// A language whose translation is not a patched cartridge but a prebuilt pack:
+// the two blocks the translated-ROM path extracts, kept in a file. The pack is
+//
+//   'ZCNB', u32 dialogue size, dialogue block,
+//           u32 font size, font block
+//
+// so the same text and font reach the engine either way.
+static bool AddLanguagePackToAssets(const uint8 *assets_data,
+                                    size_t assets_size,
+                                    const uint8 *pack, size_t pack_size,
+                                    const char *language_code,
+                                    bool only_language,
+                                    uint8 **out_data, size_t *out_size) {
+  enum { kHeader = 8 };
+  *out_data = NULL;
+  *out_size = 0;
+  if (pack_size < kHeader || memcmp(pack, "ZCNB", 4) != 0)
+    return false;
+  uint32 dialogue_size = ReadU32LE(pack + 4);
+  if (dialogue_size == 0 || kHeader + (size_t)dialogue_size + 4 > pack_size)
+    return false;
+  uint32 font_size = ReadU32LE(pack + kHeader + dialogue_size);
+  size_t font_offset = kHeader + (size_t)dialogue_size + 4;
+  if (font_size == 0 || font_offset + font_size > pack_size)
+    return false;
+  OwnedBlock dialogue = {0};
+  OwnedBlock font = {0};
+  if (!CopyBlock(&dialogue, pack + kHeader, dialogue_size) ||
+      !CopyBlock(&font, pack + font_offset, font_size)) {
+    FreeBlocks(&dialogue, 1);
+    FreeBlocks(&font, 1);
+    return false;
+  }
+  return AppendLanguageToAssets(assets_data, assets_size, &dialogue, &font,
+                                language_code, kLanguagePackDialogueFlags,
+                                only_language, out_data, out_size);
 }
 
 // True when the settings file sets Language to this code.
@@ -3432,13 +3496,46 @@ static bool TryBuildBaseAssetsFromInstalledUsRom(const uint8 *patch,
 
 static const char *g_profile_prepare_status = "ROM preparation failed";
 
+// A language carried as a prebuilt pack: read it from romfs and append it the
+// way a translated cartridge would be, then keep the combined assets.
+static bool AddBuildLanguagePack(uint8 **assets, size_t *assets_size) {
+  const GameLanguage *language = g_build_language;
+  size_t pack_size = 0;
+  uint8 *pack = ReadWholeFile(language->block, &pack_size);
+  bool read = pack != NULL;
+  uint8 *combined = NULL;
+  size_t combined_size = 0;
+  bool ok = read &&
+            AddLanguagePackToAssets(*assets, *assets_size, pack, pack_size,
+                                    language->code, false, &combined,
+                                    &combined_size) &&
+            AssetsBlobLooksValid(combined, combined_size);
+  LogSetup("Language %s: pack %s, %s", language->code, read ? "read" : "missing",
+           ok ? "OK" : "FAIL");
+  free(pack);
+  if (!ok) {
+    free(combined);
+    g_profile_prepare_status = read ? "Translation failed"
+                                    : "Translation unavailable";
+    return false;
+  }
+  free(*assets);
+  *assets = combined;
+  *assets_size = combined_size;
+  return true;
+}
+
 // Adds g_build_language to assets built from the USA cartridge: its bundled
 // patch turns the cartridge into the translated one, whose text and font are
 // then read as from any translated cartridge. The cartridge is not changed.
 static bool AddBuildLanguage(uint8 **assets, size_t *assets_size,
                              const uint8 *rom, size_t rom_size) {
   const GameLanguage *language = g_build_language;
-  if (!language || !language->patch)
+  if (!language)
+    return true;
+  if (language->block)
+    return AddBuildLanguagePack(assets, assets_size);
+  if (!language->patch)
     return true;
   size_t patch_size = 0, translated_size = 0;
   uint8 *patch = ReadWholeFile(language->patch, &patch_size);
@@ -4455,6 +4552,18 @@ static bool LanguageCacheStamp(const GameLanguage *language, char stamp[64]) {
       return false;
     crc = (uint32_t)footer[0] | (uint32_t)footer[1] << 8 |
           (uint32_t)footer[2] << 16 | (uint32_t)footer[3] << 24;
+  } else if (language->block) {
+    // A pack has no BPS footer, so the file itself is the stamp: replacing it
+    // must rebuild the assets even when the language is unchanged.
+    FILE *file = fopen(language->block, "rb");
+    if (!file)
+      return false;
+    uint32_t hash = 2166136261u;
+    int byte;
+    while ((byte = fgetc(file)) != EOF)
+      hash = (hash ^ (uint8_t)byte) * 16777619u;
+    fclose(file);
+    crc = hash;
   }
   snprintf(stamp, 64, "%s:2:%08lx", language->code, (unsigned long)crc);
   return true;
@@ -4491,8 +4600,11 @@ static bool ApplyProfileLanguage(void) {
   bool ok = true;
   if (!language->patch)
     remove(LANGUAGE_CART_FILE);
+  // A pack is a dialogue language too: only English has neither a patch nor a
+  // pack, and only English clears the setting.
+  bool has_dialogue = language->patch || language->block;
   ok &= IniEdit_SetValue("zelda3.ini", "[General]", "Language",
-                         language->patch ? language->code : "");
+                         has_dialogue ? language->code : "");
   ok &= IniEdit_SetValue("zelda3.ini", "[General]", "MenuLanguage",
                          UI_LanguageCode(g_profile_menu_language ? g_profile_menu_language->menu :
                                          language->menu >= 0 ? language->menu : kUiLanguage_English));
@@ -4642,7 +4754,9 @@ static void SetupPurpleBackground(bool language_frame) {
 
 static const char *SetupUiText(int language,int id) {
   int previous=UI_GetLanguage();
-  UI_SetLanguage(kGameLanguages[language].menu);
+  // A language whose menus are not translated yet (menu < 0) shows English.
+  UI_SetLanguage(kGameLanguages[language].menu >= 0 ? kGameLanguages[language].menu
+                                                    : kUiLanguage_English);
   const char *text=UI_Text(id);
   UI_SetLanguage(previous);
   return text;

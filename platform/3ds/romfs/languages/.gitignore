@@ -1,2 +1,4 @@
 # Generated language patches; see README.md
 *.bps
+# Generated language packs (translated text + font); see README.md
+*.bin

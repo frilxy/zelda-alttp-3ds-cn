@@ -54,3 +54,35 @@ confirmation, cancellation and selector requests.
 These are source/host checks. Record ARM compilation, isolated Azahar behavior
 and physical Old/New 3DS acceptance separately. Emulator FPS is not hardware
 performance evidence.
+
+## Language packs
+
+The patches above are deltas between the USA cartridge and a translated one.
+Chinese has no such cartridge: its translation is its own message text plus a
+16x16 glyph font (the game's 8x16 letter alphabet cannot draw it), so it
+travels as a *pack* instead - `platform/3ds/romfs/languages/zh.bin` - and is
+listed in `kGameLanguages` with `menu = -1`, which leaves the port's own
+screens in English until they can draw the glyphs.
+
+A pack carries the same two blocks the patch path extracts from a translated
+cartridge:
+
+    'ZCNB'
+    u32 dialogue length, dialogue block
+    u32 font length,     font block
+
+Both are memblks (blocks, then their offsets, then the count). The dialogue
+block holds the dictionary and one block per message; the font block holds the
+256 letter tiles (4096 bytes) followed by one 64-byte 16x16 glyph per
+character, then the widths: 111 letter widths followed by one byte per glyph.
+
+Message text names a glyph with an escape prefix 0x6f..0x73 (one prefix per 256
+glyphs) plus an index byte. `dialogue_flags` bit 2 (`kDialogueCjkFlag`, see
+`engine/src/dialogue_cjk.h`) tells the text engine that the block has that
+shape, and the renderer draws each glyph as two 8x16 half tiles.
+
+Packs are build inputs like the `.bps` files: they carry translated game text,
+so they are not committed (`platform/3ds/romfs/languages/.gitignore`). Check
+one before shipping it:
+
+    python3 tools/languages/check_language_pack.py platform/3ds/romfs/languages/zh.bin
