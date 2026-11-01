@@ -4858,6 +4858,12 @@ static void SetupMenuText(gfxScreen_t target,const char *text,int x,int y,int sc
       // Chinese is baked at one size, 16x16, and centred against the line the
       // Latin patterns occupy.
       int top=y+UiCjk_TopOffset(scale,16);
+      // Centre the ink rather than the 16px cell: the font keeps its baseline,
+      // so a line like 检查更新 sits a row low inside the cell and reads as
+      // off-centre even though the cell itself is centred.
+      int ink_first=-1,ink_last=-1;
+      for(int r=0;r<16;r++) if(cjk[r]) { if(ink_first<0)ink_first=r; ink_last=r; }
+      if(ink_first>=0) top-=(ink_first+ink_last+1)/2-8;
       for(int yy=0;yy<16;yy++)for(int xx=0;xx<16;xx++)
         if(cjk[yy]&(1u<<(15-xx)))SetupPutPixel(target,x+xx,top+yy,color);
       x+=16;
