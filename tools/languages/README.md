@@ -82,7 +82,15 @@ glyphs) plus an index byte. `dialogue_flags` bit 2 (`kDialogueCjkFlag`, see
 shape, and the renderer draws each glyph as two 8x16 half tiles.
 
 Packs are build inputs like the `.bps` files: they carry translated game text,
-so they are not committed (`platform/3ds/romfs/languages/.gitignore`). Check
-one before shipping it:
+so they are not committed (`platform/3ds/romfs/languages/.gitignore`).
+
+The Simplified Chinese pack is produced by the translation project's own
+extraction pipeline (LinkFish1's zelda3 fork): `assets/restool.py
+--extract-from-rom --languages cn`, whose `sprite_sheets.py` builds the glyph
+sheet from `tables/font_cn.png` and `text_compression.py` encodes
+`tables/dialogue_cn.txt` with the same escape-prefix scheme. Its output is the
+two blocks this file describes; the pack has been checked with the tool below.
+
+Check one before shipping it:
 
     python3 tools/languages/check_language_pack.py platform/3ds/romfs/languages/zh.bin
