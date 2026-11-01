@@ -5,7 +5,7 @@ name: Build 3DS
 # workflow; this one only uploads an Actions artifact.
 on:
   push:
-    branches: [feat/zh-language]
+    branches: [main, feat/zh-language]
   workflow_dispatch:
 
 jobs:
