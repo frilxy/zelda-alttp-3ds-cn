@@ -64,6 +64,8 @@ static inline int UiFontWidth(const char *text, int scale) {
     uint32_t codepoint=UiFont_DecodeUtf8(&text);
     int cjk=UiCjk_WidthFor(codepoint, scale);
     if (cjk>0) { width+=cjk; continue; }
+    // A character only the 16x16 set carries (the setup views draw those).
+    if (UiCjk_HasGlyph(codepoint)) { width+=16; continue; }
     text=before;
     char c=UiFontNext(&text,&accent);
     if (!c) break;
@@ -86,11 +88,23 @@ static inline int UiFontCenteredY(const char *text, int scale, int top, int heig
   while (*text) {
     const char *before=text;
     uint32_t codepoint=UiFont_DecodeUtf8(&text);
-    int index=UiCjk_GlyphIndex(codepoint);
+    if (UiCjk_HasGlyph(codepoint)) {
+      int rows=scale==3?15:scale==2?21:11;
+      int offset=-(scale==3?3:2*scale)+(rows-16)/2;
+      const uint16_t *glyph=UiCjk_WideRows(codepoint);
+      for (int y=0;y<16;y++) if (glyph[y]) { if(y+offset<first)first=y+offset; if(y+offset>last)last=y+offset; }
+      continue;
+    }
+    int index=UiCjk_SmallIndex(codepoint);
     if (index>=0) {
       int size=UiCjk_SizeForScale(scale);
-      const uint16_t *rows=UiCjk_GlyphRows(index,size);
-      for (int y=0;y<size;y++) if (rows[y]) { if(y<first)first=y; if(y>last)last=y; }
+      const uint16_t *rows=UiCjk_SmallRows(index,size);
+      for (int y=0;y<size;y++) if (rows[y]) {
+        // The glyph is drawn two pixels (times the scale) above y, like the
+        // Latin patterns.
+        if(y-2*scale<first)first=y-2*scale;
+        if(y-2*scale>last)last=y-2*scale;
+      }
       continue;
     }
     text=before;

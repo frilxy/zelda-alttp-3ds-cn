@@ -465,13 +465,13 @@ static SDL_Texture *cjk_texture(int size) {
   int slot = size == 16 ? 2 : size == 12 ? 1 : 0;
   if (g_cjk_textures[slot])
     return g_cjk_textures[slot];
-  int rows = (UiCjk_GlyphCount() + 15) / 16;
+  int rows = (UiCjk_SmallCount() + 15) / 16;
   int w = 16 * size, h = rows * size;
   uint32_t *pixels = calloc((size_t)w * (size_t)h, sizeof(*pixels));
   if (!pixels)
     return NULL;
-  for (int i = 0; i < UiCjk_GlyphCount(); i++) {
-    const uint16_t *glyph = UiCjk_GlyphRows(i, size);
+  for (int i = 0; i < UiCjk_SmallCount(); i++) {
+    const uint16_t *glyph = UiCjk_SmallRows(i, size);
     int bx = (i % 16) * size, by = (i / 16) * size;
     for (int y = 0; y < size; y++)
       for (int x = 0; x < size; x++)
@@ -525,7 +525,7 @@ static void draw_tiny_text(const char *s, float x, float y, float sc, uint32_t c
   while (*s) {
     const char *before = s;
     uint32_t codepoint = UiFont_DecodeUtf8(&s);
-    int cjk = UiCjk_GlyphIndex(codepoint);
+    int cjk = UiCjk_SmallIndex(codepoint);
     if (cjk >= 0) {
       int size = UiCjk_SizeForScale(scale);
       SDL_Texture *atlas = cjk_texture(size);
@@ -533,7 +533,9 @@ static void draw_tiny_text(const char *s, float x, float y, float sc, uint32_t c
         SDL_SetTextureColorMod(atlas, (c>>16)&255, (c>>8)&255, c&255);
         SDL_SetTextureAlphaMod(atlas, c>>24);
         SDL_Rect src = {(cjk % 16) * size, (cjk / 16) * size, size, size};
-        SDL_Rect dst = {cx, cy, size, size};
+        // The Latin glyphs sit two pixels (times the scale) above the box's
+        // top edge, so the Chinese squares line up with them.
+        SDL_Rect dst = {cx, cy - 2 * scale, size, size};
         SDL_RenderCopy(ss_r, atlas, &src, &dst);
         SDL_SetTextureColorMod(atlas, 255, 255, 255);
         SDL_SetTextureAlphaMod(atlas, 255);

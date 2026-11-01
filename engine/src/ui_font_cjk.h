@@ -1,34 +1,41 @@
-// Chinese text on the port's own screens (the bottom screen, and later the
-// setup views).
+// Chinese text on the port's own screens (the bottom screen and the setup
+// views).
 //
-// The Latin and Cyrillic letters are 5x11/7x15/10x21 pixel patterns; Chinese
-// needs real glyphs, so tools/ui/generate_cjk_glyphs.py bakes the characters
-// the UI strings use at the three sizes those scales draw, and this module
-// answers the questions the text routines ask: how many pixels a character
-// takes, and where its rows are.
+// The Latin and Cyrillic letters are small hand-authored patterns; Chinese
+// needs real glyphs, so tools/ui/generate_cjk_glyphs.py bakes two sets:
+// GB2312 level 1 at 16x16 for the screens that draw one size (and for text
+// fetched at runtime, like the update notes), and the characters the UI
+// strings use at the three sizes the bottom screen draws.
 #ifndef ZELDA3_UI_FONT_CJK_H_
 #define ZELDA3_UI_FONT_CJK_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 // Decodes one UTF-8 codepoint and advances *text past it. Invalid bytes give
 // '?' and advance by one.
 uint32_t UiFont_DecodeUtf8(const char **text);
 
-// How many characters the tables carry.
+// Characters the wide (16x16) set carries, and whether one is there.
 int UiCjk_GlyphCount(void);
+bool UiCjk_HasGlyph(uint32_t codepoint);
 
-// Index into the generated tables, or -1 when the codepoint has no glyph.
-int UiCjk_GlyphIndex(uint32_t codepoint);
+// Characters the bottom screen can draw, and one's index in its tables.
+int UiCjk_SmallCount(void);
+int UiCjk_SmallIndex(uint32_t codepoint);
 
-// Glyph size the port's own screens use for a text scale (1..3).
+// Glyph size the bottom screen uses for a text scale (1..3).
 int UiCjk_SizeForScale(int scale);
 
-// Rows of one glyph, `size` of them, most significant bit leftmost. NULL when
-// the index or size is unknown.
-const uint16_t *UiCjk_GlyphRows(int index, int size);
+// Rows of a bottom-screen glyph, `size` of them, most significant bit
+// leftmost, or NULL when the index or size is unknown.
+const uint16_t *UiCjk_SmallRows(int index, int size);
 
-// Pixels a character takes at `scale`, or 0 when it is not Chinese.
+// Rows of any character at 16x16, or NULL when it has no glyph.
+const uint16_t *UiCjk_WideRows(uint32_t codepoint);
+
+// Pixels a character takes at `scale` on the bottom screen, or 0 when it is
+// not one of the characters that screen draws.
 int UiCjk_WidthFor(uint32_t codepoint, int scale);
 
 #endif  // ZELDA3_UI_FONT_CJK_H_

@@ -2273,13 +2273,30 @@ static uint8_t SetupGlyph(uint32_t code, int row) {
 }
 
 static int SetupTextWidth(const char *text, int scale) {
-  return SetupTextLength(text) * 6 * scale;
+  int width = 0;
+  while (text && *text)
+    width += UiCjk_WideRows(SetupNextChar(&text)) ? 16 : 6 * scale;
+  return width;
 }
 
 static void SetupDrawChar(gfxScreen_t screen, uint32_t c, int x, int y,
                           int scale, uint16_t color) {
   if (c == ' ')
     return;
+  const uint16_t *cjk = UiCjk_WideRows(c);
+  if (cjk) {
+    int top = y - 2 * scale + (11 * scale - 16) / 2;
+    for (int row = 0; row < 16; row++) {
+      uint32_t bits = cjk[row];
+      for (int col = 0; col < 16; ) {
+        if (!(bits & (1u << (15 - col)))) { col++; continue; }
+        int start = col;
+        while (col < 16 && (bits & (1u << (15 - col)))) col++;
+        SetupFillRect(screen, x + start, top + row, col - start, 1, color);
+      }
+    }
+    return;
+  }
   for (int row = -2; row < 9; row++) {
     uint8_t bits = SetupGlyph(c, row);
     for (int col = 0; col < 5; col++) {
@@ -2297,10 +2314,12 @@ static void SetupDrawText(gfxScreen_t screen, const char *text, int x, int y,
   int cursor = x;
   int last = x + max_width;
   while (*text) {
-    if (max_width > 0 && cursor + 6 * scale > last)
+    uint32_t c = SetupNextChar(&text);
+    int advance = UiCjk_WideRows(c) ? 16 : 6 * scale;
+    if (max_width > 0 && cursor + advance > last)
       break;
-    SetupDrawChar(screen, SetupNextChar(&text), cursor, y, scale, color);
-    cursor += 6 * scale;
+    SetupDrawChar(screen, c, cursor, y, scale, color);
+    cursor += advance;
   }
 }
 
@@ -4720,6 +4739,8 @@ static bool SetupCanDraw(const char *text) {
     uint32_t c = SetupNextChar(&text);
     if (c == ' ')
       continue;
+    if (UiCjk_WideRows(c))
+      continue;
     bool drawn = false;
     for (int row = -2; row < 9 && !drawn; row++)
       drawn = SetupGlyph(c, row) != 0;
@@ -4776,8 +4797,22 @@ static void SetupStyledButton(int x,int y,int w,int h,bool selected) {
 }
 // Same authored glyphs, spacing and ink centering as the normal bottom UI.
 static void SetupMenuText(gfxScreen_t target,const char *text,int x,int y,int scale,uint16_t color) {
-  unsigned code;
-  while((code=UiFontNextCode(&text))) {
+  while(*text) {
+    const char *before=text;
+    uint32_t codepoint=UiFont_DecodeUtf8(&text);
+    const uint16_t *cjk=UiCjk_WideRows(codepoint);
+    if(cjk) {
+      // Chinese is baked at one size, 16x16, and centred against the line the
+      // Latin patterns occupy.
+      int rows=scale==3?15:scale==2?21:11;
+      int top=y-(scale==3?3:2*scale)+(rows-16)/2;
+      for(int yy=0;yy<16;yy++)for(int xx=0;xx<16;xx++)
+        if(cjk[yy]&(1u<<(15-xx)))SetupPutPixel(target,x+xx,top+yy,color);
+      x+=16;
+      continue;
+    }
+    text=before;
+    unsigned code=UiFontNextCode(&text);
     int rows=scale==3?15:scale==2?21:11,width=scale==3?7:5*scale;
     for(int yy=0;yy<rows;yy++)for(int xx=0;xx<width;xx++) {
       unsigned bits=scale==3?kNativeUiMediumGlyphs[code][yy]:scale==2?kNativeUiLargeGlyphs[code][yy]:kNativeUiGlyphs[code][yy];
@@ -4835,11 +4870,13 @@ static int SetupWrap(gfxScreen_t target,const char *text,int x,int y,int width,i
   while(*text && lines<max_lines) {
     const char *end=text,*space=NULL;char line[256];int length=0;
     while(*end) {
-      const char *next=end;UiFontNextCode(&next);int n=next-text;
+      const char *next=end;uint32_t codepoint=SetupNextChar(&next);int n=next-text;
       if(n>=(int)sizeof(line))break;
       memcpy(line,text,n);line[n]=0;
       if(UiFontWidth(line,face)>width)break;
+      // A space breaks before itself, one Chinese character after itself.
       if(*end==' ')space=end;
+      else if(UiCjk_WideRows(codepoint))space=next;
       end=next;length=n;
     }
     if(*end&&space&&space>text){end=space;length=end-text;}

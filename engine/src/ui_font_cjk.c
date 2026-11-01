@@ -20,17 +20,13 @@ uint32_t UiFont_DecodeUtf8(const char **text) {
   return '?';
 }
 
-int UiCjk_GlyphCount(void) {
-  return kUiCjkGlyphCount;
-}
-
-int UiCjk_GlyphIndex(uint32_t codepoint) {
-  if (codepoint < kUiCjkFirstCodepoint)
+static int Lookup(const uint32_t *codepoints, int count, uint32_t codepoint) {
+  if (count <= 0 || codepoint < kUiCjkFirstCodepoint)
     return -1;
-  int lo = 0, hi = kUiCjkGlyphCount - 1;
+  int lo = 0, hi = count - 1;
   while (lo <= hi) {
     int mid = (lo + hi) / 2;
-    uint32_t value = kUiCjkCodepoints[mid];
+    uint32_t value = codepoints[mid];
     if (value == codepoint)
       return mid;
     if (value < codepoint)
@@ -41,25 +37,45 @@ int UiCjk_GlyphIndex(uint32_t codepoint) {
   return -1;
 }
 
+int UiCjk_GlyphCount(void) {
+  return kUiCjkGlyphCount;
+}
+
+bool UiCjk_HasGlyph(uint32_t codepoint) {
+  return Lookup(kUiCjkCodepoints, kUiCjkGlyphCount, codepoint) >= 0;
+}
+
+int UiCjk_SmallCount(void) {
+  return kUiCjkSmallCount;
+}
+
+int UiCjk_SmallIndex(uint32_t codepoint) {
+  return Lookup(kUiCjkSmallCodepoints, kUiCjkSmallCount, codepoint);
+}
+
 int UiCjk_SizeForScale(int scale) {
   // The bottom screen draws Latin at 11, 21 and 15 pixels for scales 1..3; the
   // Chinese glyphs closest to those are 10, 16 and 12.
   return scale == 2 ? 16 : scale == 3 ? 12 : 10;
 }
 
-const uint16_t *UiCjk_GlyphRows(int index, int size) {
-  if (index < 0 || index >= kUiCjkGlyphCount)
+const uint16_t *UiCjk_SmallRows(int index, int size) {
+  if (index < 0 || index >= kUiCjkSmallCount)
     return 0;
   switch (size) {
-  case 16: return kUiCjk16[index];
   case 12: return kUiCjk12[index];
   case 10: return kUiCjk10[index];
   default: return 0;
   }
 }
 
+const uint16_t *UiCjk_WideRows(uint32_t codepoint) {
+  int index = Lookup(kUiCjkCodepoints, kUiCjkGlyphCount, codepoint);
+  return index < 0 ? 0 : kUiCjk16[index];
+}
+
 int UiCjk_WidthFor(uint32_t codepoint, int scale) {
-  if (UiCjk_GlyphIndex(codepoint) < 0)
+  if (UiCjk_SmallIndex(codepoint) < 0)
     return 0;
   return UiCjk_SizeForScale(scale);
 }

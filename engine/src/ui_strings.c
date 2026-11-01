@@ -150,10 +150,10 @@ static const char *const kUiStrings[kUiStringCount][kUiLanguageCount] = {
   [kUi_EdgeMode]        = {"EDGE MODE",     "MODE BORDS", "CÁMARA", "CÂMERA", "CAMERA", "KAMERA", "КРАЯ", "边缘模式" },
   [kUi_Zoom]            = {"ZOOM",          "ZOOM", "ZOOM", "ZOOM", "ZOOM", "ZOOM", "МАСШТАБ", "缩放" },
   [kUi_TopHud]          = {"TOP HUD",       "HUD HAUT", "HUD SUPERIOR", "HUD SUPERIOR", "HUD IN ALTO", "OBERES HUD", "ВЕРХНИЙ HUD", "上屏 HUD" },
-  [kUi_Wide]            = {"WIDE",          "LARGE", "AMPLIA", "AMPLA", "AMPIO", "BREIT", "ШИРОКИЙ", "宽屏 (WIDE)" },
+  [kUi_Wide]            = {"WIDE",          "LARGE", "AMPLIA", "AMPLA", "AMPIO", "BREIT", "ШИРОКИЙ", "宽屏" },
   [kUi_Original]        = {"ORIGINAL",      "ORIGINAL", "ORIGINAL", "ORIGINAL", "ORIGINALE", "ORIGINAL", "ИСХОДНЫЙ", "原始" },
   [kUi_Stretch]         = {"STRETCH",       "\xC3\x89TIR\xC3\x89", "ESTIRADA", "ESTICADA", "ESTESO", "GESTRECKT", "РАСТЯНУТЬ", "拉伸" },
-  [kUi_FixedCamera]     = {"FIXED CAMERA",  "CAM\xC3\x89RA FIXE", "FIJA", "FIXA", "FISSA", "FEST", "ФИКС.", "固定 (FIXED)" },
+  [kUi_FixedCamera]     = {"FIXED CAMERA",  "CAM\xC3\x89RA FIXE", "FIJA", "FIXA", "FISSA", "FEST", "ФИКС.", "固定" },
   [kUi_Standard]        = {"STANDARD",      "STANDARD", "NORMAL", "PADRÃO", "NORMALE", "STANDARD", "ОБЫЧНЫЙ", "标准" },
 
   [kUi_MemDump] = {"DUMP", "DUMP", "DUMP", "DUMP", "DUMP", "DUMP", "ДАМП", "转储" },
