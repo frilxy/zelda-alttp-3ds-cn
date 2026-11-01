@@ -456,6 +456,11 @@ static float tiny_text_width(const char *s, float sc) {
   return UiFontWidth(s, (int)fmaxf(1, floorf(sc + 0.5f)));
 }
 
+// Chinese glyphs, one texture per size (see ui_font_cjk.h). Built on first
+// use like the Latin atlases, and only when the UI strings actually carry
+// Chinese, so a build without the language never allocates them.
+static SDL_Texture *g_cjk_textures[3];
+
 static SDL_Texture *cjk_texture(int size) {
   int slot = size == 16 ? 2 : size == 12 ? 1 : 0;
   if (g_cjk_textures[slot])
