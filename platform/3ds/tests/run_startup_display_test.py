@@ -14,9 +14,12 @@ code=r'''
 #include <assert.h>
 #include <stdio.h>
 typedef uint8_t u8;typedef int Result;
+static bool g_bottom_fade_active;
+static int SS_GetModule(void){return 0;}
+static void Platform3DS_DrawBottomTexture(void){}
 static bool g_startup_lcd_black=true,g_setup_console_active,g_gpu_presenter_initialized,g_gpu_frame_active;
 static unsigned valid,setupPresents,reveals,waits;
-static bool black=true;
+static bool black=true,g_setup_audio_preserve;static unsigned audio_stops;
 static int g_top_target=1,g_bottom_target=2;
 static uint16_t g_setup_top_pixels[400*240],g_setup_bottom_pixels[320*240];
 enum {GFX_TOP,GFX_BOTTOM,GSP_RGB565_OES};
@@ -32,7 +35,7 @@ static void aptSetSleepAllowed(bool b){}
 static void consoleInit(int s,void *p){}
 static void consoleClear(void){}
 static void PresentSetupConsole(void){if(++setupPresents>=2)valid=3;}
-static void SetupAudioStop(void){}
+static void SetupAudioStop(void){audio_stops++;}
 static void gfxExit(void){GSPGPU_SetLcdForceBlack(1);valid=0;}
 static bool C3D_FrameBegin(int flags){return true;}
 static void Platform3DS_ClearBlackTarget(int target){valid|=target;}
@@ -45,7 +48,8 @@ FRAME
 int main(void){
  for(int session=0;session<20;session++) {
   g_gpu_presenter_initialized=false;BeginSetupConsole();assert(!black&&valid==3);
-  EndSetupConsole();assert(black&&g_startup_lcd_black);
+  g_setup_audio_preserve=(session&1)!=0;unsigned old_stops=audio_stops;
+  EndSetupConsole();assert(black&&g_startup_lcd_black&&audio_stops==old_stops+!g_setup_audio_preserve);
   gfxInitDefault(); // SDL gfxInit's premature unmask must be suppressed.
   assert(black);g_gpu_presenter_initialized=true;
   Platform3DS_BlankScreens();assert(black&&valid==3);
@@ -53,7 +57,7 @@ int main(void){
   before=waits;g_gpu_frame_active=true;Platform3DS_EndFrame();assert(waits==before);
   gfxExit();
  }
- assert(reveals==40);puts("PASS 20 selector/SDL/probe/game handoffs: no uninitialized reveal; one startup wait, no added gameplay wait");
+ assert(reveals==40&&audio_stops==10);puts("PASS 20 selector/SDL/probe/game handoffs: no uninitialized reveal; one startup wait, no added gameplay wait; setup audio retained across language-only restarts");
 }
 '''
 for marker,sig in [('WRAPPER','Result __wrap_GSPGPU_SetLcdForceBlack('),('REVEAL','static void RevealInitializedScreens('),('BEGIN','static void BeginSetupConsole('),('END','static void EndSetupConsole('),('BLANK','void Platform3DS_BlankScreens('),('FRAME','void Platform3DS_EndFrame(')]:code=code.replace(marker,fn(sig))

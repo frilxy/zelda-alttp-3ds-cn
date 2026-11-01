@@ -1,0 +1,280 @@
+# HyruleCastleEscape.yaml — Hyrule Castle Escape Inverted world-state (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/HyruleCastleEscape.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# Inheritance chain:
+#   Inverted\HyruleCastleEscape  extends  Open\HyruleCastleEscape  extends  Standard\HyruleCastleEscape
+# The Inverted file calls `parent::initalize()` (php:21) → Open then Standard.
+# Each layer overrides a subset of locations; the Inverted overrides re-replace
+# the predicates set by Open/Standard for the locations listed below.
+# Locations NOT overridden in the Inverted file (and thus inherited from the
+# nearest parent that overrides them):
+#   - "Sewers - Dark Cross"   — set by Open parent (Open/HyruleCastleEscape.php:45-48):
+#         Lamp || (itemPlacement==='advanced' && FireRod)
+#       itemPlacement!='advanced' under Phase A → reduces to: HAS_ITEM(Lamp).
+#   - "Hyrule Castle - Map Chest" — set by Standard parent (php:91-93):
+#         canKillEscapeThings(world)
+#   - "Zelda" (Prize\Event) — set by Standard parent via can_complete = Sanctuary
+#     canAccess. The Inverted file changes Sanctuary's predicate; the inherited
+#     can_complete therefore tracks the new Sanctuary predicate.
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP item-name remappings used:
+#       * KeyH2        → SmallKey_HyruleCastleEscape
+#       * PegasusBoots → Boots (referenced as `PegasusBoot` typo inside dropped
+#         trick branches, php:89, 110 — typo in upstream PHP, branch is FALSE)
+#       * MoonPearl, MagicMirror, Lamp, FireRod, Hammer, Hookshot, Flippers —
+#         identical names in our item_registry.yaml.
+#   - Dropped branches (all gated on Phase B trick / config flags that
+#     evaluate FALSE under Phase A axis pins):
+#       * canBunnyRevive (php:25, 29, 36, 40, 47, 51, 58, 65, 77, 93, 113, 131)
+#       * canOWYBA + hasABottle (php:26, 30, 37, 41, 48, 52, 59, 66, 75, 94, 114, 132)
+#       * canDungeonRevive (php:28, 39, 50, 57, 64, 128)
+#       * canSuperBunny + MagicMirror (php:73, 86, 129) — only the
+#         Sanctuary/can_enter "MoonPearl is not required" trick branch
+#       * canMirrorClip + (canBootsClip+Boots|canSuperSpeed+canSpinSpeed|
+#         canOneFrameClipOW) + WestDM->canEnter (php:84-92, 106-112) — the
+#         Secret Passage and Link's Uncle alternative-mirror-clip path
+#       * region.wildKeys / wildBigKeys / wildMaps / wildCompasses (php:98-101,
+#         120-123) — all false → setFillRules degenerates: NO dungeon item
+#         (Key, BigKey, Map, Compass) may be placed at Secret Passage or
+#         Link's Uncle. Modeled below as can_place restrictions. Note that
+#         HCE has NO `BigKey_HyruleCastleEscape` or `Compass_HyruleCastleEscape`
+#         items in our item_registry.yaml (only `SmallKey_HyruleCastleEscape`
+#         and `Map_HyruleCastleEscape` exist), so the ban only meaningfully
+#         constrains those two; the BigKey/Compass clauses of the PHP
+#         setFillRules are vacuous in our registry (no item can match).
+#         UNKNOWN-ID FLAG: if Phase B introduces HCE BigKey/Compass items,
+#         this predicate must be revisited.
+#       * itemPlacement === 'advanced' on Sewers - Dark Cross (Open parent)
+#         — drops the FireRod fallback; only Lamp remains.
+#   - Surviving Phase A predicates collapse the second-disjunct "stay-Link"
+#     check `(canDungeonRevive | hasSword | canBunnyRevive | canOWYBA |
+#     MoonPearl)` to `(HasSword(1) OR HAS_ITEM(MoonPearl))`.
+#
+# Status: translated 2026-05-27. Awaiting review + codegen integration.
+
+format_version: 1
+
+regions:
+  # External parent stubs — in Inverted, HCE's overworld parent is
+  # "North East Light World" (php:134, 96, 117). Sanctuary's alternate path
+  # references "North West Light World" (php:79). Both stubbed for cross-file
+  # region reference; codegen "last-wins" merge resolves with the eventual
+  # full inverted/LightWorld/NorthEast and NorthWest translations.
+  - id: LightWorld_NorthEast
+    name: "Light World - North East (stub)"
+    source: "stub for cross-file region reference"
+
+  - id: LightWorld_NorthWest
+    name: "Light World - North West (stub)"
+    source: "stub for cross-file region reference"
+
+  - id: HyruleCastleEscape
+    name: "Hyrule Castle Escape (Inverted)"
+    dungeon: HyruleCastleEscape
+    world_state_filter: [Inverted]
+    source: "app/Region/Inverted/HyruleCastleEscape.php:11 (extends Open\\HyruleCastleEscape extends Standard\\HyruleCastleEscape)"
+
+edges:
+  # Inverted `can_enter` (php:127-135):
+  #   (canDungeonRevive | canSuperBunny+MagicMirror | canBunnyRevive |
+  #    canOWYBA+hasABottle | MoonPearl)
+  #   AND North-East-LW->canEnter
+  # All trick disjuncts → FALSE → reduces to MoonPearl AND NE-LW (source region).
+  - from: LightWorld_NorthEast
+    to: HyruleCastleEscape
+    predicate: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/HyruleCastleEscape.php:127-135 (can_enter closure)"
+
+locations:
+  # ===========================================================================
+  # Sewers - Secret Room - Left/Middle/Right (php:23-54)
+  # All three have identical bodies:
+  #   (canLiftRocks AND (MoonPearl | canBunnyRevive | canOWYBA+hasABottle))
+  #   OR (Lamp AND KeyH2 AND
+  #       (canDungeonRevive | hasSword | canBunnyRevive | canOWYBA+hasABottle | MoonPearl))
+  # MoonPearl is already required by the entry edge; the first disjunct's
+  # (MoonPearl|trick) clause is therefore TRUE → first disjunct reduces to
+  # CanLiftRocks. The second-disjunct stay-Link clause collapses to
+  # (HasSword(1) OR MoonPearl); since MoonPearl is region-required, the clause
+  # is TRUE → second disjunct reduces to (Lamp AND KeyH2). Combined:
+  #   CanLiftRocks() OR (Lamp AND SmallKey_HyruleCastleEscape)
+  # ===========================================================================
+  - id: "Sewers - Secret Room - Left"
+    name: "Sewers - Secret Room - Left"
+    region: HyruleCastleEscape
+    type: Chest
+    vanilla_item: Rupee100
+    can_reach: "CanLiftRocks() OR (HAS_ITEM(Lamp) AND HAS_ITEM(SmallKey_HyruleCastleEscape))"
+    source: "app/Region/Inverted/HyruleCastleEscape.php:23-32"
+
+  - id: "Sewers - Secret Room - Middle"
+    name: "Sewers - Secret Room - Middle"
+    region: HyruleCastleEscape
+    type: Chest
+    vanilla_item: Rupee100
+    can_reach: "CanLiftRocks() OR (HAS_ITEM(Lamp) AND HAS_ITEM(SmallKey_HyruleCastleEscape))"
+    source: "app/Region/Inverted/HyruleCastleEscape.php:34-43"
+
+  - id: "Sewers - Secret Room - Right"
+    name: "Sewers - Secret Room - Right"
+    region: HyruleCastleEscape
+    type: Chest
+    vanilla_item: Rupee100
+    can_reach: "CanLiftRocks() OR (HAS_ITEM(Lamp) AND HAS_ITEM(SmallKey_HyruleCastleEscape))"
+    source: "app/Region/Inverted/HyruleCastleEscape.php:45-54"
+
+  # Sewers - Dark Cross — NOT overridden in Inverted file; inherited from
+  # Open parent (Open/HyruleCastleEscape.php:45-48):
+  #   Lamp || (itemPlacement==='advanced' && FireRod)
+  # itemPlacement!='advanced' under Phase A → HAS_ITEM(Lamp).
+  - id: "Sewers - Dark Cross"
+    name: "Sewers - Dark Cross"
+    region: HyruleCastleEscape
+    type: Chest
+    vanilla_item: SmallKey_HyruleCastleEscape
+    dungeon_item_class: small_key
+    can_reach: "HAS_ITEM(Lamp)"
+    source: "app/Region/Open/HyruleCastleEscape.php:45-48 (inherited)"
+
+  # Hyrule Castle - Boomerang Chest (php:56-61):
+  #   KeyH2 AND (canDungeonRevive | hasSword | canBunnyRevive | canOWYBA+hasABottle | MoonPearl)
+  # Stay-Link clause collapses to (HasSword(1) OR MoonPearl). MoonPearl required
+  # at region level → clause TRUE → reduces to KeyH2.
+  - id: "Hyrule Castle - Boomerang Chest"
+    name: "Hyrule Castle - Boomerang Chest"
+    region: HyruleCastleEscape
+    type: Chest
+    vanilla_item: BlueBoomerang
+    can_reach: "HAS_ITEM(SmallKey_HyruleCastleEscape)"
+    source: "app/Region/Inverted/HyruleCastleEscape.php:56-61"
+
+  # Hyrule Castle - Map Chest — NOT overridden in Inverted file; inherited
+  # from Standard parent (php:91-93): canKillEscapeThings(world).
+  - id: "Hyrule Castle - Map Chest"
+    name: "Hyrule Castle - Map Chest"
+    region: HyruleCastleEscape
+    type: Chest
+    vanilla_item: Map_HyruleCastleEscape
+    dungeon_item_class: map
+    can_reach: "CanKillEscapeThings(world)"
+    source: "app/Region/Standard/HyruleCastleEscape.php:91-93 (inherited)"
+
+  # Hyrule Castle - Zelda's Cell (php:63-68): same body as Boomerang Chest.
+  - id: "Hyrule Castle - Zelda's Cell"
+    name: "Hyrule Castle - Zelda's Cell"
+    region: HyruleCastleEscape
+    type: Chest
+    vanilla_item: Rupee20
+    can_reach: "HAS_ITEM(SmallKey_HyruleCastleEscape)"
+    source: "app/Region/Inverted/HyruleCastleEscape.php:63-68"
+
+  # Sanctuary (php:70-80):
+  #   (KeyH2 AND Lamp)
+  #   OR ((MoonPearl | canSuperBunny+MagicMirror | canOWYBA+hasABottle | canBunnyRevive)
+  #       AND North-West-LW->canEnter)
+  # Trick disjuncts FALSE → reduces to:
+  #   (KeyH2 AND Lamp) OR (MoonPearl AND NW-LW->canEnter)
+  # MoonPearl is already required at the entry edge; the NW-LW branch is the
+  # cross-region "approach Sanctuary from outside" path. Modeled here keeping
+  # the explicit MoonPearl AND NW-LW edge predicate; codegen handles the
+  # cross-region reachability via OP_REGION_REACHABLE.
+  - id: "Sanctuary"
+    name: "Sanctuary"
+    region: HyruleCastleEscape
+    type: Chest
+    vanilla_item: BossHeartContainer
+    can_reach: "(HAS_ITEM(SmallKey_HyruleCastleEscape) AND HAS_ITEM(Lamp)) OR (HAS_ITEM(MoonPearl) AND OP_REGION_REACHABLE(LightWorld_NorthWest))"
+    source: "app/Region/Inverted/HyruleCastleEscape.php:70-80"
+
+  # Secret Passage (php:82-102):
+  #   (
+  #     (canMirrorClip AND canSuperBunny AND MagicMirror AND
+  #      (canBootsClip+PegasusBoot | canSuperSpeed+canSpinSpeed | canOneFrameClipOW)
+  #      AND West-DM->canEnter)
+  #     OR canBunnyRevive
+  #     OR canOWYBA+hasABottle
+  #     OR MoonPearl
+  #   )
+  #   AND North-East-LW->canEnter
+  # All trick disjuncts FALSE → reduces to MoonPearl AND NE-LW.
+  # MoonPearl already required by entry edge; NE-LW is the entry edge's source
+  # region. Reduces to TRUE inside the region.
+  #
+  # setFillRules (php:97-102): forbids placing any Key/BigKey/Map/Compass here
+  # (all wild flags FALSE). Modeled as can_place restriction.
+  - id: "Secret Passage"
+    name: "Secret Passage"
+    region: HyruleCastleEscape
+    type: Chest
+    vanilla_item: Rupee100
+    can_reach: "TRUE()"
+    # wild-flag ban: forbid SmallKey + Map placements at this slot. BigKey
+    # and Compass clauses of the PHP ban are vacuous (no such HCE items
+    # exist in our item_registry.yaml).
+    can_place: "NOT OP_ITEM_IS(SmallKey_HyruleCastleEscape) AND NOT OP_ITEM_IS(Map_HyruleCastleEscape)"
+    source: "app/Region/Inverted/HyruleCastleEscape.php:82-102"
+
+  # Link's Uncle (php:104-124):
+  #   (
+  #     (canMirrorClip AND MagicMirror AND
+  #      (canBootsClip+PegasusBoot | canSuperSpeed+canSpinSpeed | canOneFrameClipOW)
+  #      AND West-DM->canEnter)
+  #     OR canBunnyRevive
+  #     OR canOWYBA+hasABottle
+  #     OR MoonPearl
+  #   )
+  #   AND North-East-LW->canEnter
+  # All trick disjuncts FALSE → reduces to MoonPearl AND NE-LW (vacuous in
+  # region). The setFillRules clause (php:119-124) additionally requires
+  # Sanctuary's canAccess (for the placer's spoiler-ordering pass) and the
+  # wild-flag dungeon-item ban.
+  #
+  # Note: Link's Uncle is listed in location_registry.yaml id 8 with region
+  # = LinksHouse, NOT HyruleCastleEscape. We honor the registry: cite the
+  # registry-canonical region.
+  - id: "Link's Uncle"
+    name: "Link's Uncle"
+    # Audit finding #5 fix (post-S2 cluster audit): under Inverted, Link
+    # starts in `LinksHouse_Inverted` not `LinksHouse`. The base region
+    # binding (LinksHouse) was producing the 1/237 unreachable placement.
+    # Override the region for the Inverted view so Uncle lives in the
+    # Inverted start region.
+    region: LinksHouse_Inverted
+    type: Npc
+    vanilla_item: L1Sword
+    can_reach: "TRUE()"
+    # Sanctuary-canAccess is a placer-ordering guard ("don't place Uncle's
+    # item until Sanctuary is reachable"); modeled here as a can_place
+    # predicate referencing the HCE region. Combined with the wild-flag
+    # ban — vacuous for BigKey/Compass (no such HCE items in registry);
+    # only SmallKey + Map are meaningful bans.
+    can_place: "OP_REGION_REACHABLE(HyruleCastleEscape) AND NOT OP_ITEM_IS(SmallKey_HyruleCastleEscape) AND NOT OP_ITEM_IS(Map_HyruleCastleEscape)"
+    source: "app/Region/Inverted/HyruleCastleEscape.php:104-124"
+
+  # Zelda (Prize\Event) — not overridden in Inverted; inherited can_complete
+  # from Standard parent (Standard/HyruleCastleEscape.php:116-118):
+  #   can_complete = Sanctuary canAccess
+  # Tracks the Sanctuary predicate above.
+  - id: "Zelda"
+    name: "Zelda"
+    region: HyruleCastleEscape
+    type: Prize_Event
+    vanilla_item: RescuedZelda
+    can_reach: "(HAS_ITEM(SmallKey_HyruleCastleEscape) AND HAS_ITEM(Lamp)) OR (HAS_ITEM(MoonPearl) AND OP_REGION_REACHABLE(LightWorld_NorthWest))"
+    source: "app/Region/Standard/HyruleCastleEscape.php:116-120 (inherited can_complete = Sanctuary access)"
+
+# Note on macros: CanLiftRocks, CanKillEscapeThings are defined in macros.yaml;
+# codegen pulls them from the merged macro table.
+#
+# UNKNOWN-ID FLAG: HCE has no `BigKey_HyruleCastleEscape` or
+# `Compass_HyruleCastleEscape` in our `item_registry.yaml` — only
+# `SmallKey_HyruleCastleEscape` and `Map_HyruleCastleEscape` exist. The PHP
+# `setFillRules` wild-flag bans on those item classes (Item\BigKey, Item\Compass)
+# are therefore vacuous in our registry (no item can match), and we omit those
+# clauses from the can_place predicates above. If Phase B introduces HCE
+# BigKey/Compass items into the registry, the can_place predicates for Secret
+# Passage and Link's Uncle must be revisited.

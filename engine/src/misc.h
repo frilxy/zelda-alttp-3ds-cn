@@ -59,7 +59,21 @@ void Module15_MirrorWarpFromAga();
 void Module16_BossVictory_Crystal();
 void Module16_04_FadeAndEnd();
 void TriforceRoom_LinkApproachTriforce();
-void AncillaAdd_ItemReceipt(uint8 ain, uint8 yin, int chest_pos);
+bool ItemReceipt_GrantInventory(uint8 item);
+bool ItemReceipt_CanAccept(uint8 item);
+bool ItemReceipt_CanAllocate(void);
+bool ItemReceipt_GrantWithoutAnimation(uint8 item);
+void ItemReceipt_CompleteMethod3WithoutAnimation(uint8 item);
+bool AncillaAdd_ItemReceipt(uint8 ain, uint8 yin, int chest_pos);
+void ItemReceipt_FastFanfareSelfCheck(void);
+void ItemReceipt_LosslessSelfCheck(void);
+bool ItemReceipt_IsFastBossPrize(uint8 item, uint8 receipt_method,
+                                 bool indoors, bool fast_fanfare);
+bool ItemReceipt_ShouldWaitForPendantFanfare(uint8 item, uint8 apu_busy,
+                                             bool fast_boss_prize);
+uint8 ItemReceipt_TickCrystalFanfare(uint8 timer, bool fast_boss_prize);
+bool ItemReceipt_ShouldAdvanceCrystalFanfare(uint8 apu_busy, uint8 timer,
+                                             bool fast_boss_prize);
 void ItemReceipt_GiveBottledItem(uint8 item);
 void Module17_SaveAndQuit();
 void WallMaster_SendPlayerToLastEntrance();

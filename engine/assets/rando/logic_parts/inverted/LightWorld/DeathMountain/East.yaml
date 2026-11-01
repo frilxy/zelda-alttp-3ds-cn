@@ -1,0 +1,152 @@
+# LightWorld/DeathMountain/East.yaml — Inverted LightWorld Death Mountain East (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/LightWorld/DeathMountain/East.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `PegasusBoots` → registry-canonical `Boots`.
+#   - PHP `canOWYBA`/`canSuperBunny`/`canBootsClip`/`canOneFrameClipOW`/
+#     `canSuperSpeed`/`canMirrorWrap` are Phase B trick/glitch axes —
+#     DROPPED.
+#
+# Inverted regional context:
+#   - In Inverted, `East` (php:25-26) RE-ADDS the Ether Tablet and
+#     Spectacle Rock locations (which Inverted West.php:24-25 removes from
+#     DM West). So in Inverted these two locations live in DM East.
+#     NOTE: location_registry.yaml assigns Ether Tablet (id 194) and
+#     Spectacle Rock (id 195) to region=LightWorld_DeathMountain_West with
+#     a note that Inverted re-adds at East. The registry's region field is
+#     the source of truth; the codegen merger may need a world_state_filter
+#     to route correctly. Translating PER PHP source as instructed: I emit
+#     them in LightWorld_DeathMountain_East here per the Inverted PHP file's
+#     explicit addItem calls. Flagged for reviewer at apply-time integration.
+#   - DM East entry in Inverted comes from East DW DM (via dark-rock lift)
+#     or from West DM (which itself is reached via flute/rock+lamp).
+#
+# Status: translated 2026-05-27. Awaiting review + codegen integration.
+#
+# REVIEWER FLAG: Ether Tablet + Spectacle Rock region routing — registry
+# says LightWorld_DeathMountain_West, PHP says East in Inverted. See note
+# above. May require world_state_filter on these two location entries.
+
+format_version: 1
+
+regions:
+  - id: LightWorld_DeathMountain_East
+    name: "Light World - Death Mountain East (Inverted)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:12-207"
+
+edges:
+  # `can_enter` (php:190-203):
+  #   canLiftDarkRocks AND East-Dark-DM-reachable
+  #   OR (West-DM reachable AND ((MoonPearl OR canOWYBA) AND
+  #       (Hookshot OR boots-clip OR spin-speed)))
+  #   OR (canMirrorWrap AND MagicMirror)
+  #   OR canOneFrameClipOW
+  # All glitch/trick branches drop. Surviving:
+  #   1. canLiftDarkRocks AND East-DW-DM reachable (dark-rock lift entry)
+  #   2. West-DM reachable AND MoonPearl AND Hookshot (the canonical bridge)
+  - from: DarkWorld_DeathMountain_East
+    to: LightWorld_DeathMountain_East
+    predicate: "CanLiftDarkRocks()"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:190-203 (dark-rock lift entry)"
+
+  - from: LightWorld_DeathMountain_West
+    to: LightWorld_DeathMountain_East
+    predicate: "HAS_ITEM(MoonPearl) AND HAS_ITEM(Hookshot)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:190-203 (West-DM bridge entry)"
+
+locations:
+  # `Spiral Cave` (php:51-63): MoonPearl. The bottle/spin-speed/superbunny+
+  # MagicMirror+hasSword branches DROP.
+  - id: "Spiral Cave"
+    region: LightWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:51-63"
+
+  # `Mimic Cave` (php:65-73): Hammer AND MoonPearl. The OWYBA/clip
+  # alternatives drop.
+  - id: "Mimic Cave"
+    region: LightWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:65-73"
+
+  # `Paradox Cave Lower - Far Left` (php:75-85): MoonPearl. All OWYBA/clip/
+  # spin-speed alternatives drop.
+  - id: "Paradox Cave Lower - Far Left"
+    region: LightWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:75-85"
+
+  # `Paradox Cave Lower - Left` (php:87-97).
+  - id: "Paradox Cave Lower - Left"
+    region: LightWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:87-97"
+
+  # `Paradox Cave Lower - Right` (php:99-109).
+  - id: "Paradox Cave Lower - Right"
+    region: LightWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:99-109"
+
+  # `Paradox Cave Lower - Far Right` (php:111-121).
+  - id: "Paradox Cave Lower - Far Right"
+    region: LightWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:111-121"
+
+  # `Paradox Cave Lower - Middle` (php:123-133).
+  - id: "Paradox Cave Lower - Middle"
+    region: LightWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:123-133"
+
+  # `Paradox Cave Upper - Left` (php:135-146): canBombThings AND MoonPearl.
+  - id: "Paradox Cave Upper - Left"
+    region: LightWorld_DeathMountain_East
+    can_reach: "CanBombThings() AND HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:135-146"
+
+  # `Paradox Cave Upper - Right` (php:148-159).
+  - id: "Paradox Cave Upper - Right"
+    region: LightWorld_DeathMountain_East
+    can_reach: "CanBombThings() AND HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:148-159"
+
+  # `Ether Tablet` (php:25 added; php:161-176): BookOfMudora AND hasSword(2)
+  # AND MoonPearl AND Hammer. swordless-mode (Hammer-only for tablet read)
+  # branch drops. The boots-clip/super-speed/OWYBA+clip alternatives within
+  # the inner clause drop, leaving Hammer as the survivor.
+  # NOTE: see reviewer flag in header — registry assigns this to
+  # LightWorld_DeathMountain_West.
+  # §4 swordless: read with Book+Hammer (inert under randomized).
+  - id: "Ether Tablet"
+    region: LightWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(BookOfMudora) AND (HasSword2() OR (OP_MODEWEAPONS_EQ(swordless) AND HAS_ITEM(Hammer))) AND HAS_ITEM(MoonPearl) AND HAS_ITEM(Hammer)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:25, 161-176"
+
+  # `Spectacle Rock` (php:26 added; php:178-188): MoonPearl AND (Hammer OR
+  # other-glitch). All glitch alternatives drop, leaving Hammer.
+  # NOTE: see reviewer flag in header.
+  - id: "Spectacle Rock"
+    region: LightWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(MoonPearl) AND HAS_ITEM(Hammer)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:26, 178-188"
+
+  # `Floating Island` (id 205): in Inverted it is gated ONLY by the region's
+  # canEnter. Inverted East overrides Standard's initalize() WITHOUT calling
+  # parent and WITHOUT re-setting Floating Island's requirements (verified:
+  # php:62-207 sets Mimic/Paradox/Ether/Spectacle but not Floating Island), so
+  # its requirement_callback stays null and Location::canAccess returns true
+  # (Location.php:106). Without this override the codegen "last-wins" merge
+  # leaves the STRICT Standard predicate (MagicMirror AND MoonPearl AND
+  # CanBombThings AND CanLiftRocks AND East-DW-DM) applied to Inverted, which is
+  # strictly harder than ALTTPR and can make the Piece of Heart unplaceable.
+  - id: "Floating Island"
+    region: LightWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:62-207 (initalize() does not set Floating Island => region-gated only)"
+
+macros: []

@@ -1,0 +1,159 @@
+NOTICE
+======
+
+This file lists upstream copyright notices required by MIT-style licenses
+preserved in the zelda3-randomizer codebase. Per tasks.md §13.9 (OpenSpec
+change `add-randomizer-support`).
+
+The main project license (MIT) is in `LICENSE.txt`. The notices below cover
+upstream sources whose code or data was incorporated into this project.
+
+---
+
+## ALTTPR (`alttp_vt_randomizer`) — randomizer logic provenance
+
+The Phase A logic graph in `assets/rando/logic.yaml`, the 43 named macros in
+`assets/rando/macros.yaml`, and the canonical location/region/prize naming
+in `assets/rando/location_registry.yaml` were hand-translated from the
+ALTTPR PHP randomizer (`alttp_vt_randomizer`) per audit.md §0.10. Each
+translated artifact carries an inline `source: app/<path>:<line-range>`
+citation pointing back to the upstream PHP source.
+
+ALTTPR is distributed under the MIT License:
+
+```
+MIT License
+
+Copyright (c) 2016 sporchia
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+Upstream repository: <https://github.com/aerinon/ALttPDoorRandomizer>
+(and its sibling MIT-licensed variants).
+
+Translation discipline: per audit.md §0.10.2, every macro and location
+predicate cites the upstream PHP file:line range. Memory-based translation
+is forbidden; stale upstream comments are not load-bearing. This NOTICE
+file satisfies the MIT requirement to preserve the upstream copyright in
+derivative works.
+
+---
+
+## z3randomizer (KatDevsGames) — custom randomizer art
+
+The Triforce Piece and magic-decanter pixel art in
+`assets/rando/custom_item_gfx.png` (built into `zelda3_assets.dat` as the
+`kRandoCustomItemGfx` asset) is custom art from the ALTTPR randomizer ROM-asm
+repository (`z3randomizer`). The committed PNG is regenerated locally from
+palette-indexed pixel rows with an authored preview palette; the generator does
+not use ROM-derived palette words or item-offset tables. The Rupoor uses the
+attributed z3randomizer `off_black` custom palette constant in `src/sprite.c`.
+The sparse medallion-entrance BG glyph patches in
+`src/rando/medallion_icons.c` are derived from the same MIT z3randomizer art
+blobs (`data/99ff1_bombos.gfx`, `data/99ff1_quake.gfx`,
+`data/a6fc4_bombos.gfx`, `data/a6fc4_ether.gfx`) so shuffled Misery Mire and
+Turtle Rock entrance plaques show the assigned medallion.
+Per OpenSpec change `add-rando-field-item-custom-art`.
+
+z3randomizer is distributed under the MIT License:
+
+```
+Copyright 2016, 2017 Equilateral IT
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+Upstream repository: <https://github.com/KatDevsGames/z3randomizer>.
+
+---
+
+## Enemizer — enemy-shuffle constraint provenance
+
+The enemy-shuffle constraint generator in `assets/scripts/gen_enemy_shuffle_tables.py`
+parses Enemizer's `SpriteRequirement.cs` and `SpriteConstants.cs` to emit the
+sheet, slot, room-safety, boss, and overlord facts embedded in
+`src/rando/shuffle_enemies.c`. The generated tables are structural facts used to
+keep enemy substitutions render-safe and beatable; they are not ROM-extracted
+graphics or level data.
+
+Enemizer is distributed under the MIT License:
+
+```
+MIT License
+
+Copyright (c) 2023 Zarby89
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+Upstream repository: <https://github.com/Zarby89/Enemizer>.
+
+---
+
+## portable-file-dialogs — native manifest picker
+
+The PC native randomizer window vendors `portable-file-dialogs.h` under
+`third_party/portable-file-dialogs/` for the customizer manifest file picker.
+The header carries its own upstream copyright and WTFPL v2 license notice.
+
+Upstream repository: <https://github.com/samhocevar/portable-file-dialogs>.
+
+---
+
+## (Other upstream notices already covered in LICENSE.txt)
+
+- snesrev / elzo_d — zelda3 reimplementation (MIT, see `LICENSE.txt`).
+- Opus 1.3.1 — CSIRO / Xiph.Org / Gregory Maxwell (BSD-3-Clause; full text
+  in `LICENSE.txt`).
+- SHA-256 — vendored at `third_party/sha256/`; see that directory for the
+  upstream notice.
+- LakeSnes — SNES emulator core under `snes/`; see `snes/LICENSE` if present.

@@ -1,5 +1,6 @@
 #include "tagalong.h"
 #include "sprite_main.h"
+#include "mods.h"
 #include "sprite.h"
 #include "zelda_rtl.h"
 #include "variables.h"
@@ -145,7 +146,8 @@ bool Follower_ValidateMessageFreedom() {  // 87f46f
   uint8 t = button_mask_b_y & 0x80 | link_unk_master_sword | link_item_in_hand |
             link_position_mode | flag_is_ancilla_to_pick_up | flag_is_sprite_to_pick_up |
             link_state_bits | link_grabbing_wall;
-  return t == 0;
+  // A quest can silence the followers: SEC becomes CLC ($87:F498).
+  return t == 0 && Mods_RomByte(0x87f498, 0x38) == 0x38;
 }
 
 void Follower_MoveTowardsLink() {  // 88f91a
@@ -369,7 +371,9 @@ void Follower_BasicMover() {  // 89a197
     BYTE(dung_cur_door_pos) = 0;
     BYTE(door_animation_step_indicator) = 0;
     submodule_index = 5;
-    music_control = 21;
+    // A quest can keep the music on: LDA #$15, STA $012C become NOPs ($89:A234).
+    if (Mods_RomByte(0x89a234, 0xa9) == 0xa9)
+      music_control = Mods_RomByte(0x89a235, 21);
     return;
   }
 

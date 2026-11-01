@@ -1,5 +1,6 @@
 #include "sprite_main.h"
 #include "sprite.h"
+#include "mods.h"
 #include "tagalong.h"
 #include "ancilla.h"
 #include "overworld.h"
@@ -8,8 +9,185 @@
 #include "dungeon.h"
 #include "player.h"
 #include "misc.h"
+#include "features.h"
+#include "zelda_rtl.h"
+#include "rando/rando.h"
+#include "rando/goal_npc.h"
+#include "rando/alttpr_import.h"
+#include "rando/rando_dialogue.h"
+#include "rando/rando_hints.h"
+#include "rando/item_ids.h"
+#include "rando/location_ids.h"
+#include "rando/souls.h"           // add-npc-souls trigger gates
+#include "rando/npc_soul_tables.h" // kNpcSoul_* indices
 
 #define byte_7FFE01 (*(uint8*)(g_ram+0x1FE01))
+
+static bool CutsceneFastForwardEnabled(void) {
+  return (enhanced_features0 & kFeatures0_CutsceneFastForward) &&
+         !ZeldaIsEmulatorAttached();
+}
+
+static uint8 CutsceneClampTimer8(uint8 value, uint8 cap) {
+  return CutsceneFastForwardEnabled() && value > cap ? cap : value;
+}
+
+static bool Sprite_GrantResultIsTerminal(RandoGrantResult result) {
+  return result == kRandoGrantResult_Accepted ||
+         result == kRandoGrantResult_AlreadyChecked;
+}
+
+// Presence-aware completion policy used by sprite visibility/state guards. A
+// real placement owns completion through the sidecar checked bit; only an
+// absent placement may fall back to the authored vanilla SRAM proxy.
+static bool Sprite_SourceCompletionPolicy(bool placement_present, bool checked,
+                                          bool vanilla_completed) {
+  return placement_present ? checked : vanilla_completed;
+}
+
+static bool Sprite_SourceCompleted(uint16 location_id,
+                                   bool vanilla_completed) {
+  return Sprite_SourceCompletionPolicy(
+      Rando_HasLocationPlacement(location_id),
+      Rando_IsLocationChecked(location_id), vanilla_completed);
+}
+
+static bool Sprite_SourceShouldSuppress(bool prerequisite_met,
+                                        bool completed) {
+  return !prerequisite_met || completed;
+}
+
+// A paid grant can mutate the wallet itself (notably Rupoor). Prices therefore
+// apply to the post-grant balance and saturate instead of wrapping uint16.
+static uint16 Sprite_BalanceAfterPostGrantPrice(uint16 balance,
+                                                uint16 price) {
+  return balance >= price ? (uint16)(balance - price) : 0;
+}
+
+static void Sprite_ApplyPostGrantPrice(uint16 price) {
+  link_rupees_goal = Sprite_BalanceAfterPostGrantPrice(link_rupees_goal, price);
+}
+
+enum {
+  kKingZoraPurchase_PaidAtDialogue = 1,
+  kKingZoraPurchase_DeferPayment = 2,
+  kKingZoraReward_PaymentPending = 0x5a,
+};
+
+static bool Sprite_KingZoraShouldChargeAtPickup(uint8 payment_marker,
+                                                RandoGrantResult result) {
+  return payment_marker == kKingZoraReward_PaymentPending &&
+         result == kRandoGrantResult_Accepted;
+}
+
+static bool Sprite_WitchNeedsRewardPreview(bool preview_available,
+                                           bool preview_seen) {
+  return preview_available && !preview_seen;
+}
+
+static uint16 StandingPoH_Location(int k);
+
+static RandoGrantPresentation Sprite_MagicBatPresentationForPlan(
+    const RandoGrantPlan *plan) {
+  return plan->item_id == ITEM_HalfMagic
+      ? kRandoGrantPresentation_None
+      : kRandoGrantPresentation_Animated;
+}
+
+static bool Sprite_StandingPoHCallerOwnsPresentation(
+    const RandoGrantPlan *plan) {
+  return plan->item_id == ITEM_PieceOfHeart;
+}
+
+bool SpriteMain_GrantPresentationSelfCheck(void) {
+  RandoGrantPlan plan = {0};
+  plan.item_id = ITEM_HalfMagic;
+  if (Sprite_MagicBatPresentationForPlan(&plan) !=
+      kRandoGrantPresentation_None)
+    return false;
+  plan.item_id = ITEM_QuarterMagic;
+  if (Sprite_MagicBatPresentationForPlan(&plan) !=
+      kRandoGrantPresentation_Animated)
+    return false;
+  plan.item_id = ITEM_PieceOfHeart;
+  if (!Sprite_StandingPoHCallerOwnsPresentation(&plan))
+    return false;
+  plan.item_id = ITEM_BossHeartContainer;
+  if (Sprite_StandingPoHCallerOwnsPresentation(&plan))
+    return false;
+
+  // Exact checked-vs-vanilla policy truth table.
+  if (Sprite_SourceCompletionPolicy(true, false, true) ||
+      !Sprite_SourceCompletionPolicy(true, true, false) ||
+      !Sprite_SourceCompletionPolicy(false, false, true) ||
+      Sprite_SourceCompletionPolicy(false, true, false))
+    return false;
+  if (!Sprite_SourceShouldSuppress(false, false) ||
+      Sprite_SourceShouldSuppress(true, false) ||
+      !Sprite_SourceShouldSuppress(true, true))
+    return false;
+
+  // Exact post-grant pricing cases, including the Rupoor mutation that can put
+  // the wallet below a price which passed the pre-grant affordability check.
+  if (Sprite_BalanceAfterPostGrantPrice(600, 500) != 100 ||
+      Sprite_BalanceAfterPostGrantPrice(500, 500) != 0 ||
+      Sprite_BalanceAfterPostGrantPrice(490, 500) != 0 ||
+      Sprite_BalanceAfterPostGrantPrice(99, 100) != 0)
+    return false;
+
+  // Deferred Zora payment is one-shot on Accepted only. Retryable,
+  // AlreadyChecked, and a vanilla/already-paid reward never charge at pickup.
+  return Sprite_KingZoraShouldChargeAtPickup(
+             kKingZoraReward_PaymentPending, kRandoGrantResult_Accepted) &&
+         !Sprite_KingZoraShouldChargeAtPickup(
+             kKingZoraReward_PaymentPending, kRandoGrantResult_Retryable) &&
+         !Sprite_KingZoraShouldChargeAtPickup(
+             kKingZoraReward_PaymentPending,
+             kRandoGrantResult_AlreadyChecked) &&
+         !Sprite_KingZoraShouldChargeAtPickup(
+             0, kRandoGrantResult_Accepted) &&
+         Sprite_WitchNeedsRewardPreview(true, false) &&
+         !Sprite_WitchNeedsRewardPreview(true, true) &&
+         !Sprite_WitchNeedsRewardPreview(false, false);
+}
+
+// Common immediate item-source transaction. A missing/inactive placement keeps
+// the original vanilla receipt exactly; retryable/invalid randomized grants do
+// not mutate the source, so its handler can try again on a later frame.
+static RandoGrantResult Sprite_GrantAnimatedOrVanilla(
+    uint16 location_id, uint16 vanilla_registry_id, uint8 vanilla_lttp_code,
+    uint8 receipt_method, uint8 chest_position) {
+  RandoGrantResult result = kRandoGrantResult_NotActive;
+  if (enhanced_features1 & kFeatures1_RandomizerActive) {
+    result = Rando_GrantLocation(
+        location_id, vanilla_registry_id, vanilla_lttp_code,
+        kRandoGrantPresentation_Animated, receipt_method, chest_position);
+  }
+  if (result == kRandoGrantResult_NotActive) {
+    // Link_ReceiveItem gained a rando acceptance gate in the same commit that
+    // introduced this helper, so it can now return having granted NOTHING (a
+    // bottle code with no compatible slot). Reporting Accepted regardless made
+    // callers consume their source for free -- the Bottle Merchant would take
+    // 100 rupees and mark itself sold out without handing over a bottle.
+    // Report the refusal instead so the caller can keep its source.
+    // Rando-gated: this branch IS the vanilla path (result is NotActive when
+    // the feature bit is clear), and changing it would move the side-by-side
+    // RAM compare. And a PERMANENT refusal must terminate, not retry -- the
+    // first version of this check returned Retryable for a 5th bottle and so
+    // reintroduced the very loop class this change exists to remove.
+    if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+        !ItemReceipt_CanAccept(vanilla_lttp_code)) {
+      return Rando_ReceiveCodePermanentlyBlocked(vanilla_lttp_code)
+                 ? kRandoGrantResult_Accepted
+                 : kRandoGrantResult_Retryable;
+    }
+    item_receipt_method = receipt_method;
+    Link_ReceiveItem(vanilla_lttp_code, chest_position);
+    return kRandoGrantResult_Accepted;
+  }
+  return result;
+}
+
 static const int8 kSpriteKeese_Tab2[16] = {0, 8, 11, 14, 16, 14, 11, 8, 0, -8, -11, -14, -16, -14, -11, -8};
 static const int8 kSpriteKeese_Tab3[16] = {-16, -14, -11, -8, 0, 8, 11, 14, 16, 14, 11, 8, 0, -9, -11, -14};
 static const int8 kZazak_Yvel[4] = {0, 0, 16, -16};
@@ -963,6 +1141,20 @@ void Sprite_PullSwitch_bounce(int k) {
     PullSwitch_FacingDown(k);
 }
 
+// A quest's routine that sets bits of work RAM: LDA $7Exxxx, ORA #n,
+// STA $7Exxxx, as many times as it has them (the bytes are in its
+// kModTable_RomBytes).
+static void Quest_RunOrRoutine(uint32 a) {
+  for (int i = 0; i < 8 && Mods_RomByte(a, 0) == 0xaf; i++, a += 10) {
+    uint32 src = Mods_RomByte(a + 1, 0) | Mods_RomByte(a + 2, 0) << 8 | Mods_RomByte(a + 3, 0) << 16;
+    uint32 dst = Mods_RomByte(a + 7, 0) | Mods_RomByte(a + 8, 0) << 8 | Mods_RomByte(a + 9, 0) << 16;
+    if (Mods_RomByte(a + 4, 0) != 0x09 || Mods_RomByte(a + 6, 0) != 0x8f || src != dst ||
+        (src >> 17) != 0x3f)
+      break;
+    g_ram[src & 0x1ffff] |= Mods_RomByte(a + 5, 0);
+  }
+}
+
 void GiantMoldorm_DrawSegment_AB(int k, int lookback) {
   static const DrawMultipleData kGiantMoldorm_SegA_Dmd[8] = {
     {-8, -8, 0x0084, 2},
@@ -975,6 +1167,11 @@ void GiantMoldorm_DrawSegment_AB(int k, int lookback) {
     { 8,  8, 0x40a4, 2},
   };
   int j = sprite_subtype2[k] - lookback & 0x7f;
+  // A quest can run its own code as the first segment draws: a JSL there
+  // ($9D:DA03), to a routine that sets bits of work RAM.
+  if (lookback == 16 && Mods_RomByte(0x9dda03, 0xbf) == 0x22)
+    Quest_RunOrRoutine(Mods_RomByte(0x9dda04, 0) | Mods_RomByte(0x9dda05, 0) << 8 |
+                       Mods_RomByte(0x9dda06, 0) << 16);
   cur_sprite_x = moldorm_x_lo[j] | moldorm_x_hi[j] << 8;
   cur_sprite_y = moldorm_y_lo[j] | moldorm_y_hi[j] << 8;
   oam_cur_ptr += 0x10;
@@ -1023,6 +1220,8 @@ void FortuneTeller_LightOrDarkWorld(int k, bool dark_world) {
 
   switch (sprite_ai_state[k]) {
   case 0:  // WaitForInquiry
+    Rando_HintsCancelPaid(dark_world ? kRandoHintPaidSource_FortuneDark
+                                     : kRandoHintPaidSource_FortuneLight);
     sprite_graphics[k] = 0;
     sprite_A[k] = (j = (GetRandomNumber() & 3)) << 1;
     if (link_rupees_goal < kFortuneTeller_Prices[j])
@@ -1033,25 +1232,35 @@ void FortuneTeller_LightOrDarkWorld(int k, bool dark_world) {
   case 1: // NotEnoughRupees
     Sprite_ShowSolicitedMessage(k, 0xf2);
     break;
-  case 2:  // AskIfPlayerWantsReading
+  case 2: {  // AskIfPlayerWantsReading
+    RandoHintPaidSource source =
+        dark_world ? kRandoHintPaidSource_FortuneDark
+                   : kRandoHintPaidSource_FortuneLight;
+    Rando_HintsSetPaidPromptContext(
+        source, kFortuneTeller_Prices[sprite_A[k] >> 1]);
     if (Sprite_ShowSolicitedMessage(k, 0xf3) & 0x100) {
       sprite_delay_main[k] = 255;
       flag_is_link_immobilized = 1;
       sprite_ai_state[k]=3;
     }
     break;
+  }
   case 3: // ReactToPlayerResponse
     if (!choice_in_multiselect_box) {
       if (!sprite_delay_main[k])
         sprite_ai_state[k]++;
       sprite_graphics[k] = frame_counter >> 4 & 1;
     } else {
+      Rando_HintsCancelPaid(dark_world ? kRandoHintPaidSource_FortuneDark
+                                       : kRandoHintPaidSource_FortuneLight);
       Sprite_ShowMessageUnconditional(0xf5);
       sprite_ai_state[k] = 2;
       flag_is_link_immobilized = 0;
     }
     break;
   case 4: // FortuneTeller_PerformPseudoScience
+    Rando_HintsPreparePaid(dark_world ? kRandoHintPaidSource_FortuneDark
+                                      : kRandoHintPaidSource_FortuneLight);
     FortuneTeller_PerformPseudoScience(k);
     break;
   case 5:  // ShowCostMessage
@@ -1063,12 +1272,23 @@ void FortuneTeller_LightOrDarkWorld(int k, bool dark_world) {
     Sprite_ShowMessageUnconditional(0xf4);
     sprite_ai_state[k]++;
     break;
-  case 6:  // DeductPayment
-    link_rupees_goal -= kFortuneTeller_Prices[sprite_A[k]>>1];
+  case 6: {  // DeductPayment
+    uint16 price = kFortuneTeller_Prices[sprite_A[k] >> 1];
+    RandoHintPaidSource source =
+        dark_world ? kRandoHintPaidSource_FortuneDark
+                   : kRandoHintPaidSource_FortuneLight;
+    link_rupees_goal -= price;
+    // The receipt already displayed the price, but a slot/snapshot transition
+    // can invalidate the prepared plan before this state runs. Never retain a
+    // charge when that exact prepared fact cannot commit.
+    if (!Rando_HintsCommitPaid(source))
+      link_rupees_goal += price;
     sprite_ai_state[k]++;
     link_hearts_filler = 160;
     flag_is_link_immobilized = 0;
+    Rando_HintsCancelPaid(source);
     break;
+  }
   case 7:
     break;
   }
@@ -1146,9 +1366,85 @@ void Sprite_WishPond3(int k) {
     break;
   case 1:
     if (!choice_in_multiselect_box) {
-      Sprite_ShowMessageUnconditional(0x8a);
-      sprite_ai_state[k] = 2;
-      flag_is_link_immobilized = 1;
+      // Chest-model fairy (rando): drop the vanilla "throw an item in" entirely
+      // and hand over the next un-collected of this pond's two checks directly,
+      // like opening a chest. The vanilla toss is a poor fit under item shuffle —
+      // you may not own the sword/bow it expects, the toss CONSUMES/upgrades the
+      // item, owning a higher tier locks the check out, and the toss picker
+      // (RenderText_FindYItem) hard-FREEZES on an empty Y-inventory. ALTTPR
+      // itself replaces both ponds with two chests (NorthEast.php / z3r
+      // hooks.asm "2 chests, fat fairy room"). Granting on contact makes the
+      // runtime requirement exactly "reach the pond", which MATCHES the
+      // reach-only placement logic for Waterfall/Pyramid Left/Right — no
+      // throwable-item residual, no freeze, no consume, no lockout. Off-rando:
+      // the untouched vanilla toss path runs (preserves the RAM-compare).
+      uint16 pond_left = savegame_is_darkworld
+          ? LOC_Pyramid_Fairy_Left : LOC_Waterfall_Fairy_Left;
+      uint16 pond_right = savegame_is_darkworld
+          ? LOC_Pyramid_Fairy_Right : LOC_Waterfall_Fairy_Right;
+      bool randomized_pond =
+          (enhanced_features1 & kFeatures1_RandomizerActive) &&
+          (Rando_HasLocationPlacement(pond_left) ||
+           Rando_HasLocationPlacement(pond_right));
+      if (randomized_pond) {
+        // add-npc-souls — the fairies have no discrete sprite to suppress
+        // (this pond machinery also runs the wishing/happiness ponds), so the
+        // GRANT gates on the respective fairy soul: without it the pond does
+        // nothing (silent idle; re-contact works once the soul is found).
+        // The Bomb Shop dealer's soul gates the Big Bomb PURCHASE (physical
+        // pyramid-wall access), not this grant — runtime mirrors the logic.
+        if (Souls_NpcActive() &&
+            !Souls_NpcOwned(savegame_is_darkworld ? kNpcSoul_PyramidFairy
+                                                  : kNpcSoul_WaterfallFairy)) {
+          sprite_ai_state[k] = 0;
+          sprite_delay_main[k] = 255;
+          return;
+        }
+        uint16 loc = 0xFFFFu, vi = 0xFFFFu;
+        uint8 vlttp = 0;
+        if (!savegame_is_darkworld) {  // Waterfall Fairy (LW)
+          if (!Rando_IsLocationCheckedOrVanilla(
+                  LOC_Waterfall_Fairy_Left, true)) {
+            loc = LOC_Waterfall_Fairy_Left;  vi = ITEM_RedShield;          vlttp = 0x05;
+          } else if (!Rando_IsLocationCheckedOrVanilla(
+                         LOC_Waterfall_Fairy_Right, true)) {
+            loc = LOC_Waterfall_Fairy_Right; vi = ITEM_BottleEmpty;        vlttp = 0x16;
+          }
+        } else {                       // Pyramid Fairy (DW)
+          if (!Rando_IsLocationCheckedOrVanilla(
+                  LOC_Pyramid_Fairy_Left, true)) {
+            // SilverArrowUpgrade vanilla code is 0x3b (sets link_item_bow=3,
+            // silver bow); NOT 0x43 (that writes link_arrow_filler) — see
+            // progressive_to_lttp in rando.c.
+            loc = LOC_Pyramid_Fairy_Left;    vi = ITEM_SilverArrowUpgrade; vlttp = 0x3b;
+          } else if (!Rando_IsLocationCheckedOrVanilla(
+                         LOC_Pyramid_Fairy_Right, true)) {
+            loc = LOC_Pyramid_Fairy_Right;   vi = ITEM_BottleEmpty;        vlttp = 0x16;
+          }
+        }
+        if (loc == 0xFFFFu) {
+          (void)Alttpr_RefillBottle(savegame_is_darkworld != 0);
+          Sprite_ShowMessageUnconditional(0x14b);  // both collected — dismiss
+        } else {
+          RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+              loc, vi, vlttp, 0, 0);
+          if (!Sprite_GrantResultIsTerminal(result)) {
+            // Keep the pond live. In particular, a bottle placement with no
+            // empty slot must not consume this check or dismiss the source.
+            sprite_ai_state[k] = 0;
+            sprite_delay_main[k] = 255;
+            return;
+          }
+        }
+        // Idle the pond; delay + Sprite_CheckIfLinkIsBusy (case 0) prevents a
+        // same-touch re-fire, so the player re-contacts for the second check.
+        sprite_ai_state[k] = 0;
+        sprite_delay_main[k] = 255;
+      } else {
+        Sprite_ShowMessageUnconditional(0x8a);
+        sprite_ai_state[k] = 2;
+        flag_is_link_immobilized = 1;
+      }
     } else {
       Sprite_ShowMessageUnconditional(0x14b);
       sprite_ai_state[k] = 0;
@@ -1209,6 +1505,9 @@ void Sprite_WishPond3(int k) {
   case 6:
     sprite_ai_state[k] = 7;
     if (!savegame_is_darkworld) {
+      // Rando grants the Waterfall's two checks directly in case 1 (chest
+      // model) and never advances past ai_state 1, so only the vanilla
+      // toss-upgrade path reaches case 6.
       if (sprite_graphics[k] == 12) {
         sprite_graphics[k] = 42;
         sprite_head_dir[k] = 1;
@@ -1223,6 +1522,9 @@ void Sprite_WishPond3(int k) {
         return;
       }
     } else {
+      // Rando grants the Pyramid's two checks (Left/Right) directly in case 1
+      // (chest model) and never advances past ai_state 1, so only the vanilla
+      // sword/bow toss-upgrade path reaches case 6.
       if (sprite_graphics[k] == 58) {
         sprite_graphics[k] = 59;
         sprite_head_dir[k] = 4;
@@ -1264,6 +1566,11 @@ void Sprite_WishPond3(int k) {
     PaletteFilter_RestoreSP5F();
     Palette_RevertTranslucencySwap();
     item_receipt_method = 2;
+    // rando-exempt: state-shuffle — Wishing Pond's grant is determined by
+    // the pond's internal state (sprite_graphics[k] holds the rotation
+    // pick: bomb/arrow/sword/bow/heart upgrade). ALTTPR treats wishing
+    // ponds as not-a-placement-location (per audit.md §0.3.6 resolved
+    // wishing-pond classification); the upgrade rotation is its own logic.
     Link_ReceiveItem(sprite_graphics[k], 0);
     sprite_ai_state[k] = 10;
     break;
@@ -1307,16 +1614,31 @@ int Sprite_SpawnSmallSplash(int k) {
   return j;
 }
 
-void HeartUpgrade_CheckIfAlreadyObtained(int k) {
+static void HeartUpgrade_CheckIfAlreadyObtainedAtLocation(
+    int k, uint16 location_id) {
+  bool prerequisite_met = true;
+  bool vanilla_completed;
   if (!player_is_indoors) {
-    if (BYTE(overworld_screen_index) == 0x3b && !(save_ow_event_info[0x3b] & 0x20) ||
-      save_ow_event_info[BYTE(overworld_screen_index)] & 0x40)
-      sprite_state[k] = 0;
+    uint8 screen = BYTE(overworld_screen_index);
+    // Sunken Treasure's drained-swamp bit is an availability prerequisite,
+    // not a completion proxy, and must still gate a live placement.
+    if (screen == 0x3b)
+      prerequisite_met = (save_ow_event_info[0x3b] & 0x20) != 0;
+    vanilla_completed = (save_ow_event_info[screen] & 0x40) != 0;
   } else {
     int j = sprite_x_hi[k] & 1;
-    if (dung_savegame_state_bits & (j ? 0x2000 : 0x4000))
-      sprite_state[k] = 0;
+    vanilla_completed =
+        (dung_savegame_state_bits & (j ? 0x2000 : 0x4000)) != 0;
   }
+  bool already_collected = location_id != 0xFFFFu
+      ? Sprite_SourceCompleted(location_id, vanilla_completed)
+      : vanilla_completed;
+  if (Sprite_SourceShouldSuppress(prerequisite_met, already_collected))
+    sprite_state[k] = 0;
+}
+
+void HeartUpgrade_CheckIfAlreadyObtained(int k) {
+  HeartUpgrade_CheckIfAlreadyObtainedAtLocation(k, 0xFFFFu);
 }
 
 void Sprite_EE_MovableMantle(int k) {
@@ -1328,10 +1650,36 @@ void Sprite_EE_MovableMantle(int k) {
   Sprite_NullifyHookshotDrag();
   Sprite_RepelDash();
 
-  if (follower_indicator != 1 || !link_item_torch || link_is_running || sprite_G[k] == 0x90 || sign8(link_actual_vel_x - 24))
+  // Vanilla gates the push on link_item_torch (lamp) as a "post-wake-up"
+  // sentinel — the room isn't dark (lights_out: 0 in dungeon-81.yaml). Vanilla
+  // could rely on this because Link's House chest always yields the lamp, so
+  // by the time Zelda is a tagalong the player guaranteed-has it. Under rando
+  // the chest is shuffled and the lamp may live elsewhere, leaving the player
+  // unable to push the throne and softlocked at the Hyrule Castle escape.
+  // follower_indicator == 1 (Zelda following) is the real prerequisite; drop
+  // the lamp gate when rando is active.
+  bool no_lamp_gate = !link_item_torch &&
+                      !(enhanced_features1 & kFeatures1_RandomizerActive);
+  // ALTTPR parity (z3randomizer lampmantlecone.asm CheckForZelda): once the
+  // escape is over (sram_progress_indicator >= 2) the throne is pushable
+  // WITHOUT the Zelda follower. Vanilla uses "Zelda following" as its
+  // escape-in-progress sentinel, which seals the castle->sewers route forever
+  // after she's delivered — but the ALTTPR-faithful logic counts that route
+  // open post-escape (and from a cold start in Open/Inverted/Retro seeds).
+  bool zelda_ok = follower_indicator == 1 ||
+      ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+       sram_progress_indicator >= 2);
+  if (!zelda_ok || no_lamp_gate || link_is_running || sprite_G[k] == 0x90 || sign8(link_actual_vel_x - 24))
     return;
 
-  which_starting_point = 4;
+  // The throne-push beat sets the escape-only sewers respawn pointer. Restrict
+  // the write to the real escape (Zelda actually following): a post-escape
+  // lone push (zelda_ok via progress >= 2 above) must NOT re-arm the escape
+  // respawn pointer, or a save-and-quit would spawn the player back in the
+  // escape-only sewers region. Vanilla always has follower_indicator == 1
+  // here, so this is behavior-neutral outside rando.
+  if (!Rando_SuppressHyruleCastleEscape() && follower_indicator == 1)
+    which_starting_point = 4;
   sprite_subtype2[k]++;
 
   if (!(sprite_subtype2[k] & 1))
@@ -1430,6 +1778,9 @@ void Bee_PutInBottle(int k) {
   if (!choice_in_multiselect_box) {
     int j = Sprite_Find_EmptyBottle();
     if (j >= 0) {
+      // rando-exempt: state-shuffle — Bee_PutInBottle stores the captured bee
+      // species (7+dir) into an existing empty bottle slot. Not an ALTTPR
+      // grant location; the bottle was the grant (handled by its own slot).
       link_bottle_info[j] = 7 + sprite_head_dir[k];
       Hud_RefreshIcon();
       sprite_state[k] = 0;
@@ -1588,15 +1939,30 @@ void SpritePrep_FakeSword(int k) {
 }
 
 void SpritePrep_MedallionTable(int k) {
+  // Vanilla fast-forwards the tablet to ai_state 3 (already-read, inert
+  // crumbled graphic) when the matching medallion is held, because in vanilla
+  // reading the tablet IS the only way to get that medallion — "has medallion"
+  // == "already read this tablet." Under rando the medallions are shuffled:
+  // obtaining Bombos/Ether elsewhere first would make the tablet inert before
+  // its check is collected, making LOC_*_Tablet unreachable. Gate on whether
+  // the location has actually been checked instead (the read cutscene in
+  // {Ether,Bombos}Tablet_StartCutscene → LinkState_Receiving* dispatches
+  // Rando_DispatchVanillaGrant(LOC_*_Tablet, ...), which marks it). Once
+  // checked the tablet goes inert as before, so a revisit can't re-read.
+  // Vanilla path keeps the proxy so RAM-compare stays byte-identical.
   sprite_ignore_projectile[k]++;
   if (BYTE(overworld_screen_index) != 3) {
     sprite_x_lo[k] += 8;
-    if (link_item_bombos_medallion) {
+    bool already_read = Rando_IsLocationCheckedOrVanilla(
+        LOC_Bombos_Tablet, (bool)link_item_bombos_medallion);
+    if (already_read) {
       sprite_graphics[k] = 4;
       sprite_ai_state[k] = 3;
     }
   } else {
-    if (link_item_ether_medallion) {
+    bool already_read = Rando_IsLocationCheckedOrVanilla(
+        LOC_Ether_Tablet, (bool)link_item_ether_medallion);
+    if (already_read) {
       sprite_graphics[k] = 4;
       sprite_ai_state[k] = 3;
     }
@@ -1618,6 +1984,25 @@ void Hobo_Draw(int k) {  // 84ea60
     { 3,   3, 0x0088, 2},
     {-5,   3, 0x00a6, 2},
   };
+  // add-rando-field-item-sprites: in his give pose (sprite_graphics==2) the Hobo
+  // holds out a bottle (table entries 8 & 10). When his location holds a different
+  // shuffled item, draw the Hobo's BODY (entries 9 & 11, the left-hand tiles) plus
+  // THAT item's icon where the bottle was — resolved/drawn exactly like the free-
+  // standing field items (Rando_GetFieldItemIcon gates on the active slot + the
+  // field_item_sprites toggle and returns the trap decoy for traps). Vanilla /
+  // bottle placements and every other pose fall through to the normal draw.
+  if (sprite_graphics[k] == 2) {
+    uint8 g, b, f;
+    if (Rando_GetFieldItemIcon(LOC_Hobo, ITEM_BottleEmpty, &g, &b, &f)) {
+      static const DrawMultipleData kHobo_BodyFrame2[2] = {
+        {-5, 3, 0x00ab, 0},   // = kHobo_Dmd[9]  (body, not bottle)
+        {-5, 3, 0x00a6, 2},   // = kHobo_Dmd[11]
+      };
+      Sprite_DrawMultiplePlayerDeferred(k, kHobo_BodyFrame2, 2, NULL);
+      Rando_TryDrawHeldItemSprite(k, LOC_Hobo, ITEM_BottleEmpty, 5, -11);
+      return;
+    }
+  }
   Sprite_DrawMultiplePlayerDeferred(k, &kHobo_Dmd[sprite_graphics[k] * 4], 4, NULL);
 }
 
@@ -2075,17 +2460,33 @@ void Sprite_62_MasterSword(int k) {  // 8588c5
 }
 
 void MasterSword_Main(int k) {  // 8588d6
-  if (main_module_index != 26 && save_ow_event_info[BYTE(overworld_screen_index)] & 0x40) {
+  if (main_module_index != 26 && Sprite_SourceCompleted(
+          LOC_Master_Sword_Pedestal,
+          (save_ow_event_info[BYTE(overworld_screen_index)] & 0x40) != 0)) {
     sprite_state[k] = 0;
     return;
   }
-  if (sprite_ai_state[k] != 5)
-    MasterSword_Draw(k);
+  if (sprite_ai_state[k] != 5) {
+    // add-rando-field-item-sprites: show the placed item on the pedestal (and
+    // rising during the ceremony) instead of the Master Sword. Falls back to the
+    // 6-tile sword when the placement is the sword, has no gfx, or rando is off.
+    if (!Rando_TryDrawFieldItemSprite(k, LOC_Master_Sword_Pedestal, ITEM_L2Sword))
+      MasterSword_Draw(k);
+  }
   switch (sprite_ai_state[k]) {
   case 0:  // waiting
     if (Sprite_CheckIfLinkIsBusy() || !Sprite_CheckDamageToLink_same_layer(k) || link_direction_facing != 2 ||
       !(filtered_joypad_L & 0x80) || (link_which_pendants & 7) != 7)
       return;
+
+    if (enhanced_features1 & kFeatures1_RandomizerActive) {
+      RandoDeferredGrantToken token;
+      RandoGrantResult result = Rando_PrepareGrant(
+          LOC_Master_Sword_Pedestal, ITEM_L2Sword, 1, &token);
+      if (result == kRandoGrantResult_Retryable ||
+          result == kRandoGrantResult_Invalid)
+        return;
+    }
 
     music_control = 10;
     link_disable_sprite_damage = 1;
@@ -2125,11 +2526,20 @@ void MasterSword_Main(int k) {  // 8588d6
     break;
   case 4:  // give to player
     if (!sprite_delay_main[k]) {
+      RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+          LOC_Master_Sword_Pedestal, ITEM_L2Sword, 1, 0, 0);
+      if (!Sprite_GrantResultIsTerminal(result))
+        return;
       save_ow_event_info[BYTE(overworld_screen_index)] |= 0x40;
-      item_receipt_method = 0;
-      Link_ReceiveItem(1, 0);
       savegame_map_icons_indicator = 5;
       link_unk_master_sword = 0;
+      // The ceremony owns these flags. Direct, capped and saturated receipts
+      // finish without the vanilla hold-up animation that normally clears them.
+      if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+          link_player_handler_state != kPlayerState_HoldUpItem) {
+        flag_is_link_immobilized = 0;
+        link_disable_sprite_damage = 0;
+      }
       sprite_ai_state[k] = 5;
     }
     break;
@@ -3022,17 +3432,32 @@ void Sprite_52_KingZora(int k) {  // 85995b
       }
     } else if (j == 78) {
       if (choice_in_multiselect_box == 0 && link_rupees_goal >= 500) {
-        link_rupees_goal -= 500;
+        bool defer_payment =
+            Rando_HasLocationPlacement(LOC_King_Zora);
+        if (!defer_payment)
+          link_rupees_goal -= 500;
         dialogue_message_index = 0x144;
         Sprite_ShowMessageMinimal();
-        sprite_E[k] = 1;
+        sprite_E[k] = defer_payment
+            ? kKingZoraPurchase_DeferPayment
+            : kKingZoraPurchase_PaidAtDialogue;
       } else {
         dialogue_message_index = 0x145;
         Sprite_ShowMessageMinimal();
         sprite_delay_main[k] = 0x30;
       }
     } else if (j == 77) {
-      if (sprite_E[k])
+      // Defense-in-depth against re-grant: SpritePrep_KingZora despawns Zora
+      // once LOC_King_Zora is checked, so this dialogue branch is normally
+      // unreachable on a revisit. But Rando_DispatchVanillaGrant /
+      // Rando_OnLocationCheck are NOT idempotent (every call re-runs
+      // Link_ReceiveItem / re-ticks the Triforce counter / re-writes prize
+      // bits), so if the regurgitate were ever reached a second time it would
+      // mint a duplicate item. Skip the regurgitate when the location is
+      // already checked under rando (the vanilla path is untouched).
+      bool already_collected = Rando_IsLocationCheckedOrVanilla(
+          LOC_King_Zora, false);
+      if (sprite_E[k] && !already_collected)
         Sprite_Zora_RegurgitateFlippers(k);
     }
     break;
@@ -3322,8 +3747,18 @@ void Sprite_53_ArmosKnight(int k) {  // 85a036
         sprite_x_vel[j] = sprite_y_vel[j] = sprite_z_vel[j] = 0;
       }
     }
+    uint8 dying_state = sprite_state[k];
     sprite_state[k] = 0;
     if (Sprite_CheckIfScreenIsClear()) {
+      if (!Rando_TryGrantBossEnemyCheckForCurrentEvent()) {
+        // The clear test requires this final knight to be temporarily absent.
+        // Re-arm its terminal death frame and compensate the group counter so
+        // the grant can retry without resurrecting/re-killing the encounter.
+        sprite_state[k] = dying_state;
+        sprite_delay_main[k] = 1;
+        byte_7E0FF8++;
+        return;
+      }
       SpriteSpawnInfo info;
       int j = Sprite_SpawnDynamically(k, 0xea, &info);
       assert(j >= 0);
@@ -3520,8 +3955,16 @@ lbl_a:
     break;
   case 5:
     if (!sprite_delay_main[k]) {
+      uint8 dying_state = sprite_state[k];
       sprite_state[k] = 0;
       if (Sprite_CheckIfScreenIsClear()) {
+        if (!Rando_TryGrantBossEnemyCheckForCurrentEvent()) {
+          // Keep the final Lanmola's terminal frame as a retry seam; no prize
+          // sprite or room-clear progression is emitted until acceptance.
+          sprite_state[k] = dying_state;
+          sprite_delay_main[k] = 1;
+          return;
+        }
         SpriteSpawnInfo info;
         int j = Sprite_SpawnDynamically(k, 0xEA, &info);
         assert(j >= 0);
@@ -3828,7 +4271,15 @@ void Sprite_SpawnPoofGarnish(int j) {  // 85ab9c
 }
 
 void Sprite_6C_MirrorPortal(int k) {  // 85af75
-  if (savegame_is_darkworld) {
+  // #82 Inverted: warp-vortex world visibility (z3randomizer $85AF79). Vanilla
+  // despawns the mirror-portal vortex in the DARK world (visible only in light);
+  // Inverted flips the home world so it is visible/active in the DARK world.
+  bool vortex_hidden_world =
+      ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+       Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */)
+        ? (savegame_is_darkworld == 0)
+        : (savegame_is_darkworld != 0);
+  if (vortex_hidden_world) {
     sprite_state[k] = 0;
   } else {
     if (BYTE(overworld_screen_index) >= 0x80)
@@ -5729,13 +6180,33 @@ void Uncle_InPassage(int k) {  // 85df19
     }
     break;
   case 1:  // GiveSwordAndShield
-    item_receipt_method = 0;
-    Link_ReceiveItem(0, 0);
+    {
+      // Vanilla: code 0 = L1Sword (+shield as side-effect via the dispatch
+      // table's special-case branch in misc.c). In rando mode we dispatch via
+      // the placement table; the shield side-effect is preserved IF the placed
+      // item is still L1Sword (code 0) — otherwise the player loses the
+      // vanilla shield but gains whatever was placed (acceptable Phase A1).
+      RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+          LOC_Link_s_Uncle, ITEM_L1Sword, 0, 0, 0);
+      if (!Sprite_GrantResultIsTerminal(result)) {
+        // The dialogue advanced us here before the transaction. Return to the
+        // contact state so Link can make bottle space and talk again.
+        sprite_ai_state[k] = 0;
+        flag_is_link_immobilized = 0;
+        return;
+      }
+    }
     sprite_ai_state[k]++;
     sprite_graphics[k] = 1;
-    which_starting_point = 3;
-    sram_progress_flags |= 1;
-    sram_progress_indicator = 1;
+    // Defense-in-depth: never write the escape-only respawn pointer / drop
+    // progress below the post-escape baseline for a non-Standard rando seed.
+    // The sprite is normally despawned at prep (SpritePrep_UncleAndPriest_bounce),
+    // so this guard is a belt-and-suspenders backstop against the S&Q trap.
+    if (!Rando_SuppressHyruleCastleEscape()) {
+      which_starting_point = 3;
+      sram_progress_flags |= 1;
+      sram_progress_indicator = 1;
+    }
     break;
   }
 }
@@ -5847,6 +6318,42 @@ void Sprite_Witch(int k) {  // 85e3fb
     return;
   switch (sprite_ai_state[k]) {
   case 0:  // main
+    if (enhanced_features1 & kFeatures1_RandomizerActive) {
+      // Rando: Mushroom possession is tracked separately from
+      // link_item_mushroom (which may currently show Powder=2), so accept on
+      // contact when the player holds an undelivered Mushroom — without the
+      // vanilla "Mushroom must be the selected item" requirement, which can't
+      // be satisfied while Powder occupies the HUD slot.
+      if (save_dung_info[0x109] & 0x80) {
+        sprite_B[k] = 0;
+        Sprite_ShowSolicitedMessage(k, 0x4b);        // already traded
+      } else if (!Rando_MushroomHeld()) {
+        sprite_B[k] = 0;
+        Sprite_ShowSolicitedMessage(k, 0x4a);        // come back with a mushroom
+      } else {
+        const bool preview_available =
+            Rando_CanPreviewNpcReward(LOC_Potion_Shop);
+        if (Sprite_CheckDamageToLink_same_layer(k)) {
+          if (Sprite_WitchNeedsRewardPreview(
+                  preview_available, sprite_B[k] != 0)) {
+            // The rando contact path normally consumes the Mushroom
+            // immediately. Insert one unavoidable, no-choice information box
+            // first; after it closes, the next contact frame commits through
+            // the unchanged transaction.
+            sprite_B[k] = 1;
+            Sprite_ShowMessageUnconditional(0x4c);
+          } else {
+            sprite_B[k] = 0;
+            Witch_AcceptShroom(k);
+          }
+        } else {
+          int shown = Sprite_ShowSolicitedMessage(k, 0x4c);
+          if (preview_available && (shown & 0x100))
+            sprite_B[k] = 1;
+        }
+      }
+      break;
+    }
     if (link_item_mushroom == 0) {
       if (save_dung_info[0x109] & 0x80)
         Sprite_ShowSolicitedMessage(k, 0x4b);
@@ -5862,16 +6369,43 @@ void Sprite_Witch(int k) {  // 85e3fb
       Sprite_ShowSolicitedMessage(k, 0x4a);
     }
     break;
-  case 1:  // grant cane of byrna
+  case 1:  // grant cane of byrna (vestigial — never reached in normal play)
     sprite_ai_state[k] = 0;
     item_receipt_method = 0;
+    // rando-exempt: this case is unreachable in normal vanilla LttP — the
+    // Witch's ALTTPR location "Potion Shop" (LOC_Potion_Shop, vanilla:
+    // MagicPowder) is granted by a different code path (the mushroom-
+    // delivery acceptance flow). Leaving this as the vanilla 0x18 grant
+    // means rando does not double-dispatch a stray Cane of Byrna at the
+    // Witch.
     Link_ReceiveItem(0x18, 0);
     break;
   }
 }
 
 void Witch_AcceptShroom(int k) {  // 85e4cf
-  link_item_mushroom = 0;
+  bool rando = (enhanced_features1 & kFeatures1_RandomizerActive) != 0;
+  sprite_B[k] = 0;  // clear the rando pre-commit preview latch
+  // Under rando the possession flag is the source of truth for the trade;
+  // clear it so the Witch won't re-prompt. The Potion Shop check is granted
+  // later at the Magic Powder dispatch (LOC_Potion_Shop).
+  if (rando)
+    Rando_DeliverMushroom();
+  // state-shuffle — the Mushroom is CONSUMED (given to the witch) here, not
+  // granted. Vanilla empties the shared byte. Under rando the player may own
+  // Powder too (the byte can't show both), so emptying unconditionally would
+  // erase it: if the byte shows Powder (=2) leave it; if it shows the Mushroom
+  // (=1, the item-menu swap can select the Mushroom icon while Powder is owned)
+  // restore Powder when owned, else empty the slot. The guard needs an
+  // exemption on each write since neither is an Rando_OnLocationCheck dispatch.
+  if (!rando) {
+    link_item_mushroom = 0;  // rando-exempt: vanilla empties the shared slot on trade
+  } else if (link_item_mushroom == 1) {
+    // rando-exempt: re-shows the player's already-owned Powder (or empties the
+    // slot if no Powder) after consuming the Mushroom — not an item grant.
+    link_item_mushroom = (g_rando_mushroom_held & kRandoMushroom_PowderOwned) ? 2 : 0;
+  }
+  // else byte==2 (Powder shown): leave it — the possession flag recorded the trade.
   save_dung_info[0x109] |= 0x80;
   sound_effect_1 = 0;
   Hud_RefreshIcon();
@@ -6176,7 +6710,9 @@ void Sprite_BottleVendor(int k) {  // 85ea79
   case 0:  // base
     if (!sprite_A[k] && sprite_E[k])
       sprite_ai_state[k] = 3;
-    else if (sram_progress_indicator_3 & 2)
+    else if (Sprite_SourceCompleted(
+                 LOC_Bottle_Merchant,
+                 (sram_progress_indicator_3 & 2) != 0))
       Sprite_ShowSolicitedMessage(k, 0xd4);
     else if (Sprite_ShowSolicitedMessage(k, 0xd1) & 0x100)
       sprite_ai_state[k] = 1;
@@ -6191,10 +6727,27 @@ void Sprite_BottleVendor(int k) {  // 85ea79
     }
     break;
   case 2:  // giving
-    item_receipt_method = 0;
-    Link_ReceiveItem(0x16, 0);
-    sram_progress_indicator_3 |= 2;
-    link_rupees_goal -= 100;
+    {
+      bool has_placement = Rando_HasLocationPlacement(LOC_Bottle_Merchant);
+      RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+          LOC_Bottle_Merchant, ITEM_BottleEmpty, 0x16, 0, 0);
+      if (result == kRandoGrantResult_AlreadyChecked) {
+        // Defensive replay: synchronize the vanilla sold flag without charging
+        // or delivering a second time.
+        sram_progress_indicator_3 |= 2;
+        sprite_ai_state[k] = 0;
+        return;
+      }
+      if (result != kRandoGrantResult_Accepted) {
+        sprite_ai_state[k] = 0;
+        return;
+      }
+      sram_progress_indicator_3 |= 2;
+      if (has_placement)
+        Sprite_ApplyPostGrantPrice(100);
+      else
+        link_rupees_goal -= 100;
+    }
     sprite_ai_state[k] = 0;
     break;
   case 3:  // buying
@@ -6299,7 +6852,10 @@ void Zelda_InCell(int k) {  // 85ecbf
     break;
   case 4:  // TransitionToTagalong
     flag_is_link_immobilized = 0;
-    which_starting_point = 2;
+    // Defense-in-depth: don't set the escape-only cell respawn pointer for a
+    // non-Standard rando seed (despawned at prep; see SpritePrep_Zelda_bounce).
+    if (!Rando_SuppressHyruleCastleEscape())
+      which_starting_point = 2;
     SavePalaceDeaths();
     follower_indicator = 1;
     Dungeon_FlagRoomData_Quadrants();
@@ -6363,7 +6919,21 @@ void Zelda_AtSanctuary(int k) {  // 85ee0c
 }
 
 void SpritePrep_Mushroom(int k) {  // 85ee53
-  if (link_item_mushroom >= 2) {
+  // Vanilla despawns the ground Mushroom once link_item_mushroom >= 2 (i.e. the
+  // player holds Powder), because byte 0xF344 is shared Mushroom(1)/Powder(2)
+  // and in vanilla you can't have Powder without having first picked up THIS
+  // Mushroom. Under rando the Mushroom is a shuffled item and Powder can be
+  // obtained first (or placed elsewhere), which raises the byte to 2 and would
+  // despawn the ground pickup before LOC_Mushroom is collected — unreachable.
+  // (The Witch / Potion-Shop *consume* side was already decoupled via
+  // g_rando_mushroom_held; this is the pickup side, still keying off the raw
+  // byte.) Gate the despawn on whether LOC_Mushroom has been checked (pickup in
+  // Sprite_E7_Mushroom dispatches Rando_DispatchVanillaGrant(LOC_Mushroom, ...),
+  // which marks it). Vanilla path keeps the proxy so RAM-compare stays
+  // byte-identical.
+  bool already_collected = Rando_IsLocationCheckedOrVanilla(
+      LOC_Mushroom, link_item_mushroom >= 2);
+  if (already_collected) {
     sprite_state[k] = 0;
   } else {
     sprite_graphics[k] = 0;
@@ -6373,7 +6943,9 @@ void SpritePrep_Mushroom(int k) {  // 85ee53
 }
 
 void Sprite_E7_Mushroom(int k) {  // 85ee78
-  SpriteDraw_SingleLarge(k);
+  // add-rando-field-item-sprites: draw the placed item; vanilla mushroom otherwise.
+  if (!Rando_TryDrawFieldItemSprite(k, LOC_Mushroom, ITEM_Mushroom))
+    SpriteDraw_SingleLarge(k);
   if (Sprite_CheckIfLinkIsBusy())
     return;
 
@@ -6382,9 +6954,11 @@ void Sprite_E7_Mushroom(int k) {  // 85ee78
     return;
 
   if (Sprite_CheckDamageToLink_same_layer(k)) {
+    RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+        LOC_Mushroom, ITEM_Mushroom, 0x29, 0, 0);
+    if (!Sprite_GrantResultIsTerminal(result))
+      return;
     sprite_state[k] = 0;
-    item_receipt_method = 0;
-    Link_ReceiveItem(0x29, 0);
   } else if ((frame_counter & 0x1f) == 0) {
     sprite_oam_flags[k] ^= 0x40;
   }
@@ -6410,7 +6984,10 @@ void FakeSword_Draw(int k) {  // 85eee6
 }
 
 void SpritePrep_HeartContainer(int k) {  // 85ef01
-  HeartUpgrade_CheckIfAlreadyObtained(k);
+  uint16 boss_loc = player_is_indoors
+      ? Rando_GetBossHeartLocation(BYTE(cur_palace_index_x2) >> 1)
+      : 0xFFFFu;
+  HeartUpgrade_CheckIfAlreadyObtainedAtLocation(k, boss_loc);
 }
 
 void Sprite_HeartContainer(int k) {  // 85ef47
@@ -6425,9 +7002,28 @@ void Sprite_HeartContainer(int k) {  // 85ef47
     sprite_G[k] = 1;
   }
 
+  // add-rando-field-item-sprites: resolve the boss-heart location once, shared by
+  // the field-item draw below and the grant dispatch further down.
+  uint16 boss_loc = 0xFFFFu;
+  if (player_is_indoors && (enhanced_features1 & kFeatures1_RandomizerActive))
+    boss_loc = Rando_GetBossHeartLocation(BYTE(cur_palace_index_x2) >> 1);
+  // dungeon-chains: a cleared terminal boss room can be reached again through
+  // its chain door. Rando_OnLocationCheck is not idempotent, so suppress the
+  // boss-heart sprite before draw/grant if this boss location is already done.
+  if (boss_loc != 0xFFFFu && Rando_IsLocationCheckedOrVanilla(
+          boss_loc, (dung_savegame_state_bits & 0x8000) != 0)) {
+    sprite_state[k] = 0;
+    dung_savegame_state_bits |= 0x8000;
+    return;
+  }
+
   if (BYTE(dungeon_room_index2) == 6 && !sprite_z[k])
     SpriteDraw_WaterRipple_WithOamAdjust(k);
-  SpriteDraw_SingleLarge(k);
+  // Show the placed boss-reward item instead of the heart container; vanilla
+  // heart when the placement is the heart / no gfx / off.
+  if (boss_loc == 0xFFFFu ||
+      !Rando_TryDrawFieldItemSprite(k, boss_loc, ITEM_BossHeartContainer))
+    SpriteDraw_SingleLarge(k);
   if (Sprite_ReturnIfInactive(k))
     return;
   sprite_z_vel[k] -= 2;
@@ -6445,31 +7041,164 @@ void Sprite_HeartContainer(int k) {  // 85ef47
     return;
   if (!Sprite_CheckDamageToLink_same_layer(k))
     return;
-  sprite_state[k] = 0;
+  // §6.6 transaction: when this heart-container drop is inside a dungeon AND
+  // the current dungeon is one of the 10 main-boss dungeons (EP/DP/TH/PoD/
+  // SP/SW/TT/IP/MM/TR), route the grant through Rando_DispatchVanillaGrant
+  // for the matching LOC_<Dungeon>_Boss slot. Those boss-heart drops are
+  // shuffled locations; when the placed item happens to be BossHeartContainer,
+  // the dispatch is a no-op and the player gets the vanilla heart container.
+  // boss_loc resolved at the top of the handler (shared with the field-item draw).
   if (sprite_A[k]) {
-    item_receipt_method = 2;
-    Link_ReceiveItem(0x3e, 0);
+    RandoGrantResult result = kRandoGrantResult_NotActive;
+    if (boss_loc != 0xFFFFu) {
+      RandoDeferredGrantToken token;
+      result = Rando_PrepareGrant(
+          boss_loc, ITEM_BossHeartContainer, 0x3e, &token);
+      if (result == kRandoGrantResult_Accepted) {
+        // The generated plan freezes the falling-heart identity alias at 0x3e.
+        // Only that exact receipt may use method 2; arbitrary placed receive
+        // items need method 0 so their receipt clears immobilization.
+        uint8 method = token.plan.receive_code == 0x3e ? 2 : 0;
+        result = Rando_CommitPreparedGrant(
+            &token, kRandoGrantPresentation_Animated, method, 0);
+      }
+    }
+    if (result == kRandoGrantResult_NotActive) {
+      item_receipt_method = 2;
+      Link_ReceiveItem(0x3e, 0);
+    } else if (!Sprite_GrantResultIsTerminal(result)) {
+      return;
+    } else {
+      // A method-0 grant relies on the RECEIPT to clear immobilization (see the
+      // comment above). When the ancilla pool is saturated Link_ReceiveItem
+      // takes its lossless quiet fallback and no receipt is ever created, so
+      // nothing releases Link: the heart is banked and the player is frozen
+      // after the boss dies. The flag is ours -- we are the ones who left Link
+      // immobilized for the falling heart -- so release it on the terminal
+      // path. The fallback deliberately does not, to stay lossless.
+      //
+      // ONLY when no receipt exists, though. Releasing unconditionally clobbers
+      // the normal path: a live 0x22 receipt owns this flag until its own
+      // teardown, and for receive code 0x3e that same teardown is what banks the
+      // +8 capacity (Ancilla22_ItemReceipt). Handing control back mid-fanfare
+      // lets the player walk out of the receipt and lose the heart container
+      // while Rando_CommitPreparedGrant has already consumed the check. That is
+      // the third time this success-path clobber has been reintroduced here --
+      // scope any future release to the no-receipt case it is actually for.
+      if (!AncillaAdd_CheckForPresence(kAncillaType_ItemReceipt))
+        flag_is_link_immobilized = 0;
+    }
+    sprite_state[k] = 0;
     dung_savegame_state_bits |= 0x8000;
     return;
   }
   Link_CancelDash();
-  item_receipt_method = 0;
-  Link_ReceiveItem(0x26, 0);
+  RandoGrantResult result = kRandoGrantResult_NotActive;
+  if (boss_loc != 0xFFFFu) {
+    result = Rando_GrantLocation(
+        boss_loc, ITEM_BossHeartContainer, 0x26,
+        kRandoGrantPresentation_Animated, 0, 0);
+  }
+  if (result == kRandoGrantResult_NotActive) {
+    item_receipt_method = 0;
+    Link_ReceiveItem(0x26, 0);
+  } else if (!Sprite_GrantResultIsTerminal(result)) {
+    return;
+  }
+  sprite_state[k] = 0;
   if (!player_is_indoors)
     save_ow_event_info[BYTE(overworld_screen_index)] |= 0x40;
   else
     dung_savegame_state_bits |= (sprite_x_hi[k] & 1) ? 0x2000 : 0x4000;
 }
 
+// §6.5 standing/freestanding Piece-of-Heart location resolution. Sprite_Heart
+// Piece is the single handler for every standing/overworld/cave PoH pickup;
+// this maps the current (screen | room) to the specific ALTTPR location so the
+// field-item draw, the prep-time gfx DMA, and the collect-time grant dispatch
+// all agree. Returns 0xFFFF when the spot isn't an unambiguously-wired PoH.
+//
+// Screen/room keys mirror HeartUpgrade_SetObtainedFlag's discriminators and are
+// sourced from z3randomizer heartpieces.asm LoadOutdoorValue/LoadIndoorValue,
+// cross-referenced to the ALTTPR 0x18014x / 0x18000x table order. Only entries
+// whose (screen|room) -> LOC mapping is unambiguous are wired.
+static uint16 StandingPoH_Location(int k) {
+  static const struct { uint8 screen; uint16 loc; } kStandingPoHOutdoor[] = {
+    { 0x03, LOC_Spectacle_Rock },     // z3r $03 (LinkPosX-gated vs Ether; PoH sprite is unique here)
+    { 0x05, LOC_Floating_Island },    // z3r $05 HeartPiece_Mountain_Warp = 0x180141 Floating Island
+    { 0x28, LOC_Maze_Race },          // z3r $28 HeartPiece_Maze
+    { 0x30, LOC_Desert_Ledge },       // z3r $30 (LinkPosX-gated vs Bombos; PoH sprite is unique here)
+    { 0x35, LOC_Lake_Hylia_Island },  // z3r $35 HeartPiece_Lake
+    { 0x3B, LOC_Sunken_Treasure },    // z3r $3B HeartPiece_Swamp = 0x180145 Sunken Treasure
+    { 0x4A, LOC_Bumper_Cave },        // z3r $4A HeartPiece_Cliffside = 0x180146 Bumper Cave
+    { 0x5B, LOC_Pyramid },            // z3r $5B HeartPiece_Pyramid
+    { 0x81, LOC_Zora_s_Ledge },       // z3r $81 HeartPiece_Zora (registry lists Flippers; in-game sprite is the PoH)
+  };
+  if (!player_is_indoors) {
+    uint8 scr = BYTE(overworld_screen_index);
+    for (int i = 0; i < (int)(sizeof kStandingPoHOutdoor / sizeof kStandingPoHOutdoor[0]); i++) {
+      if (kStandingPoHOutdoor[i].screen == scr)
+        return kStandingPoHOutdoor[i].loc;
+    }
+    return 0xFFFFu;
+  }
+  // Indoor: dungeon_room_index. Room 283 hosts two PoH; sprite_x_hi[k]&1 picks
+  // (bit clear = Cave 45, set = Graveyard Ledge), matching the obtained-bit
+  // split in HeartUpgrade_SetObtainedFlag.
+  switch (dungeon_room_index) {
+    case 225: return LOC_Lost_Woods_Hideout;   // z3r room 225 Forest_Thieves
+    case 226: return LOC_Lumberjack_Tree;      // z3r room 226
+    case 234: return LOC_Spectacle_Rock_Cave;  // z3r room 234 Spectacle_Cave
+    case 283: return (sprite_x_hi[k] & 1) ? LOC_Graveyard_Ledge : LOC_Cave_45;
+    case 294: return LOC_Checkerboard_Cave;    // z3r room 294 = 0x180005 Checkerboard Cave
+    // Hammer Pegs (room 295) intentionally omitted — dispatched in overworld.c;
+    // wiring it here would double-grant.
+    default:  return 0xFFFFu;
+  }
+}
+
+static uint16 StandingPoH_LatchedLocation(int k) {
+  uint16 encoded = (uint16)(sprite_A[k] | sprite_B[k] << 8);
+  return encoded ? (uint16)(encoded - 1) : 0xFFFFu;
+}
+
 void Sprite_HeartPiece(int k) {  // 85f020
   static const uint16 kHeartPieceMsg[4] = {0x158, 0x155, 0x156, 0x157};
+  uint16 rando_loc = 0xFFFFu;
   if (!sprite_ai_state[k]) {
     sprite_ai_state[k]++;
-    HeartUpgrade_CheckIfAlreadyObtained(k);
+    // Resolve once while the sprite is still in its source room/screen. During
+    // pit-fall transitions, the old sprite can draw after the global room index
+    // starts changing; recomputing here would briefly fall back to the vanilla
+    // PoH icon even though the pickup is randomized.
+    if (enhanced_features1 & kFeatures1_RandomizerActive) {
+      rando_loc = StandingPoH_Location(k);
+      uint16 encoded = (uint16)(rando_loc + 1);
+      sprite_A[k] = (uint8)encoded;
+      sprite_B[k] = (uint8)(encoded >> 8);
+      // add-npc-souls — the Maze Race prize is a STANDING item: suppressing
+      // the two race NPCs does not physically gate it, so the item itself
+      // despawns until BOTH race souls are owned (logic gates the check the
+      // same way; re-entering the screen re-arms the spawn).
+      if (rando_loc == LOC_Maze_Race && Souls_NpcActive() &&
+          (!Souls_NpcOwned(kNpcSoul_MazeGameLady) ||
+           !Souls_NpcOwned(kNpcSoul_MazeGameGuy))) {
+        sprite_state[k] = 0;
+        return;
+      }
+    }
+    HeartUpgrade_CheckIfAlreadyObtainedAtLocation(k, rando_loc);
     if (!sprite_state[k])
       return;
+  } else if (enhanced_features1 & kFeatures1_RandomizerActive) {
+    rando_loc = StandingPoH_LatchedLocation(k);
   }
-  SpriteDraw_SingleLarge(k);
+  // Draw the placed item's sprite under rando (the helper loads its gfx on
+  // demand). Falls back to the vanilla PoH sprite when the placement is a PoH,
+  // has no gfx, or rando is inactive.
+  if (rando_loc == 0xFFFFu ||
+      !Rando_TryDrawFieldItemSprite(k, rando_loc, ITEM_PieceOfHeart))
+    SpriteDraw_SingleLarge(k);
   if (Sprite_ReturnIfInactive(k))
     return;
   if (Sprite_CheckIfLinkIsBusy())
@@ -6490,6 +7219,71 @@ void Sprite_HeartPiece(int k) {  // 85f020
   if (sprite_delay_aux4[k] || !Sprite_CheckDamageToLink_same_layer(k))
     return;
 
+  // §6.5 standing/freestanding Piece-of-Heart dispatch.
+  //
+  // Sprite_HeartPiece is the single handler for every standing/overworld/
+  // cave PoH pickup. Vanilla unconditionally increments link_heart_pieces.
+  // Under rando the placer can assign a non-PoH item to any of these
+  // locations, so before the vanilla increment we resolve the specific
+  // ALTTPR location and route it through the grant dispatcher.
+  //
+  // The location key reuses HeartUpgrade_SetObtainedFlag's exact
+  // discriminators (so the lookup, the obtained-bit, and the respawn-check
+  // all agree): outdoors keys on BYTE(overworld_screen_index); indoors keys
+  // on dungeon_room_index, with sprite_x_hi[k]&1 splitting the one room that
+  // hosts two PoH (room 283 = Cave 45 / Graveyard Ledge).
+  //
+  // Screen/room keys are sourced from z3randomizer heartpieces.asm
+  // LoadOutdoorValue/LoadIndoorValue (the ALTTPR runtime), cross-referenced
+  // to the ALTTPR PHP 0x18014x / 0x18000x table order. Only entries whose
+  // (screen|room) -> LOC mapping is unambiguous are wired; others omitted.
+  //
+  // A present randomized slot is delivered through the shared transaction;
+  // persistence and the obtained bit advance only after delivery accepts.
+  // Vanilla (or an absent placement) falls through to the original quarter-
+  // heart counter below.
+  if (enhanced_features1 & kFeatures1_RandomizerActive) {
+    // Resolved once at the top of the handler by StandingPoH_Location(k) — the
+    // same key the field-item draw + prep-time gfx DMA use, so all three agree.
+    uint16 loc = rando_loc;
+    if (loc != 0xFFFFu) {
+      RandoDeferredGrantToken token;
+      RandoGrantResult result = Rando_PrepareGrant(
+          loc, ITEM_PieceOfHeart, 0x17, &token);
+      if (result == kRandoGrantResult_Accepted &&
+          Sprite_StandingPoHCallerOwnsPresentation(&token.plan)) {
+        // The standing pickup owns its quarter-heart counter/message/SFX. This
+        // narrow commit records the randomized check without applying 0x17;
+        // fall through to the byte-identical vanilla presentation below.
+        result = Rando_CommitStandingPieceOfHeartIdentity(&token);
+        if (result == kRandoGrantResult_Accepted)
+          goto vanilla_standing_piece_of_heart;
+      } else if (result == kRandoGrantResult_Accepted) {
+        Link_CancelDash();
+        result = Rando_CommitPreparedGrant(
+            &token, kRandoGrantPresentation_Animated, 0, 0);
+        if (!Sprite_GrantResultIsTerminal(result))
+          return;
+        sprite_state[k] = 0;
+        HeartUpgrade_SetObtainedFlag(k);
+        return;
+      }
+      if (result == kRandoGrantResult_AlreadyChecked) {
+        sprite_state[k] = 0;
+        HeartUpgrade_SetObtainedFlag(k);
+        return;
+      }
+      if (result != kRandoGrantResult_NotActive)
+        return;
+    }
+  }
+
+vanilla_standing_piece_of_heart:
+  // rando-exempt: this is the generic piece-of-heart pickup sprite handler,
+  // not a specific ALTTPR location. The 24 PieceOfHeart placement sites
+  // (Sunken Treasure, Cave 45, etc.) dispatch at their spawn point (chest /
+  // standing / dig / dash); this counter logic runs the same way regardless
+  // of which slot's PoH was collected.
   link_heart_pieces = link_heart_pieces + 1 & 3;
   if (link_heart_pieces == 0) {
     Link_CancelDash();
@@ -6542,8 +7336,15 @@ void Sprite_Sahasrahla(int k) {  // 85f14d
     savegame_map_icons_indicator = 3;
     break;
   case 2:  // grant boots
-    item_receipt_method = 0;
-    Link_ReceiveItem(0x4b, 0);
+    {
+      RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+          LOC_Sahasrahla, ITEM_Boots, 0x4b, 0, 0);
+      if (!Sprite_GrantResultIsTerminal(result)) {
+        sprite_ai_state[k] = 0;
+        flag_is_link_immobilized = 0;
+        return;
+      }
+    }
     sprite_ai_state[k] = 3;
     savegame_map_icons_indicator = 3;
     break;
@@ -6555,10 +7356,23 @@ void Sprite_Sahasrahla(int k) {  // 85f14d
 }
 
 void Sasha_Idle(int k) {  // 85f160
+  // Vanilla selects the give-Boots branch on !link_item_boots, because in
+  // vanilla Sahasrahla IS the source of the Pegasus Boots — "no boots" ==
+  // "haven't received his gift yet" (the green-pendant precondition above
+  // still gates when he'll offer it). Under rando Boots are shuffled: obtaining
+  // them elsewhere first makes !link_item_boots false, so he skips straight to
+  // the ice-rod hint and LOC_Sahasrahla never grants (unreachable). Conversely
+  // a non-Boots placed item never raises link_item_boots, so every revisit
+  // re-enters the give branch and re-dispatches the (non-idempotent) grant.
+  // Gate on whether LOC_Sahasrahla has been checked (case 2 dispatches
+  // Rando_DispatchVanillaGrant(LOC_Sahasrahla, ...), which marks it). The
+  // green-pendant precondition is unchanged; vanilla path stays byte-identical.
+  bool boots_given = Rando_IsLocationCheckedOrVanilla(
+      LOC_Sahasrahla, (bool)link_item_boots);
   if (!(link_which_pendants & 4)) {
     if (Sprite_ShowSolicitedMessage(k, 0x32) & 0x100)
       sprite_ai_state[k] = 1;
-  } else if (!link_item_boots) {
+  } else if (!boots_given) {
     int m = (savegame_map_icons_indicator >= 3) ? 0x38 : 0x39;
     if (Sprite_ShowSolicitedMessage(k, m) & 0x100)
       sprite_ai_state[k] = 2;
@@ -6674,7 +7488,13 @@ void BombosTablet(int k) {  // 85f355
     player_handler_timer = 0;
     link_position_mode = 32;
     sound_effect_1 = 0;
-    if (!sign8(link_sword_type) && link_sword_type >= 2) {
+    // Swordless (ALTTPR setSwordlessMode / AllowHammerTablets): a tablet normally
+    // grants its medallion only with the Master Sword owned (link_sword_type>=2).
+    // Under swordless, owning the Hammer substitutes (the Book is the *equipped*
+    // item here, so this must test hammer OWNERSHIP, not equipped). Matches the
+    // logic gate `HasSword2() OR (swordless AND Hammer)`. Gated → vanilla untouched.
+    if (Rando_IsSwordlessActive() ? (link_item_hammer != 0)
+                                  : (!sign8(link_sword_type) && link_sword_type >= 2)) {
       sprite_ai_state[k]++;
       BombosTablet_StartCutscene();
       sprite_delay_main[k] = 64;
@@ -6700,7 +7520,10 @@ void EtherTablet(int k) {  // 85f3c4
     player_handler_timer = 0;
     link_position_mode = 32;
     sound_effect_1 = 0;
-    if (!sign8(link_sword_type) && link_sword_type >= 2) {
+    // Swordless: Hammer ownership substitutes for the Master Sword (see the
+    // BombosTablet note above; ALTTPR AllowHammerTablets). Gated → vanilla untouched.
+    if (Rando_IsSwordlessActive() ? (link_item_hammer != 0)
+                                  : (!sign8(link_sword_type) && link_sword_type >= 2)) {
       sprite_ai_state[k]++;
       EtherTablet_StartCutscene();
       sprite_delay_main[k] = 64;
@@ -6728,8 +7551,17 @@ void SpritePrep_PotionShop(int k) {  // 85f529
 }
 
 void MagicShopAssistant_SpawnPowder(int k) {  // 85f539
-  if (!flag_overworld_area_did_change || link_item_mushroom == 2)
+  if (!flag_overworld_area_did_change)
     return;
+  // Vanilla suppresses re-spawn once you hold Powder (mushroom==2). Under
+  // rando the bag grants the Potion Shop check (which may NOT be Powder) and
+  // the player may already hold Powder, so gate on whether the check was
+  // collected instead — otherwise the bag never spawns (Powder held) or
+  // re-spawns forever (check item isn't Powder).
+  if (Rando_IsLocationCheckedOrVanilla(
+          LOC_Potion_Shop, link_item_mushroom == 2)) {
+    return;
+  }
   if (save_dung_info[0x109] & 0x80) {
     SpriteSpawnInfo info;
     int j = Sprite_SpawnDynamically(k, 0xe9, &info);
@@ -6782,15 +7614,30 @@ void Sprite_E9_PotionShop(int k) {  // 85f633
 }
 
 void Sprite_BagOfPowder(int k) {  // 85f644
-  MagicPowderItem_Draw(k);
+  // add-npc-souls — defensive: the bag only spawns after the witch hand-in
+  // (impossible while the witch is suppressed), but a foreign/edited save
+  // could carry the flag; never present the grant without the Witch soul.
+  if (Souls_NpcActive() && !Souls_NpcOwned(kNpcSoul_Witch)) {
+    sprite_state[k] = 0;
+    return;
+  }
+  // add-rando-field-item-sprites: draw the placed item; vanilla powder otherwise.
+  if (!Rando_TryDrawFieldItemSprite(k, LOC_Potion_Shop, ITEM_MagicPowder))
+    MagicPowderItem_Draw(k);
   if (Sprite_ReturnIfInactive(k))
     return;
   Sprite_BehaveAsBarrier(k);
   if (!Sprite_CheckDamageToLink_same_layer(k) || !(filtered_joypad_L & 0x80))
     return;
   Link_CancelDash();
-  item_receipt_method = 0;
-  Link_ReceiveItem(0xd, 0);
+  // §6.4 Potion Shop (mushroom→powder) dispatch. The vanilla grant is
+  // MagicPowder (LttP code 0x0d); rando may replace via the Potion Shop
+  // location. The bag spawns only when the player has turned in the
+  // mushroom (save_dung_info[0x109] & 0x80) — same gate vanilla uses.
+  RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+      LOC_Potion_Shop, ITEM_MagicPowder, 0x0d, 0, 0);
+  if (!Sprite_GrantResultIsTerminal(result))
+    return;
   sprite_state[k] = 0;
 }
 
@@ -6973,8 +7820,18 @@ void Sprite_DashItem(int k) {  // 85fbf7
   }
 }
 
+static uint16 Sprite_BonkKeyRandoLocation(void) {
+  switch (dungeon_room_index) {
+  case 0x73: return LOC_Desert_Palace_Torch;
+  case 0x8c: return LOC_Ganon_s_Tower_Bob_s_Torch;
+  default:    return 0xffff;
+  }
+}
+
 void Sprite_BonkKey(int k) {  // 85fc04
-  Sprite_DrawThinAndTall(k);
+  uint16 loc = Sprite_BonkKeyRandoLocation();
+  if (loc == 0xffff || !Rando_TryDrawFieldItemSprite(k, loc, 0xffffu))
+    Sprite_DrawThinAndTall(k);
   if (Sprite_ReturnIfInactive(k))
     return;
   if (Sprite_CheckDamageToLink_same_layer(k))
@@ -7006,16 +7863,36 @@ void Sprite_BonkKey(int k) {  // 85fc04
       sprite_floor[k] = link_is_on_lower_level;
     break;
   case 3:  // give to player
-    link_num_keys++;
+    if ((enhanced_features1 & kFeatures1_RandomizerActive) && loc != 0xffff) {
+      RandoGrantResult result = Rando_GrantLocation(
+          loc, 0xffffu, 0x24, kRandoGrantPresentation_Animated, 0, 0);
+      if (result == kRandoGrantResult_NotActive) {
+        // Defensive registry drift fallback: preserve the vanilla key drop.
+        // rando-exempt: vanilla fallback after the transaction reports NotActive
+        link_num_keys++;
+        if (Rando_IsGenericKeysActive()) link_generic_keys = link_num_keys;
+        SpriteSfx_QueueSfx3WithPan(k, 0x2f);
+      } else if (!Sprite_GrantResultIsTerminal(result)) {
+        return;
+      }
+    } else {
+      // rando-exempt: vanilla-only — active randomizer slots dispatch above;
+      // under Retro genericKeys link_num_keys is backed by the shared pool slot,
+      // so persist the dropped key immediately.
+      link_num_keys++;
+      if (Rando_IsGenericKeysActive()) link_generic_keys = link_num_keys;
+      SpriteSfx_QueueSfx3WithPan(k, 0x2f);
+    }
     sprite_state[k] = 0;
     dung_savegame_state_bits |= (sprite_die_action[k] ? 0x2000 : 0x4000);
-    SpriteSfx_QueueSfx3WithPan(k, 0x2f);
     break;
   }
 }
 
 void Sprite_BookOfMudora(int k) {  // 85fc9e
-  SpriteDraw_SingleLarge(k);
+  // add-rando-field-item-sprites: draw the placed item; vanilla book otherwise.
+  if (!Rando_TryDrawFieldItemSprite(k, LOC_Library, ITEM_BookOfMudora))
+    SpriteDraw_SingleLarge(k);
   if (Sprite_ReturnIfInactive(k))
     return;
   if (Sprite_CheckDamageToLink_same_layer(k))
@@ -7049,8 +7926,12 @@ void Sprite_BookOfMudora(int k) {  // 85fc9e
     break;
   case 3:  // give to player
     Link_CancelDash();
-    item_receipt_method = 0;
-    Link_ReceiveItem(0x1d, 0);
+    {
+      RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+          LOC_Library, ITEM_BookOfMudora, 0x1d, 0, 0);
+      if (!Sprite_GrantResultIsTerminal(result))
+        return;
+    }
     sprite_state[k] = 0;
     break;
   }
@@ -7240,6 +8121,20 @@ void SpriteModule_Initialize(int k) {  // 86864d
 }
 
 void SpritePrep_Mantle(int k) {  // 868841
+  // ALTTPR parity (z3randomizer lampmantlecone.asm Mantle_CorrectPosition,
+  // hooked at this same ROM address): once the escape is complete
+  // (sram_progress_flags & 4 = Zelda delivered to Sanctuary), spawn the throne
+  // already pushed aside so the castle->sewers route stays open. Vanilla
+  // leaves it closed and gates the push on the Zelda follower (see
+  // Sprite_EE_MovableMantle), sealing a route the ALTTPR-faithful logic
+  // counts as open (e.g. Sewers - Dark Cross = Lamp only). Only the throne
+  // room uses sprite 0xEE; the Sanctuary altar is type 0x73.
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+      (sram_progress_flags & 4)) {
+    sprite_x_lo[k] = 0x0a;  // +8 below = 0x312, the fully-pushed position
+    sprite_x_hi[k] = 3;
+    sprite_G[k] = 0x90;     // fully-pushed state; the push handler early-outs
+  }
   sprite_y_lo[k] += 3;
   sprite_x_lo[k] += 8;
 }
@@ -7333,6 +8228,18 @@ void SpritePrep_Octoballoon(int k) {  // 868910
 }
 
 void SpritePrep_AgahnimsBarrier(int k) {  // 86891b
+  // #82 Inverted: Electric_Barrier. The Ganon's-Tower crystal (electric)
+  // barrier is removed in Inverted mode (its blocking role is handled by the
+  // relocated GT entrance). z3randomizer inverted.asm Electric_Barrier ORs the
+  // screen's event-data 0x40 "barrier dead" bit on before the prep routine
+  // tests it, so the barrier always preps into its already-broken graphics
+  // state (graphics == 4). Mirror that by forcing the dead bit under the active
+  // Inverted rando world-state. Gated so vanilla / Open / Standard / Retro
+  // leave the bit (and the persisted event byte) untouched.
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+      Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */) {
+    save_ow_event_info[BYTE(overworld_screen_index)] |= 0x40;
+  }
   if (save_ow_event_info[BYTE(overworld_screen_index)] & 0x40)
     sprite_graphics[k] = 4;
   SpritePrep_MoveDown_8px_Right8px(k);
@@ -7450,7 +8357,11 @@ void SpritePrep_BullyAndVictim(int k) {  // 868a51
 }
 
 void SpritePrep_PurpleChest(int k) {  // 868a59
-  if (follower_indicator != 12 && !(sram_progress_indicator_3 & 16) && sram_progress_indicator_3 & 32)
+  bool already_delivered = Sprite_SourceCompleted(
+      LOC_Purple_Chest, (sram_progress_indicator_3 & 16) != 0);
+  bool prerequisite_met = (sram_progress_indicator_3 & 32) != 0;
+  if (follower_indicator != 12 &&
+      !Sprite_SourceShouldSuppress(prerequisite_met, already_delivered))
     sprite_ignore_projectile[k]++;
   else
     sprite_state[k] = 0;
@@ -7609,7 +8520,7 @@ void SpritePrep_HauntedGroveAnimal(int k) {  // 868bab
 }
 
 void SpritePrep_HauntedGroveOstritch(int k) {  // 868bb2
-  if (link_item_flute >= 2)
+  if (Rando_FluteShovelEffectiveLevel() >= 2)  // owns flute (rando: even if shovel selected)
     sprite_state[k] = 0;
   sprite_ignore_projectile[k]++;
 }
@@ -7642,6 +8553,27 @@ void SpritePrep_Shopkeeper(int k) {  // 868bf1
   sprite_flags3[k] |= 16;
   static const uint8 kShopKeeperWhere[13] = {0xf, 0x10, 0, 6, 0x18, 0x12, 0x1e, 0xff, 0x1f, 0x23, 0x24, 0x25, 0x27};
   uint8 room = BYTE(dungeon_room_index);
+  // Phase B Slice 3b — Retro TakeAny. The take-any host rooms (0x112/0x10F/
+  // 0x11F) ARE the regular Lake-Hylia/DW/Kakariko shops, so when the player
+  // arrived via an active take-any redirect (g_rando_takeany_door_id != 0) we
+  // must present the cave's offered item(s) and SUPPRESS the host room's
+  // regular-shop spawns (otherwise the regular shop would appear / its
+  // Rando_ShopDispatch would fire). See add-rando-retro-takeany/design.md §D1b.
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+      g_rando_takeany_door_id != 0) {
+    uint8 spawned = 0;
+    for (uint8 pos = 0; pos < 2; pos++) {
+      if (Rando_TakeAnyLiveSlot(room, g_rando_takeany_door_id, pos) != 0xFFFFu) {
+        // Per-item icon: 14 = heart (BossHeart), 15 = potion (BluePotion/generic).
+        ShopKeeper_SpawnShopItem(k, pos, Rando_TakeAnyDrawKind(g_rando_takeany_door_id, pos));
+        spawned++;
+      }
+    }
+    // Cave fully taken on a revisit -> empty room (despawn the keeper too, so
+    // it matches the asm "draw nothing when PurchaseCounts != 0").
+    if (spawned == 0) sprite_state[k] = 0;
+    return;  // never fall through to the regular-shop switch
+  }
   int j = FindInByteArray(kShopKeeperWhere, room, 13);
   switch (j) {
   case 0:
@@ -7683,6 +8615,17 @@ void SpritePrep_Shopkeeper(int k) {  // 868bf1
   default:
     assert(0);
   }
+  // Retro genericKeys — add the ALTTPR buyable ShopKey slot (Randomizer.php:746-747:
+  // 5 random shops get a 100-rupee unlimited generic key). The fork's shop layout is
+  // fixed, so add it to every standard 3-item shop (cases 0/1/5/7/8) as a 4th slot,
+  // kind 16. This is the unlimited supply that makes the >=1 small-key wildcard sound
+  // against the finite placed-key pool. Take-any caves returned above, so this never
+  // fires there; vanilla / non-Retro seeds skip it (gate false), leaving spawns
+  // byte-identical.
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) && Rando_IsGenericKeysActive() &&
+      (j == 0 || j == 1 || j == 5 || j == 7 || j == 8)) {
+    ShopKeeper_SpawnShopItem(k, 3, 16);
+  }
 }
 
 void SpritePrep_Storyteller(int k) {  // 868c9e
@@ -7721,7 +8664,19 @@ void SpritePrep_BonkItem(int k) {  // 868cf2
   }
   sprite_floor[k] = 2;
   if (dungeon_room_index == 0x107) {
-    if (link_item_book_of_mudora)
+    // The Library bonk-item (Book of Mudora). Vanilla despawns it once
+    // link_item_book_of_mudora is set, because in vanilla this IS the only
+    // Book source — "has Book" == "already dashed it out." Under rando the
+    // Book is shuffled: obtaining it elsewhere first would despawn the Library
+    // item before LOC_Library is collected, making it unreachable. Gate the
+    // despawn on whether LOC_Library has been checked (pickup dispatches
+    // Rando_DispatchVanillaGrant(LOC_Library, ...), which marks it). Vanilla
+    // path keeps the proxy so RAM-compare stays byte-identical. (The else
+    // branch below keys off dung_savegame_state_bits — a proper per-item event
+    // bit, not a shuffled-item proxy — so it is left untouched.)
+    bool already_collected = Rando_IsLocationCheckedOrVanilla(
+        LOC_Library, (bool)link_item_book_of_mudora);
+    if (already_collected)
       sprite_state[k] = 0;
     else
       DecodeAnimatedSpriteTile_variable(0xe);
@@ -7751,12 +8706,24 @@ void SpritePrep_Locksmith(int k) {  // 868d59
   if (follower_indicator == 12) {
     sprite_ai_state[k] = 2;
   }
-  if (sram_progress_indicator_3 & 0x10)
+  if (Sprite_SourceCompleted(
+          LOC_Purple_Chest, (sram_progress_indicator_3 & 0x10) != 0))
     sprite_ai_state[k] = 4;
 }
 
 void SpritePrep_SickKid(int k) {  // 868d7f
-  if (link_item_bug_net)
+  // Vanilla locks the Sick Kid into ai_state 3 ("back to rest / already gave")
+  // once link_item_bug_net is set, because in vanilla HE is the source of the
+  // bug net — so "has net" == "already collected his gift." Under rando the net
+  // is a shuffled item: obtaining it elsewhere first would lock him done before
+  // his placed check is collected, making it unreachable. Gate the done-state on
+  // whether LOC_Sick_Kid has actually been checked (Sprite_1F_SickKid case 2
+  // dispatches Rando_DispatchVanillaGrant(LOC_Sick_Kid, ...), which marks it).
+  // Keep the vanilla proxy when rando is inactive so the RAM-compare path is
+  // byte-identical.
+  bool already_done = Rando_IsLocationCheckedOrVanilla(
+      LOC_Sick_Kid, (bool)link_item_bug_net);
+  if (already_done)
     sprite_ai_state[k] = 3;
   sprite_ignore_projectile[k]++;
 }
@@ -7823,7 +8790,8 @@ void SpritePrep_Hobo(int k) {  // 868dfd
       sprite_state[i] = 0;
   }
   SpritePrep_Hobo_SpawnFire(k);
-  if (sram_progress_indicator_3 & 1)
+  if (Sprite_SourceCompleted(
+          LOC_Hobo, (sram_progress_indicator_3 & 1) != 0))
     sprite_ai_state[0] = 3;
   sprite_ignore_projectile[0] = 1;
 }
@@ -7895,7 +8863,23 @@ void SpritePrep_FallingIce(int k) {  // 868f08
 }
 
 void SpritePrep_KingZora(int k) {  // 868f0f
-  if (link_item_flippers)
+  // Vanilla despawns King Zora once link_item_flippers is set, because in
+  // vanilla HE is the only source of the Flippers — "has flippers" == "already
+  // bought his gift." Under rando the Flippers are shuffled: obtaining them
+  // elsewhere first would despawn Zora before his placed check is collected,
+  // making LOC_King_Zora unreachable (and any progression placed there would
+  // make the seed unbeatable). Gate the despawn on whether the location has
+  // actually been checked. The reward is dispatched at PICKUP, not spawn: the
+  // regurgitated medallion (sprite type 0xc0, flags3 0x54) routes to
+  // Sprite_Catfish_QuakeMedallion, which dispatches
+  // Rando_DispatchVanillaGrant(LOC_King_Zora, ...) — marking the location — only
+  // when Link collects it. Once checked he despawns as before, so a later
+  // revisit can't re-trigger the 500-rupee regurgitate (Rando_OnLocationCheck is
+  // NOT idempotent — a second dispatch would re-grant). Keep the vanilla proxy
+  // when rando is inactive so the RAM-compare path stays byte-identical.
+  bool already_collected = Rando_IsLocationCheckedOrVanilla(
+      LOC_King_Zora, (bool)link_item_flippers);
+  if (already_collected)
     sprite_state[k] = 0;
   else
     sprite_ignore_projectile[k]++;
@@ -7907,7 +8891,7 @@ bool Sprite_ReturnIfBossFinished(int k) {  // 868f1c
     return true;
   }
   for (int j = 15; j >= 0; j--) {
-    if (!(kSpriteInit_BumpDamage[sprite_type[j]] & 0x10))
+    if (!(MODS_U8(kSpriteInit_BumpDamage, 0x8db266)[sprite_type[j]] & 0x10))
       sprite_state[j] = 0;
   }
   return false;
@@ -8034,17 +9018,35 @@ void SpritePrep_CrystalSwitch(int k) {  // 869064
 void SpritePrep_FluteKid(int k) {  // 869075
   sprite_ignore_projectile[k]++;
   sprite_subtype2[k] = savegame_is_darkworld >> 6 & 1;
+  uint8 flute_level = Rando_FluteShovelEffectiveLevel();  // owns-flute level (rando: ignores selection)
   if (sprite_subtype2[k]) {
-    if (sram_progress_indicator_3 & 8 || link_item_flute > 2) {
+    // Vanilla spawns Stumpy as a finished tree once the flute quest is done
+    // (flute_level > 2), reusing link_item_flute as a proxy for "Stumpy's check
+    // is collected" — valid in vanilla, where flute==3 implies you already got
+    // his shovel. Under rando the (inactive) flute is shuffled and activated
+    // independently at the Kakariko weathervane (the travel-bird ancilla sets
+    // link_item_flute=3 / kRandoFluteShovel_FluteActive). A player who
+    // warp-activates a found flute before talking to Stumpy would otherwise
+    // freeze him in the tree state here and lose LOC_Stumpy forever — the
+    // case-0 grant gate in Sprite_FluteKid_Stumpy never runs because this prep
+    // diverts straight to ai_state 5. Gate the tree state on the
+    // location-checked bit instead, mirroring that grant gate and ALTTPR's
+    // ItemCheck_TreeKid2 reroute (which keys the tree on NpcFlags & $08, set
+    // when the item is given). sram_progress_indicator_3 & 8 is subsumed: under
+    // rando it is only set by Stumpy's own post-grant cutscene, which already
+    // requires LOC_Stumpy to be checked.
+    bool stumpy_done = Rando_IsLocationCheckedOrVanilla(
+        LOC_Stumpy, (sram_progress_indicator_3 & 8) || (flute_level > 2));
+    if (stumpy_done) {
       sprite_graphics[k] = 3;
       sprite_ai_state[k] = 5;
-    } else if (link_item_flute == 2) {
+    } else if (flute_level == 2) {
       sprite_graphics[k] = 1;
     }
     sprite_x_lo[k] += 8;
     sprite_y_lo[k] -= 8;
   } else {
-    if (link_item_flute >= 2)
+    if (flute_level >= 2)
       sprite_state[k] = 0;
     else
       sprite_x_lo[k] += 7;
@@ -8219,7 +9221,14 @@ void SpritePrep_Arrghi(int k) {  // 8691fa
   sprite_y_hi[k] = overlord_gen3[k + 7];
 }
 
+static void SpritePrep_Mothula_Quest(int k);
+
 void SpritePrep_Mothula(int k) {  // 86922f
+  // A quest can run its own code first: JML $3E8120 there ($86:922F).
+  if (Mods_RomByte(0x86922f, 0x20) == 0x5c) {
+    SpritePrep_Mothula_Quest(k);
+    return;
+  }
   if (Sprite_ReturnIfBossFinished(k))
     return;
   sprite_delay_main[k] = 80;
@@ -8227,6 +9236,36 @@ void SpritePrep_Mothula(int k) {  // 86922f
   sprite_graphics[k] = 2;
   BYTE(dung_floor_move_flags)++;
   sprite_C[k] = 112;
+}
+
+// What the quest's code at $3E:8120 does (Secrets of the Past): a beaten
+// Mothula's room gets a tile ($3E:8125 on: x, y, tile kind) as the sprite
+// goes. Its branch for an unbeaten one lands one byte short ($3E:813A, in the
+// JSL before): the cartridge then runs those bytes, ORA ($5C,X), AND $92,X,
+// ASL $00, CMP #$50 where LDA #$50 was, and stores into $0CB0,X where it
+// meant $0DB0,X. Done here the same way.
+static void SpritePrep_Mothula_Quest(int k) {
+  if (sign8(g_ram[0x403])) {
+    Dungeon_UpdateTileMapWithCommonTile(
+        Mods_RomByte(0x3e8126, 0) | Mods_RomByte(0x3e812a, 0) << 8,
+        Mods_RomByte(0x3e812e, 0) | Mods_RomByte(0x3e8132, 0) << 8,
+        Mods_RomByte(0x3e8136, 0));
+    sprite_state[k] = 0;
+    return;
+  }
+  // ORA ($5C,X): a pointer made of Link's variables at $5C + k, read in the
+  // data bank $06. Below $2000 it is work RAM, exact (the first slots, where
+  // the room puts Mothula); above $8000 the quest's bytes give the
+  // cartridge's (0 where they have none), and its registers read as 0.
+  uint8 a = g_ram[0x403];
+  uint16 p = g_ram[0x5c + k] | g_ram[0x5d + k] << 8;
+  a |= p < 0x2000 ? g_ram[p] : p >= 0x8000 ? Mods_RomByte(0x860000 | p, 0) : 0;
+  a &= g_ram[0x92 + k];
+  sprite_delay_main[k] = a;
+  sprite_ignore_projectile[k]++;
+  sprite_graphics[k] = 2;
+  BYTE(dung_floor_move_flags)++;
+  g_ram[0xcb0 + k] = 0x70;
 }
 
 void SpritePrep_DoNothingH(int k) {  // 86924d
@@ -8257,6 +9296,7 @@ void SpritePrep_KeySetItemDrop(int k) {  // 869267
 void SpriteActive_Main(int k) {  // 869271
   uint8 type = sprite_type[k];
   kSpriteActiveRoutines[type](k);
+  Rando_TryDrawEnemyDropCarrierField(k);
 }
 
 void Sprite_09_GiantMoldorm(int k) {  // 869469
@@ -9313,7 +10353,14 @@ void Sprite_0B_Cucco(int k) {  // 86a5c2
   if (sprite_x_vel[k] != 0)
     sprite_oam_flags[k] = sprite_oam_flags[k] & ~0x40 | (sign8(sprite_x_vel[k]) ? 0 : 0x40);
 
-  SpriteDraw_SingleLarge(k);
+  // add-rando-trap-catalog — a trap-cucco (signal byte sprite_A==1, set at spawn)
+  // renders from a custom tile + palette so the Cucco trap's flock appears in ANY
+  // area, not just the two that load the cucco sheet into sprite slot 3. Vanilla
+  // cuccos (sprite_A==0) and home-area flocks keep the original sheet-3 draw.
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) && sprite_A[k])
+    Rando_DrawTrapCucco(k);
+  else
+    SpriteDraw_SingleLarge(k);
   if (sprite_head_dir[k] != 0) {
     sprite_type[k] = 0x3d;
     SpritePrep_LoadProperties(k);
@@ -9709,6 +10756,7 @@ void Sprite_28_DarkWorldHintNPC(int k) {  // 86ad6f
         Sprite_ShowMessageUnconditional(0xff);
         sprite_ai_state[k] = 2;
       } else {
+        Rando_HintsCancelPaid(kRandoHintPaidSource_Storyteller);
         Sprite_ShowMessageUnconditional(0x100);
         sprite_ai_state[k] = 0;
       }
@@ -9724,6 +10772,7 @@ void Sprite_28_DarkWorldHintNPC(int k) {  // 86ad6f
         Sprite_ShowMessageUnconditional(0x101);
         sprite_ai_state[k] = 2;
       } else {
+        Rando_HintsCancelPaid(kRandoHintPaidSource_Storyteller);
         Sprite_ShowMessageUnconditional(0x100);
         sprite_ai_state[k] = 0;
       }
@@ -9739,6 +10788,7 @@ void Sprite_28_DarkWorldHintNPC(int k) {  // 86ad6f
         Sprite_ShowMessageUnconditional(0x102);
         sprite_ai_state[k] = 2;
       } else {
+        Rando_HintsCancelPaid(kRandoHintPaidSource_Storyteller);
         Sprite_ShowMessageUnconditional(0x100);
         sprite_ai_state[k] = 0;
       }
@@ -9768,6 +10818,7 @@ void Sprite_28_DarkWorldHintNPC(int k) {  // 86ad6f
         Sprite_ShowMessageUnconditional(0x103);
         sprite_ai_state[k] = 2;
       } else {
+        Rando_HintsCancelPaid(kRandoHintPaidSource_Storyteller);
         Sprite_ShowMessageUnconditional(0x100);
         sprite_ai_state[k] = 0;
       }
@@ -9779,6 +10830,7 @@ void Sprite_28_DarkWorldHintNPC(int k) {  // 86ad6f
 }
 
 void DarkWorldHintNPC_Idle(int k) {  // 86ada7
+  Rando_HintsSetPaidPromptContext(kRandoHintPaidSource_Storyteller, 20);
   if (Sprite_ShowSolicitedMessage(k, 0xfe) & 0x100)
     sprite_ai_state[k] = 1;
 }
@@ -9786,12 +10838,20 @@ void DarkWorldHintNPC_Idle(int k) {  // 86ada7
 void DarkWorldHintNPC_RestoreHealth(int k) {  // 86adb5
   link_hearts_filler = 0xa0;
   sprite_ai_state[k] = 0;
+  Rando_HintsCancelPaid(kRandoHintPaidSource_Storyteller);
 }
 
 bool DarkWorldHintNPC_HandlePayment() {  // 86aeab
   if (link_rupees_goal < 20)
     return false;
+  if (!Rando_HintsPreparePaid(kRandoHintPaidSource_Storyteller))
+    return false;
   link_rupees_goal -= 20;
+  if (!Rando_HintsCommitPaid(kRandoHintPaidSource_Storyteller)) {
+    link_rupees_goal += 20;
+    Rando_HintsCancelPaid(kRandoHintPaidSource_Storyteller);
+    return false;
+  }
   return true;
 }
 
@@ -9837,7 +10897,7 @@ void FluteKid_Human(int k) {  // 86af51
   sprite_graphics[k] = frame_counter >> 5 & 1;
   switch (sprite_ai_state[k]) {
   case 0:  // wait
-    if (link_item_flute >= 2 || FluteBoy_CheckIfPlayerClose(k)) {
+    if (Rando_FluteShovelEffectiveLevel() >= 2 || FluteBoy_CheckIfPlayerClose(k)) {  // owns flute
       sprite_ai_state[k] = 1;
       sprite_D[k]++;
       byte_7E0FDD++;
@@ -9889,8 +10949,23 @@ void Sprite_FluteKid_Stumpy(int k) {  // 86b040
   if (Sprite_ReturnIfInactive(k))
     return;
   switch (sprite_ai_state[k]) {
-  case 0:  //
-    switch (link_item_flute & 3) {
+  case 0: {
+    // Vanilla keys Stumpy's quest phase off link_item_flute & 3 (0 = needs
+    // shovel -> supplicate + grant, 1 = has shovel, 2 = has flute -> thanks +
+    // free-the-boy cutscene, 3 = done). Under rando the flute is shuffled and
+    // decoupled from this NPC, so gate the GRANT on whether LOC_Stumpy has been
+    // collected instead — mirroring ALTTPR's per-NPC NpcFlags bit
+    // (npcitems.asm ItemCheck_TreeKid3). Otherwise obtaining the flute first
+    // raises the byte past 0 and Stumpy never grants his placed item (lost).
+    // Once collected, never re-enter phase 0 (the granted item may not be the
+    // flute, so the byte can still read 0 — which would re-grant); map the
+    // no-flute cases to "already did" and keep the flute cutscene when owned.
+    int phase = link_item_flute & 3;
+    if (Rando_HasLocationPlacement(LOC_Stumpy)) {
+      bool checked = Rando_IsLocationCheckedOrVanilla(LOC_Stumpy, false);
+      phase = !checked ? 0 : (phase < 2 ? 3 : phase);
+    }
+    switch (phase) {
     case 0:  // supplicate
       if (Sprite_ShowSolicitedMessage(k, 0xe5) & 0x100)
         sprite_ai_state[k] = 1;
@@ -9908,6 +10983,7 @@ void Sprite_FluteKid_Stumpy(int k) {  // 86b040
       break;
     }
     break;
+  }
   case 1:  //
     if (!choice_in_multiselect_box) {
       Sprite_ShowMessageUnconditional(0xe6);
@@ -9918,8 +10994,15 @@ void Sprite_FluteKid_Stumpy(int k) {  // 86b040
     }
     break;
   case 2:  // grant shovel
-    item_receipt_method = 0;
-    Link_ReceiveItem(0x13, 0);
+    {
+      RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+          LOC_Stumpy, ITEM_Shovel, 0x13, 0, 0);
+      if (!Sprite_GrantResultIsTerminal(result)) {
+        sprite_ai_state[k] = 0;
+        flag_is_link_immobilized = 0;
+        return;
+      }
+    }
     sprite_ai_state[k] = 0;
     break;
   case 3:  // wait for music
@@ -10135,7 +11218,25 @@ void Smithy_Main(int k) {  // 86b34e
     break;
   case 2:  // HandleTemperingChoice
     if (choice_in_multiselect_box == 0) {
-      if (link_sword_type < 3) {
+      // Vanilla gates the tempering offer on link_sword_type < 3, because the
+      // tempering reward IS an L3 (tempered) sword — "sword >= 3" == "already
+      // tempered." There is NO persistent done-bit for the reward: bit 0x20 is
+      // "both smiths reunited" (the prerequisite) and bit 0x80 is the in-temper
+      // transient (set in case 3, cleared the instant case 6 grants), so neither
+      // survives as a done-gate. Under rando the Blacksmith's reward is shuffled
+      // two ways break this proxy:
+      //   (A) a tempered/gold sword obtained elsewhere (e.g. progressive-sword
+      //       shuffle pushing link_sword_type >= Mods_RomByte(0x86b486, 3)) makes this take the
+      //       "already good" branch and LOC_Blacksmith never grants — unreachable;
+      //   (B) a NON-sword placed reward leaves link_sword_type < 3, so the temper
+      //       flow can be run again — and case 6 routes through the NON-idempotent
+      //       Rando_DispatchVanillaGrant, re-minting the item every time.
+      // Gate on whether LOC_Blacksmith has been checked (case 6 dispatches it).
+      // Vanilla path keeps the link_sword_type proxy so RAM-compare stays
+      // byte-identical.
+      bool already_rewarded = Rando_IsLocationCheckedOrVanilla(
+          LOC_Blacksmith, link_sword_type >= Mods_RomByte(0x86b486, 3));
+      if (!already_rewarded) {
         Sprite_ShowMessageUnconditional(0xda);
         sprite_ai_state[k] = 3;
       } else {
@@ -10148,15 +11249,47 @@ void Smithy_Main(int k) {  // 86b34e
     }
     break;
   case 3:  // HandleTemperingCost
-    if (choice_in_multiselect_box || link_rupees_goal < 10) {
+    if (choice_in_multiselect_box || link_rupees_goal < Mods_RomWord(0x86b4c5, 10)) {
       Sprite_ShowMessageUnconditional(0xdc);
       sprite_ai_state[k] = 0;
     } else {
-      link_rupees_goal -= 10;
+      if (enhanced_features1 & kFeatures1_RandomizerActive) {
+        RandoDeferredGrantToken token;
+        RandoGrantResult result = Rando_PrepareGrant(
+            LOC_Blacksmith, ITEM_L3Sword, 2, &token);
+        if (result == kRandoGrantResult_Retryable ||
+            result == kRandoGrantResult_Invalid) {
+          // Refuse before payment, sword removal, partner state, or transient
+          // flags change. The player can make bottle space and ask again.
+          Sprite_ShowMessageUnconditional(0xdc);
+          sprite_ai_state[k] = 0;
+          return;
+        }
+        if (result == kRandoGrantResult_AlreadyChecked) {
+          Sprite_ShowMessageUnconditional(0xdb);
+          sprite_ai_state[k] = 0;
+          return;
+        }
+      }
+      link_rupees_goal -= Mods_RomWord(0x86b4df, 10);
       Sprite_ShowMessageUnconditional(0xdd);
       sprite_ai_state[sprite_E[k]] = 5;
       sprite_ai_state[k] = 5;
       flag_overworld_area_did_change = 0;
+      // Rando: stash the player's real sword tier so case 6 can hand it back if
+      // the placed Blacksmith reward turns out NOT to be a sword. Vanilla always
+      // gives an L3 sword here, so the 255 sentinel is always replaced; under
+      // item shuffle the reward is usually something else (only 4 swords vs
+      // hundreds of locations), which left the player permanently swordless.
+      // Guard `!= 0xFF` so re-entering tempering (e.g. left to fetch the hammer
+      // after paying) can't overwrite a valid stash with the sentinel.
+      if ((enhanced_features1 & kFeatures1_RandomizerActive) && link_sword_type != 0xFF)
+        g_ram[kRam_PreTemperSword] = link_sword_type;
+      // rando-exempt: state-shuffle — smithy tempering transient: sword is
+      // "taken away" (255 sentinel) for the duration of the upgrade. Cleared
+      // when case 6 "Smithy_GiveTemperedSword" grants the new tier (or restores
+      // the stashed tier under rando when the reward isn't a sword). Not a
+      // grant. (audit.md §0.2.2)
       link_sword_type = 255;
       sram_progress_indicator_3 |= 128;
     }
@@ -10178,10 +11311,38 @@ void Smithy_Main(int k) {  // 86b34e
     }
     break;
   case 6:  // Smithy_GiveTemperedSword
+    {
+      // Resolve progressive substitutes against the real pre-tempering sword,
+      // never the temporary 0xFF "sword removed" sentinel.
+      if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+          link_sword_type == 0xFF) {
+        // rando-exempt: state-shuffle — restore the pre-tempering sword before
+        // the grant transaction resolves a progressive replacement.
+        link_sword_type = g_ram[kRam_PreTemperSword];
+      }
+      RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+          LOC_Blacksmith, ITEM_L3Sword, Mods_RomByte(0x86b554, 2), 0, 0);
+      if (!Sprite_GrantResultIsTerminal(result)) {
+        // Preflight should make this unreachable absent external slot drift,
+        // but fully roll back every caller-owned mutation if commit rejects.
+        link_rupees_goal += 10;
+        sram_progress_indicator_3 &= ~0x80;
+        sprite_ai_state[sprite_E[k]] = 0;
+        sprite_ai_state[k] = 0;
+        flag_overworld_area_did_change = 1;
+        return;
+      }
+    }
     sprite_ai_state[k] = 0;
     sprite_ai_state[sprite_E[k]] = 0;
-    item_receipt_method = 0;
-    Link_ReceiveItem(2, 0);
+    // rando-exempt: state-shuffle — restore half of the smithy tempering
+    // transient. The dispatch above queues the placed reward's receipt; if that
+    // reward IS a sword it sets link_sword_type (now, or when the async receipt
+    // ancilla fires — which overwrites this), but if it is NOT a sword
+    // link_sword_type stays at the 255 sentinel set in case 3. Hand back the
+    // tier stashed there so tempering a non-sword reward no longer leaves Link
+    // permanently swordless. Not a grant. (audit.md §0.2.2)
+    if ((enhanced_features1 & kFeatures1_RandomizerActive) && link_sword_type == 0xFF) link_sword_type = g_ram[kRam_PreTemperSword];
     sram_progress_indicator_3 &= ~0x80;
     break;
   case 7:  //
@@ -10432,8 +11593,16 @@ void Sprite_1F_SickKid(int k) {  // 86b94c
     }
     break;
   case 2:  // grant
-    item_receipt_method = 0;
-    Link_ReceiveItem(0x21, 0);
+    {
+      RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+          LOC_Sick_Kid, ITEM_BugCatchingNet, 0x21, 0, 0);
+      if (!Sprite_GrantResultIsTerminal(result)) {
+        flag_is_link_immobilized = 0;
+        sprite_ai_state[k] = 0;
+        sprite_A[k] = 0;
+        return;
+      }
+    }
     flag_is_link_immobilized = 0;
     sprite_ai_state[k] = 3;
     break;
@@ -10644,8 +11813,14 @@ void Sprite_39_Locksmith(int k) {  // 86bcac
         Sprite_ShowMessageUnconditional(0x10c);
         sprite_ai_state[k] = 2;
       } else {
-        item_receipt_method = 0;
-        Link_ReceiveItem(0x16, 0);
+        {
+          RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+              LOC_Purple_Chest, ITEM_BottleEmpty, 0x16, 0, 0);
+          if (!Sprite_GrantResultIsTerminal(result)) {
+            sprite_ai_state[k] = 2;
+            return;
+          }
+        }
         sram_progress_indicator_3 |= 0x10;
         sprite_ai_state[k] = 4;
         follower_indicator = 0;
@@ -10731,11 +11906,19 @@ void Sprite_Hobo_Bum(int k) {  // 86bdd0
     }
     break;
   case 2:  // grant bottle
+    {
+      RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+          LOC_Hobo, ITEM_BottleEmpty, 0x16, 0, 0);
+      if (!Sprite_GrantResultIsTerminal(result)) {
+        sprite_ai_state[k] = 0;
+        sprite_A[k] = 0;
+        flag_is_link_immobilized = 0;
+        return;
+      }
+    }
     sprite_ai_state[k] = 3;
     sprite_graphics[k] = 1;
     save_ow_event_info[BYTE(overworld_screen_index)] |= 0x20;
-    item_receipt_method = 0;
-    Link_ReceiveItem(0x16, 0);
     sram_progress_indicator_3 |= 1;
     break;
   case 3:  // back to sleep
@@ -10857,7 +12040,14 @@ void Sprite_73_UncleAndPriest(int k) {  // 86bfe0
 }
 
 void SpritePrep_UncleAndPriest_bounce(int k) {  // 86bfe5
-  if (BYTE(dungeon_room_index) == 18) {
+  // Sprite 0x73 (Priest/Uncle) spawns in EXACTLY three rooms (verified against
+  // the dungeon room YAMLs): 0x012 Sanctuary, 0x104 Link's house (opening
+  // wake-up uncle), 0x055 sewers (dying uncle / "Link's Uncle" item location,
+  // handled by the else branch). Dispatch on the FULL 16-bit dungeon_room_index,
+  // never BYTE(dungeon_room_index): the low-byte form made 0x104 collide with a
+  // nonexistent "0x004" room, which is how the non-Standard HC-escape
+  // suppression wrongly despawned the opening uncle and softlocked the wake-up.
+  if (dungeon_room_index == 0x012) {
     Priest_SpawnMantle(k);
     if (sram_progress_indicator >= 3)
       sram_progress_flags |= 2;
@@ -10890,13 +12080,43 @@ void SpritePrep_UncleAndPriest_bounce(int k) {  // 86bfe5
     Sprite_SetY(k, Sprite_GetY(k) + kUncleAndSage_Y[j]);
     sprite_ignore_projectile[k]++;
     byte_7FFE01 = 0;
-  } else if (BYTE(dungeon_room_index) == 4) {
+  } else if (dungeon_room_index == 0x104) {
+    // Link's house — the opening wake-up uncle (Uncle_AtHouse). NO rando
+    // escape-suppression here: this uncle must spawn in ALL world states that
+    // run the intro (progress=0), or the wake-up softlocks. HC-escape
+    // re-engagement is suppressed at the REAL escape sites — the
+    // Uncle_InPassage write-gate (else branch) and Module05_LoadFile — not by
+    // touching the opening uncle. Vanilla behavior: nudge into position until
+    // the uncle has left the house (progress bit 0x10), then despawn.
     if (!(sram_progress_flags & 0x10))
       sprite_x_lo[k] += 8;
     else
       sprite_state[k] = 0;
   } else {
-    if (!(sram_progress_flags & 1)) {
+    // Sewers uncle that runs Uncle_InPassage. CRITICAL: this NPC is the rando
+    // item location "Link's Uncle" (Uncle_InPassage case 1 dispatches
+    // Rando_DispatchVanillaGrant(LOC_Link_s_Uncle, ...)). It must SPAWN so the
+    // player can collect the placed item — despawning it makes any seed that
+    // places progression there unbeatable. The escape TRAP it used to cause
+    // (which_starting_point=3 + sram_progress_indicator=1) is neutralized at the
+    // write site in Uncle_InPassage (gated by !Rando_SuppressHyruleCastleEscape),
+    // not by despawning — so the item-give survives while the trap does not.
+    // (Earlier this was despawned for non-Standard rando, which removed the
+    // check; the write-gate is the correct, narrower fix.)
+    //
+    // BUT: the vanilla "already collected" proxy is sram_progress_flags bit 1,
+    // which Uncle_InPassage only sets in the !Rando_SuppressHyruleCastleEscape
+    // path. In a non-Standard (Open/Inverted) seed suppression is TRUE, so bit 1
+    // is NEVER set after collecting — the uncle re-spawns on every re-entry and
+    // re-grants its placed item ("bottle twice"). Use the rando location-checked
+    // bit as the "already collected" signal in that case. LOC_Link_s_Uncle is
+    // marked the moment Uncle_InPassage case 1 dispatches the grant, so this
+    // ONLY despawns AFTER the item is collected — it does NOT re-introduce the
+    // old despawn-before-collection bug that made seeds unbeatable. Vanilla
+    // behavior (bit-1 proxy) is unchanged when rando is inactive.
+    bool collected = Rando_IsLocationCheckedOrVanilla(
+        LOC_Link_s_Uncle, (sram_progress_flags & 1) != 0);
+    if (!collected) {
       sprite_D[k] = 3;
       sprite_subtype2[k] = 1;
     } else {
@@ -10912,7 +12132,20 @@ void SpritePrep_OldMan_bounce(int k) {  // 86bff9
     return;
   }
   if (follower_indicator == 0) {
-    if (link_item_mirror == 2)
+    // Vanilla despawns the lost old man once link_item_mirror == 2, because in
+    // vanilla escorting him to his cave IS the only source of the Magic Mirror
+    // — "has mirror" == "already did the escort." Under rando the Mirror is
+    // shuffled: obtaining it elsewhere first would despawn the old man before
+    // LOC_Old_Man is collected, making the escort reward unreachable. Gate the
+    // despawn on whether the location has been checked (the escort payoff in
+    // Sprite_OldMan dispatches Rando_DispatchVanillaGrant(LOC_Old_Man, ...),
+    // which marks it). Vanilla path keeps the proxy so RAM-compare stays
+    // byte-identical. NOTE: the escort is a multi-screen tagalong flow — this
+    // prep-gate keeps the NPC spawnable until collected; the exact escort
+    // hand-off still wants a live playtest to confirm end-to-end.
+    bool already_escorted = Rando_IsLocationCheckedOrVanilla(
+        LOC_Old_Man, link_item_mirror == 2);
+    if (already_escorted)
       sprite_state[k] = 0;
     follower_indicator = 4;
     LoadFollowerGraphics();
@@ -10943,7 +12176,8 @@ void Sprite_TutorialGuardOrBarrier(int k) {  // 86bffe
   if (BYTE(overworld_area_index) == 0x1b && (sprite_y_lo[k] == 0x50 || sprite_y_lo[k] == 0x90)) {
     Sprite_TutorialGuard_ShowMessageOnContact(k, sprite_y_lo[k] == 0x50 ? 0xB2 : 0xB3);
   } else {
-    if (Sprite_TutorialGuard_ShowMessageOnContact(k, byte_7E0B69 + 0xf)) {
+    // The game adds in 8 bits ($85:D59B): the number wraps past 255.
+    if (Sprite_TutorialGuard_ShowMessageOnContact(k, (uint8)(byte_7E0B69 + 0xf))) {
       byte_7E0B69 = byte_7E0B69 != 6 ? byte_7E0B69 + 1 : 0;
     }
   }
@@ -11056,12 +12290,38 @@ void Sprite_3A_MagicBat(int k) {  // 86c044
   Sprite_MoveZ(k);
   switch(sprite_ai_state[k]) {
   case 0:  // wait for summon
-    if (link_magic_consumption >= 2)
+    // Vanilla blocks re-summon once magic is maxed. Vanilla magic never exceeds
+    // half (1), so this is unreachable in vanilla — but under rando the bat's
+    // item is SHUFFLED and reaching quarter magic (2) from another source must
+    // NOT make this location uncollectable (the classic "vanilla precondition
+    // gates a shuffled location" bug). A present row therefore uses checked
+    // state, while an absent row retains the exact vanilla magic-level proxy.
+    // Anti-re-grant guard. Vanilla's grant (case 3) sets the magic-consumption
+    // byte to the HalfMagic value, which is idempotent — re-summoning the bat
+    // (leave the room, re-enter, re-bomb the altar) just re-writes that same
+    // value, no harm, so vanilla never needed a "done" gate (the >= 2 check
+    // above only blocks once QuarterMagic, value 2, is held — NOT after a
+    // HalfMagic grant). Under
+    // rando the case-3 dispatch routes through the NON-idempotent
+    // Rando_OnLocationCheck / Rando_DispatchVanillaGrant, so a re-summon would
+    // re-grant the placed item (re-run Link_ReceiveItem / re-tick the Triforce
+    // counter / re-write prize bits). Block re-summon once LOC_Magic_Bat is
+    // checked. Vanilla path is unchanged (RAM-compare byte-identical).
+    if (Rando_IsLocationCheckedOrVanilla(
+            LOC_Magic_Bat, link_magic_consumption >= 2))
       return;
     if (!Sprite_CheckDamageToLink_same_layer(k))
       return;
     for (int i = 4; i >= 0; i--) {
       if (ancilla_type[i] == 0x1a) {
+        if (enhanced_features1 & kFeatures1_RandomizerActive) {
+          RandoDeferredGrantToken token;
+          RandoGrantResult result = Rando_PrepareGrant(
+              LOC_Magic_Bat, ITEM_HalfMagic, 0xFFu, &token);
+          if (result == kRandoGrantResult_Retryable ||
+              result == kRandoGrantResult_Invalid)
+            return;
+        }
         Sprite_SpawnSuperficialBombBlast(k);
         SpriteSfx_QueueSfx1WithPan(k, 0xd);
         sprite_ai_state[k]++;
@@ -11101,13 +12361,40 @@ void Sprite_3A_MagicBat(int k) {  // 86c044
       Sprite_MagicBat_SpawnLightning(k);
     break;
   }
-  case 3:  // DoublePlayerMagicPower
+  case 3:  // DoublePlayerMagicPower (Magic Bat half-magic grant)
     if (!sprite_delay_aux1[k]) {
-      Sprite_ShowMessageUnconditional(0x111);
+      RandoGrantResult result = kRandoGrantResult_NotActive;
+      bool message_shown = false;
+      if (enhanced_features1 & kFeatures1_RandomizerActive) {
+        RandoDeferredGrantToken token;
+        result = Rando_PrepareGrant(
+            LOC_Magic_Bat, ITEM_HalfMagic, 0xFFu, &token);
+        if (result == kRandoGrantResult_Accepted) {
+          RandoGrantPresentation presentation =
+              Sprite_MagicBatPresentationForPlan(&token.plan);
+          bool identity_magic = presentation == kRandoGrantPresentation_None;
+          if (!identity_magic) {
+            // Preserve the original ordering: the bat's curse text starts,
+            // then the substituted item receipt/confirmation takes ownership
+            // of presentation. Identity HalfMagic has no receipt code and uses
+            // the caller-owned curse presentation only.
+            Sprite_ShowMessageUnconditional(0x111);
+            message_shown = true;
+          }
+          result = Rando_CommitPreparedGrant(&token, presentation, 0, 0);
+        }
+      }
+      if (result == kRandoGrantResult_NotActive) {
+        link_magic_consumption = 1;  // rando-exempt: vanilla path when rando inactive
+        result = kRandoGrantResult_Accepted;
+      }
+      if (!Sprite_GrantResultIsTerminal(result))
+        return;
+      if (!message_shown)
+        Sprite_ShowMessageUnconditional(0x111);
       Palette_Restore_BG_And_HUD();
       flag_update_cgram_in_nmi++;
       sprite_ai_state[k]++;
-      link_magic_consumption = 1;
       Hud_RefreshIcon();
     } else if (sprite_delay_aux1[k] == 0x10) {
       intro_times_pal_flash = 0x10;
@@ -11144,7 +12431,14 @@ void SpritePrep_Zelda_bounce(int k) {  // 86c06c
     }
   } else {
     sprite_subtype2[k] = 0;
-    if (follower_indicator == 1 || (sram_progress_flags & 4))
+    // Zelda-in-cell rescue beat. Vanilla despawns it once Zelda is following
+    // or has been rescued (sram_progress_flags bit 0x04). Post-escape rando
+    // starts with bit 0x04 set, but suppress unconditionally for non-Standard
+    // rando so the cell rescue (which writes which_starting_point=2 and leaves
+    // the escape sprite/CHR mode engaged) can never re-run. See
+    // Rando_SuppressHyruleCastleEscape.
+    if (follower_indicator == 1 || (sram_progress_flags & 4) ||
+        Rando_SuppressHyruleCastleEscape())
       sprite_state[k] = 0;
   }
 }
@@ -11184,6 +12478,7 @@ void Sprite_78_MrsSahasrahla(int k) {  // 86c071
 }
 
 void Sprite_16_Elder_bounce(int k) {  // 86c08a
+  if (Rando_HandleGoalNpc(k)) return;
   Elder_Draw(k);
   if (Sprite_ReturnIfInactive(k))
     return;
@@ -11199,7 +12494,8 @@ void Sprite_16_Elder_bounce(int k) {  // 86c08a
 }
 
 void SpritePrep_HeartPiece(int k) {  // 86c0a8
-  HeartUpgrade_CheckIfAlreadyObtained(k);
+  HeartUpgrade_CheckIfAlreadyObtainedAtLocation(
+      k, StandingPoH_Location(k));
 }
 
 void Sprite_2D_TelepathicTile(int k) {  // 86c0b2
@@ -11325,11 +12621,12 @@ void Sprite_1D_FluteQuest(int k) {  // 86c2e5
   Sprite_PrepOamCoord(k, &info);
   if (Sprite_ReturnIfInactive(k))
     return;
+  uint8 flute_level = Rando_FluteShovelEffectiveLevel();  // owns-flute level (rando: ignores selection)
   if (BYTE(overworld_screen_index) == 0x18) {
-    if (link_item_flute == 3)
+    if (flute_level == 3)
       sprite_state[k] = 0;
   } else {
-    if (link_item_flute & 2)
+    if (flute_level & 2)
       sprite_state[k] = 0;
   }
 }
@@ -11375,6 +12672,22 @@ void Sprite_WishPond2(int k) {  // 86c41d
     Sprite_WishPond3(k);
   else
     Sprite_HappinessPond(k);
+}
+
+// The fairy refunds an upgrade she cannot give: 100 rupees. A mod whose code
+// branches at $06:C6CF (Max Consumables Fix) also gives back the rupees thrown
+// into the pond and empties it; its sum starts from the A the message call
+// left (Link's state, 0 when it was 2) and the carry of that call's CMP #$02.
+static void FairyPond_Refund(void) {
+  uint8 state = link_player_handler_state;
+  Sprite_ShowMessageUnconditional(0x98);
+  if (Mods_RomByte(0x86c6cf, 0x4c) != 0x8b) {
+    link_rupees_goal += 100;
+    return;
+  }
+  uint8 lo = link_rupees_in_pond + 100 + (state >= 2);
+  link_rupees_goal += (state == 2 ? 0 : state) << 8 | lo;
+  link_rupees_in_pond = 0;
 }
 
 void Sprite_HappinessPond(int k) {  // 86c44c
@@ -11477,15 +12790,55 @@ show_later_msg:
       sprite_ai_state[k] = 12;
     break;
   case 8: {
-    static const uint8 kMaxBombsForLevelHex[8] = {0x10, 0x15, 0x20, 0x25, 0x30, 0x35, 0x40, 0x50};
     int i = link_bomb_upgrades + 1;
-    if (i != 8) {
-      link_bomb_upgrades = i;
-      dialogue_number[0] = link_bomb_filler = kMaxBombsForLevelHex[i];
-      Sprite_ShowMessageUnconditional(0x96);
+    if (link_bomb_upgrades != Mods_RomByte(0x86c6a8, 7)) {
+      RandoDeferredGrantToken token;
+      RandoGrantResult result = kRandoGrantResult_NotActive;
+      if (enhanced_features1 & kFeatures1_RandomizerActive) {
+        result = Rando_PrepareGrant(
+            LOC_Capacity_Upgrade_Bomb, ITEM_BombUpgrade5, 0xFFu, &token);
+      }
+      bool identity = result == kRandoGrantResult_NotActive ||
+          result == kRandoGrantResult_AlreadyChecked ||
+          (result == kRandoGrantResult_Accepted &&
+           token.plan.item_id == ITEM_BombUpgrade5);
+      if (identity) {
+        // Caller-owned repeatable +5. Bookkeeping occurs only after the
+        // capacity write and never applies the generated direct opcode twice.
+        uint8 old_upgrade = link_bomb_upgrades;
+        uint8 old_filler = link_bomb_filler;
+        // rando-exempt: repeatable capacity identity; specialized commit below
+        link_bomb_upgrades = i;
+        dialogue_number[0] = link_bomb_filler = Hud_Capacity(0x86c6b3, 0xdb40, i);
+        // A checked location needs no commit — later donations are the
+        // vanilla repeatable +5 even when the slot held a non-identity item
+        // (the identity commit would reject that placement and roll back the
+        // upgrade forever).
+        if (result == kRandoGrantResult_Accepted) {
+          result = Rando_CommitRepeatableCapacityIdentity(
+              LOC_Capacity_Upgrade_Bomb, ITEM_BombUpgrade5);
+          if (!Sprite_GrantResultIsTerminal(result)) {
+            // rando-exempt: rollback of the caller-owned repeatable identity
+            link_bomb_upgrades = old_upgrade;
+            link_bomb_filler = old_filler;
+          }
+        }
+        if (result == kRandoGrantResult_NotActive ||
+            Sprite_GrantResultIsTerminal(result))
+          Sprite_ShowMessageUnconditional(0x96);
+      } else if (result == kRandoGrantResult_Accepted) {
+        result = Rando_CommitPreparedGrant(
+            &token, kRandoGrantPresentation_Animated, 0, 0);
+      }
+      if (result != kRandoGrantResult_NotActive &&
+          !Sprite_GrantResultIsTerminal(result)) {
+        // The 100-rupee threshold was paid before the fairy asks which upgrade
+        // to grant. Roll it back and close the cutscene on a retryable/invalid
+        // replacement so the player can make room and donate again.
+        link_rupees_goal += 100;
+      }
     } else {
-      link_rupees_goal += 100;
-      Sprite_ShowMessageUnconditional(0x98);
+      FairyPond_Refund();
     }
     sprite_ai_state[k] = 9;
     break;
@@ -11514,15 +12867,46 @@ show_later_msg:
     sprite_delay_main[k] = 255;
     break;
   case 12: {
-    static const uint8 kMaxArrowsForLevelHex[8] = {0x30, 0x35, 0x40, 0x45, 0x50, 0x55, 0x60, 0x70};
     int i = link_arrow_upgrades + 1;
-    if (i != 8) {
-      link_arrow_upgrades = i;
-      dialogue_number[0] = link_arrow_filler = kMaxArrowsForLevelHex[i];
-      Sprite_ShowMessageUnconditional(0x97);
+    if (link_arrow_upgrades != Mods_RomByte(0x86c72b, 7)) {
+      RandoDeferredGrantToken token;
+      RandoGrantResult result = kRandoGrantResult_NotActive;
+      if (enhanced_features1 & kFeatures1_RandomizerActive) {
+        result = Rando_PrepareGrant(
+            LOC_Capacity_Upgrade_Arrow, ITEM_ArrowUpgrade5, 0xFFu, &token);
+      }
+      bool identity = result == kRandoGrantResult_NotActive ||
+          result == kRandoGrantResult_AlreadyChecked ||
+          (result == kRandoGrantResult_Accepted &&
+           token.plan.item_id == ITEM_ArrowUpgrade5);
+      if (identity) {
+        uint8 old_upgrade = link_arrow_upgrades;
+        uint8 old_filler = link_arrow_filler;
+        // rando-exempt: repeatable capacity identity; specialized commit below
+        link_arrow_upgrades = i;
+        dialogue_number[0] = link_arrow_filler = Hud_Capacity(0x86c736, 0xdb50, i);
+        // A checked location needs no commit — see the bomb-capacity note.
+        if (result == kRandoGrantResult_Accepted) {
+          result = Rando_CommitRepeatableCapacityIdentity(
+              LOC_Capacity_Upgrade_Arrow, ITEM_ArrowUpgrade5);
+          if (!Sprite_GrantResultIsTerminal(result)) {
+            // rando-exempt: rollback of the caller-owned repeatable identity
+            link_arrow_upgrades = old_upgrade;
+            link_arrow_filler = old_filler;
+          }
+        }
+        if (result == kRandoGrantResult_NotActive ||
+            Sprite_GrantResultIsTerminal(result))
+          Sprite_ShowMessageUnconditional(0x97);
+      } else if (result == kRandoGrantResult_Accepted) {
+        result = Rando_CommitPreparedGrant(
+            &token, kRandoGrantPresentation_Animated, 0, 0);
+      }
+      if (result != kRandoGrantResult_NotActive &&
+          !Sprite_GrantResultIsTerminal(result))
+        link_rupees_goal += 100;
     } else {
-      link_rupees_goal += 100;
-      Sprite_ShowMessageUnconditional(0x98);
+      FairyPond_Refund();
     }
     sprite_ai_state[k] = 9;
     break;
@@ -11832,6 +13216,9 @@ void Sprite_E3_Fairy(int k) {  // 86cf94
     if (choice_in_multiselect_box == 0) {
       int j = Sprite_Find_EmptyBottle();
       if (j >= 0) {
+        // rando-exempt: state-shuffle — GoodBee capture into bottle. The
+        // bottle was the grant; this stores the captured-bee species code
+        // (6 = GoodBee) into an existing empty bottle slot.
         link_bottle_info[j] = 6;
         Hud_RefreshIcon();
         sprite_state[k] = 0;
@@ -12668,7 +14055,7 @@ void Sprite_FluteDad(int k) {  // 8dc343
   if (sprite_ai_state[k]) {
     Sprite_ShowSolicitedMessage(k, 0xa3);
     sprite_graphics[k] = 2;
-  } else if (link_item_flute < 2) {
+  } else if (Rando_FluteShovelEffectiveLevel() < 2) {  // doesn't own a flute
     Sprite_ShowSolicitedMessage(k, 0xa1);
   } else if (!(Sprite_ShowSolicitedMessage(k, 0xa4) & 0x100) &&
              hud_cur_item == kHudItem_Flute && (joypad1H_last&0x40) && Sprite_CheckDamageToLink_same_layer(k)) {
@@ -12836,7 +14223,10 @@ void FortuneTeller_PerformPseudoScience(int k) {  // 8dc849
     goto done;
   if (!link_item_book_of_mudora) ADD_MSG(2);
   if (!(link_which_pendants & 2)) ADD_MSG(1);
-  if (link_item_mushroom < 2) ADD_MSG(3);
+  // Rando decouples Powder ownership from the shared byte (the item-menu swap
+  // can show the Mushroom icon while Powder is owned), so consult ownership —
+  // else a swapped player is wrongly told to seek Powder. Vanilla: byte != 2.
+  if (!Rando_PowderOwned()) ADD_MSG(3);
   if (!link_item_flippers) ADD_MSG(4);
   if (!link_item_moon_pearl) ADD_MSG(5);
   if (sram_progress_indicator < 3) ADD_MSG(6);
@@ -13467,7 +14857,18 @@ void Waterfall(int k) {  // 9af5b8
   if (Sprite_ReturnIfInactive(k))
     return;
   if (Sprite_CheckDamageToLink_same_layer(k)) {
-    if (BYTE(overworld_screen_index) == 0x43)
+    // #82 Inverted: GanonTowerInvertedCheck. Vanilla treats the waterfall on
+    // overworld screen 0x43 as the Ganon's-Tower crystal-barrier trigger
+    // (spawns the GT break-seal cutscene). In Inverted the GT entrance is
+    // relocated, so z3randomizer inverted.asm GanonTowerInvertedCheck forces
+    // this 0x43 compare to fail (returns a non-zero so the BEQ to the GT path
+    // isn't taken), making the screen-0x43 waterfall behave as an ordinary
+    // splash. Mirror that by suppressing the GT branch under the active
+    // Inverted rando world-state. Vanilla / Open / Standard / Retro unchanged.
+    bool inverted_rando =
+        (enhanced_features1 & kFeatures1_RandomizerActive) &&
+        Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */;
+    if (BYTE(overworld_screen_index) == 0x43 && !inverted_rando)
       AncillaAdd_GTCutscene();
     else
       AncillaAdd_WaterfallSplash();
@@ -13515,6 +14916,7 @@ update_pos:
     break;
   }
   case 1:
+    sprite_delay_aux1[k] = CutsceneClampTimer8(sprite_delay_aux1[k], 24);
     if (!sprite_delay_aux1[k]) {
       sprite_ai_state[k]++;
       SpriteSfx_QueueSfx3WithPan(k, 0x26);
@@ -13534,6 +14936,7 @@ update_pos:
     }
     break;
   case 2:
+    sprite_delay_aux1[k] = CutsceneClampTimer8(sprite_delay_aux1[k], 12);
     if (!sprite_delay_aux1[k]) {
       sprite_y_vel[k] = 0;
       sprite_delay_aux1[k] = 96;
@@ -13545,6 +14948,7 @@ update_pos:
     }
     break;
   case 3:  // Finishing Up
+    sprite_delay_aux1[k] = CutsceneClampTimer8(sprite_delay_aux1[k], 24);
     if (!sprite_delay_aux1[k]) {
       sprite_state[k] = 0;
       overworld_map_state++;
@@ -17772,9 +19176,15 @@ void CutsceneAgahnim_Agahnim(int k) {  // 9dd23f
     break;
   case 6:  // linger then terminate
     if (!sprite_delay_aux4[k]) {
+      // Release Link BEFORE any retry: a pending refusal must not block its own
+      // recovery (the only refusal that can still reach here is transient -- a
+      // potion needing an empty bottle -- and the cure is the menu).
       flag_is_link_immobilized = 0;
+      // Honor the return. The enemy check is granted inside; consuming the
+      // sprite first dropped it with nothing left to retry.
+      if (!Sprite_ManuallySetDeathFlagUW(k))
+        break;
       sprite_state[k] = 0;
-      Sprite_ManuallySetDeathFlagUW(k);
       dung_savegame_state_bits |= 0x4000;
     }
     break;
@@ -18187,14 +19597,64 @@ void Sprite_Catfish_QuakeMedallion(int k) {  // 9ddf54
   if (!sprite_z[k]) {
     SpriteDraw_WaterRipple_WithOamAdjust(k);
     if (!submodule_index && Sprite_CheckDamageToLink_same_layer(k)) {
+      // sprite type 0xc0 is shared by TWO rewards: the Great Catfish's
+      // regurgitated Quake medallion (sprite_A = 0x11, sprite_flags3 = 0x58)
+      // and King Zora's regurgitated Flippers (sprite_A = 30, sprite_flags3 =
+      // 0x54). sprite_flags3 is written once at spawn and is NOT touched again
+      // anywhere on the 0xc0 reward sprite's path (neither this handler nor its
+      // draw helpers mutate it), so it is the stable discriminator between the
+      // two sources. Without it the shared pickup would always dispatch
+      // LOC_Catfish, consuming the Catfish's check at King Zora and stranding
+      // whatever was placed at the Catfish.
+      uint8 lttp_code = sprite_A[k];  // Catfish: 0x11 (Quake); King Zora: 30 (Flippers)
+      bool is_zora_reward = sprite_flags3[k] == 0x54;
+      RandoGrantResult result = kRandoGrantResult_NotActive;
+      if (enhanced_features1 & kFeatures1_RandomizerActive) {
+        uint16 loc_id; uint16 vanilla_item;
+        if (is_zora_reward) {  // King Zora's regurgitated reward
+          loc_id = LOC_King_Zora;
+          vanilla_item = ITEM_Flippers;
+        } else {                         // the real Great Catfish (flags3 0x58)
+          loc_id = LOC_Catfish;
+          vanilla_item = ITEM_Quake;
+        }
+        result = Rando_GrantLocation(
+            loc_id, vanilla_item, lttp_code,
+            kRandoGrantPresentation_Animated, 0, 0);
+      }
+      if (result == kRandoGrantResult_NotActive) {
+        item_receipt_method = 0;
+        Link_ReceiveItem(lttp_code, 0);
+        result = kRandoGrantResult_Accepted;
+      } else if (!Sprite_GrantResultIsTerminal(result)) {
+        return;
+      }
+      if (is_zora_reward &&
+          Sprite_KingZoraShouldChargeAtPickup(sprite_B[k], result))
+        Sprite_ApplyPostGrantPrice(500);
       sprite_state[k] = 0;
-      item_receipt_method = 0;
-      Link_ReceiveItem(sprite_A[k], 0);
     }
   }
   if (sprite_delay_aux3[k])
     Oam_AllocateFromRegionC(8);
-  SpriteDraw_SingleLarge(k);
+  // Draw the PLACED item's icon instead of the vanilla Flippers/Quake tile so
+  // the floating reward looks randomized from spawn — not vanilla-until-grabbed
+  // — exactly like a free-standing field item. Same flags3 discriminator as the
+  // grant below; gated on the field-item-sprites toggle (Rando_TryDrawField-
+  // ItemSprite → Rando_GetFieldItemIcon, which also handles big/small OAM + the
+  // custom-art palette). Falls back to the vanilla SpriteDraw_SingleLarge when
+  // rando is inactive, the placement equals the vanilla item, or the placed item
+  // has no receive gfx. The placed gfx loads on this first draw frame (before
+  // the frame is displayed), so there is no one-frame vanilla flash.
+  bool rando_drew_item = false;
+  if (enhanced_features1 & kFeatures1_RandomizerActive) {
+    bool is_zora = (sprite_flags3[k] == 0x54);
+    rando_drew_item = Rando_TryDrawFieldItemSprite(
+        k, is_zora ? LOC_King_Zora : LOC_Catfish,
+        is_zora ? (uint16)ITEM_Flippers : (uint16)ITEM_Quake);
+  }
+  if (!rando_drew_item)
+    SpriteDraw_SingleLarge(k);
   if (Sprite_ReturnIfInactive(k))
     return;
   Sprite_MoveXYZ(k);
@@ -18270,6 +19730,22 @@ void Catfish_BigFish(int k) {  // 9ddfd1
   case 3: { // ConversateThenSubmerge
     int j = sprite_delay_main[k];
     static const uint8 kGreatCatfish_Conversate_Gfx[20] = { 0, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6 };
+    // Vanilla keys the catfish on link_item_quake_medallion because HE is the
+    // only source of Quake — "has Quake" == "already received his gift," after
+    // which he shows the taunt text and lobs a bomb/fireball instead of
+    // regurgitating. Under rando Quake is shuffled, breaking the proxy two ways:
+    //   (A) obtaining Quake elsewhere first makes !already false, so the catfish
+    //       never regurgitates and LOC_Catfish becomes unreachable (a seed with
+    //       progression placed there would be unbeatable);
+    //   (B) a non-Quake placed item never raises link_item_quake_medallion, so
+    //       every revisit regurgitates again — and Rando_OnLocationCheck is NOT
+    //       idempotent, so each pickup re-grants (infinite items).
+    // Gate on whether LOC_Catfish has actually been checked (the regurgitated
+    // medallion's pickup in Sprite_Catfish_QuakeMedallion dispatches
+    // Rando_DispatchVanillaGrant(LOC_Catfish, ...), which marks it). Vanilla
+    // path keeps the original proxy so RAM-compare stays byte-identical.
+    bool already_given = Rando_IsLocationCheckedOrVanilla(
+        LOC_Catfish, (bool)link_item_quake_medallion);
     if (j == 0) {
       sprite_state[k] = 0;
     } else {
@@ -18279,11 +19755,11 @@ void Catfish_BigFish(int k) {  // 9ddfd1
         Catfish_SpawnPlop(k);
       } else if (j == 96) {
         flag_is_link_immobilized = 0;
-        dialogue_message_index = link_item_quake_medallion ? 0x12b : 0x12a;
+        dialogue_message_index = already_given ? 0x12b : 0x12a;
         Sprite_ShowMessageMinimal();
         return;
       } else if (j == 80) {
-        if (link_item_quake_medallion) {
+        if (already_given) {
           if (GetRandomNumber() & 1)
             Sprite_SpawnBomb(k);
           else
@@ -18337,10 +19813,27 @@ void Sprite_Zora_RegurgitateFlippers(int k) {  // 9de1aa
   Sprite_SetSpawnedCoordinates(j, &info);
   sprite_z_vel[j] = 32;
   sprite_y_vel[j] = 16;
+  // sprite_A[j] becomes the LttP receive code when Link picks up the
+  // spawned medallion. Vanilla: 30 (0x1e) = Flippers (kMemoryLocationToGiveItemTo
+  // index 30 = 0xf356 = link_item_flippers). King Zora and the Great Catfish
+  // BOTH spawn sprite type 0xc0; the shared pickup handler
+  // (Sprite_Catfish_QuakeMedallion) routes on sprite_A: 0 -> BigFish boss,
+  // 0x80 -> splash, anything else -> the QuakeMedallion pickup. 30 keeps King
+  // Zora on the pickup path. Under rando the placement dispatch is DEFERRED to
+  // pickup (Sprite_Catfish_QuakeMedallion) — disambiguated there by the stable
+  // sprite_flags3 == 0x54 marker set below — so the reward is only granted when
+  // Link actually collects it (closes the spawn-time missable window), and so a
+  // direct-grant/skip result can never reach BigFish via sprite_A == 0.
   sprite_A[j] = 30;
+  // An active placement pays only after its pickup transaction accepts. The
+  // reward sprite owns this marker, so abandoning a transient reward, a failed
+  // spawn, or a Retryable grant cannot consume the 500-rupee price.
+  sprite_B[j] = sprite_E[k] == kKingZoraPurchase_DeferPayment
+      ? kKingZoraReward_PaymentPending
+      : 0;
   SpriteSfx_QueueSfx2WithPan(j, 0x20);
   sprite_flags2[j] = 0x83;
-  sprite_flags3[j] = 0x54;
+  sprite_flags3[j] = 0x54;  // discriminator: King Zora reward vs Catfish (0x58)
   sprite_oam_flags[j] = 0x54 & 15;
   sprite_delay_aux3[j] = 0x30;
   DecodeAnimatedSpriteTile_variable(0x11);
@@ -18500,7 +19993,7 @@ void Sprite_BD_Vitreous(int k) {  // 9de4c8
       static const uint8 kVitreous_AfromG[10] = {0x20, 0x20, 0x20, 0x40, 0x60, 0x80, 0xa0, 0xc0, 0xe0, 0};
       sprite_delay_aux4[k] = 16;
       sprite_ai_state[k] = 0;
-      sprite_A[k] = kVitreous_AfromG[sprite_G[k]];
+      sprite_A[k] = MODS_U8(kVitreous_AfromG, 0x9de53f)[sprite_G[k]];
     } else {
       Vitreous_Animate(k, sprite_delay_main[k]);
     }
@@ -18766,7 +20259,17 @@ void Sprite_EvilBarrier(int k) {  // 9df06b
   sprite_graphics[k] = frame_counter >> 1 & 3;
   if (Sprite_ReturnIfInactive(k))
     return;
-  if (Sprite_CheckDamageFromLink(k) && link_sword_type < 2) {
+  // Swordless: the Agahnim-Tower-entrance Evil Barrier normally cancels any hit
+  // from a non-master-sword (link_sword_type < 2) and electrocutes Link, so a
+  // swordless player's hammer never breaks it. The fork's HCT-entry logic grants
+  // entry via `swordless && Hammer` (HyruleCastleTower.php can_enter), so the
+  // runtime must honor it: mirror ALTTPR's GetSwordLevelForEvilBarrier (asm hook
+  // at $9DF086 / AllowHammerEvilBarrier...) by treating the sword as master-level
+  // under swordless — the hammer's zap damage then sticks and breaks the barrier
+  // (approach from the side to avoid the passive proximity zap below). Gated →
+  // vanilla / non-swordless behavior is byte-identical.
+  uint8 evil_barrier_sword = Rando_IsSwordlessActive() ? 0xFF : link_sword_type;
+  if (Sprite_CheckDamageFromLink(k) && evil_barrier_sword < Mods_RomByte(0x9df08b, 2)) {
     sprite_hit_timer[k] = 0;
     Sprite_AttemptDamageToLinkPlusRecoil(k);
     if (!countdown_for_blink)
@@ -19141,8 +20644,8 @@ void RupeePull_SpawnPrize(int k) {  // 9dfbd7
       if (j < 0)
         break;
       Sprite_SetSpawnedCoordinates(j, &info);
-      sprite_x_vel[j] = kSpawnRupees_Xvel[tmp_counter];
-      sprite_y_vel[j] = kSpawnRupees_Yvel[tmp_counter];
+      sprite_x_vel[j] = MODS_I8(kSpawnRupees_Xvel, 0x9dfbcc)[tmp_counter];
+      sprite_y_vel[j] = MODS_I8(kSpawnRupees_Yvel, 0x9dfbd0)[tmp_counter];
       sprite_stunned[j] = 255;
       sprite_delay_aux4[j] = 32;
       sprite_delay_aux3[j] = 32;
@@ -19891,6 +21394,9 @@ void Sprite_AA_Pikit(int k) {  // 9e8bbf
       } else {
         sprite_subtype[k] = link_shield_type;
         if (link_shield_type != 0 && link_shield_type != 3)
+          // rando-exempt: consumption — like-like steals Link's shield by
+          // clearing link_shield_type to 0 (sprite_subtype captures the old
+          // tier so it can be dropped/re-collected). (audit.md §0.2.4)
           link_shield_type = 0;
         else
           sprite_G[k] = 0;
@@ -20592,8 +22098,11 @@ void Sprite_A1_Freezor(int k) {  // 9e981d
   case 3: {  // melting
     static const uint8 kFreezor_Melting_Gfx[4] = { 6, 5, 4, 7 };
     if (!sprite_delay_main[k]) {
-      Sprite_ManuallySetDeathFlagUW(k);
-      sprite_state[k] = 0;
+      // Honor the return: consuming the sprite on a refused grant dropped the
+      // enemy check with nothing left to retry. Lingering one more frame is
+      // harmless -- the melt graphic is driven by sprite_delay_main, not state.
+      if (Sprite_ManuallySetDeathFlagUW(k))
+        sprite_state[k] = 0;
     }
     sprite_graphics[k] = kFreezor_Melting_Gfx[sprite_delay_main[k] >> 3];
     break;
@@ -22034,7 +23543,7 @@ void Sprite_8C_Arrghus(int k) {  // 9eb433
     if (!sprite_delay_main[k]) {
       sprite_ai_state[k] = 0;
       if (!Sprite_CheckIfScreenIsClear()) {
-        if (++overlord_x_lo[3] == 4) {
+        if (++overlord_x_lo[3] == Mods_RomByte(0x9eb5dd, 4)) {
           overlord_x_lo[3] = 0;
           sprite_ai_state[k] = 2;
           sprite_delay_main[k] = 176;
@@ -22074,7 +23583,7 @@ void Sprite_8C_Arrghus(int k) {  // 9eb433
     sprite_z_vel[k] = 120;
     Sprite_MoveZ(k);
     if (sprite_z[k] >= 224) {
-      sprite_delay_main[k] = 64;
+      sprite_delay_main[k] = Mods_RomByte(0x9eb4da, 64);
       sprite_ai_state[k] = 4;
       sprite_z_vel[k] = 0;
       sprite_x_lo[k] = link_x_coord;
@@ -23279,6 +24788,8 @@ void CrystalMaiden_RunCutscene(int k) {  // 9ece39
     sprite_ai_state[k]++;
     break;
   case 2:  // generate sparkles
+    if (CutsceneFastForwardEnabled())
+      poly_config1 = 0;
     if (poly_config1 < 6) {
       poly_config1 = 0;
       sprite_ai_state[k]++;
@@ -23292,7 +24803,10 @@ void CrystalMaiden_RunCutscene(int k) {  // 9ece39
     sprite_ai_state[k]++;
   case 4:
     if (!(sprite_E[k] & 1)) {
-      PaletteFilter_SP5F();
+      do {
+        PaletteFilter_SP5F();
+      } while (CutsceneFastForwardEnabled() &&
+               BYTE(palette_filter_countdown) != 0);
       if (!BYTE(palette_filter_countdown)) {
         sprite_ai_state[k]++;
         flag_is_link_immobilized = 1;
@@ -23414,7 +24928,8 @@ void Firebar_Main(int k) {  // 9ed049
   for (int i = 3; i >= 0; i--, oam++) {
     SetOamPlain(oam, info.x + sinval * (i + 1) / 4, info.y + cosval * (i + 1) / 4, 0x28, flags, 2);
   }
-  Sprite_CorrectOamEntries(k, 3, 0xff);
+  // Its touch on Link, below, reads these tiles back.
+  Sprite_CorrectOamEntriesOnScreen(k, 3, 0xff);
   if (!((k ^ frame_counter) & 3 | submodule_index | flag_unk1)) {
     OamEnt *oam = GetOamCurPtr();
     for (int i = 0; i < 4; i++, oam++) {
@@ -24265,7 +25780,7 @@ void Sprite_BombShop_Bomb(int k) {  // 9ee190
   if (!ShopItem_CheckForAPress(k))
     return;
 
-  if (link_item_bombs != kMaxBombsForLevel[link_bomb_upgrades]) {
+  if (link_item_bombs != Hud_Capacity(0x9ee1a6, 0xdb48, link_bomb_upgrades)) {
     if (!ShopItem_HandleCost(100)) {
       Sprite_ShowMessageUnconditional(0x17c);
       ShopItem_PlayBeep(k);
@@ -24628,6 +26143,19 @@ void Sprite_B7_BlindMaiden(int k) {  // 9ee8b6
 }
 
 void OldMan_RevertToSprite(int k) {  // 9ee938
+  if (enhanced_features1 & kFeatures1_RandomizerActive) {
+    RandoDeferredGrantToken token;
+    RandoGrantResult result = Rando_PrepareGrant(
+        LOC_Old_Man, ITEM_MagicMirror, 0x1a, &token);
+    if (result == kRandoGrantResult_Retryable ||
+        result == kRandoGrantResult_Invalid) {
+      // Follower_HandleTrigger set this event bit immediately before calling
+      // us. Re-arm it so the escort reward can be retried after bottle space is
+      // made; do not remove the follower or spawn the completion sprite.
+      tagalong_event_flags &= ~4;
+      return;
+    }
+  }
   SpriteSpawnInfo info;
   int j = Sprite_SpawnDynamically(k, 0xAD, &info);
   sprite_D[j] = sprite_head_dir[j] = tagalong_layerbits[k] & 3;
@@ -24677,9 +26205,13 @@ void Sprite_AD_OldMan(int k) {  // 9ee992
     Sprite_MoveXY(k);
     switch(sprite_ai_state[k]) {
     case 0:  // grant mirror
+      {
+        RandoGrantResult result = Sprite_GrantAnimatedOrVanilla(
+            LOC_Old_Man, ITEM_MagicMirror, 0x1a, 0, 0);
+        if (!Sprite_GrantResultIsTerminal(result))
+          return;
+      }
       sprite_ai_state[k]++;
-      item_receipt_method = 0;
-      Link_ReceiveItem(0x1a, 0);
       which_starting_point = 1;
       OldMan_EnableCutscene();
       sprite_delay_main[k] = 48;
@@ -24987,6 +26519,39 @@ void Sprite_BB_Shopkeeper(int k) {  // 9eeeef
   case 11: ShopItem_Arrows(k); break;
   case 12: ShopItem_Bombs(k); break;
   case 13: ShopItem_Bee(k); break;
+  case 14: case 15: ShopItem_TakeAny(k); break;  // Phase B Slice 3b — take-any (14=heart,15=potion icon)
+  case 16: ShopItem_GenericKey(k); break;  // Retro genericKeys — buyable generic small key
+  }
+}
+
+// Phase B Slice 3b — a take-any cave's offered item. Presented free; taking
+// EITHER offered item locks the whole cave (Rando_TakeAnyDispatch marks every
+// active slot checked), so the sibling item despawns on its next frame via the
+// live-slot check below. The host room arrived through a take-any redirect, so
+// g_rando_takeany_door_id holds the cave's overworld door (disambiguation key).
+void ShopItem_TakeAny(int k) {
+  uint8 room = BYTE(dungeon_room_index);
+  uint8 pos = (uint8)(sprite_subtype[k] - 1);  // ShopKeeper_SpawnShopItem stored pos+1
+  if (Rando_TakeAnyLiveSlot(room, g_rando_takeany_door_id, pos) == 0xFFFFu) {
+    sprite_state[k] = 0;  // inactive / cave already locked — vanish
+    return;
+  }
+  SpriteDraw_ShopItem(k);
+  if (Sprite_ReturnIfInactive(k))
+    return;
+  Sprite_BehaveAsBarrier(k);
+  if (ShopItem_CheckForAPress(k)) {
+    // vanilla_lttp fallback is unreachable here (slot is guaranteed in the
+    // placement table by the live-slot check); pass a benign refill code.
+    RandoGrantResult result = Rando_TakeAnyGrant(
+        room, g_rando_takeany_door_id, pos, 0x42,
+        kRandoGrantPresentation_Animated, 0, 0);
+    if (!Sprite_GrantResultIsTerminal(result)) {
+      ShopItem_PlayBeep(k);
+      return;
+    }
+    sprite_state[k] = 0;
+    ShopKeeper_RapidTerminateReceiveItem();
   }
 }
 
@@ -25064,15 +26629,50 @@ void NiceThiefWithGift(int k) {  // 9ef038
     if (Sprite_ShowSolicitedMessage(k, 0x176) & 0x100)
       sprite_ai_state[k] = 1;
     break;
-  case 1:
-    if (!(dung_savegame_state_bits & 0x4000)) {
+  case 1: {
+    // The generous guys in Hype Cave and Mini Moldorm Cave share this sprite
+    // handler. In a live rando slot, their canonical checked bits are the
+    // source of truth: this prevents a stale vanilla room bit from hiding an
+    // uncollected placement and prevents a missing room bit from re-granting a
+    // placement already persisted in the sidecar. Other rooms and vanilla play
+    // retain the original room-bit behavior.
+    uint16 gift_loc = 0xFFFFu;
+    if ((enhanced_features1 & kFeatures1_RandomizerActive) && Rando_IsActive())
+      gift_loc = Rando_GiftThiefLocationForRoom(dungeon_room_index);
+    bool already_claimed = (gift_loc != 0xFFFFu)
+        ? Rando_IsLocationCheckedOrVanilla(
+              gift_loc, (dung_savegame_state_bits & 0x4000) != 0)
+        : (dung_savegame_state_bits & 0x4000) != 0;
+    if (!already_claimed) {
+      // The gift thief (subtype2==2) grants a hard-coded 300-rupee LttP code
+      // (0x46) in vanilla. ALTTPR maps Hype Cave (0x11E) and Mini Moldorm Cave
+      // (0x123) to distinct shuffled NPC locations. Other subtype2==2 thief
+      // rooms keep vanilla behavior; Rando_GiftThiefLocationForRoom matches
+      // full 16-bit room ids so low-byte collisions cannot misroute a check.
+      RandoGrantResult result = kRandoGrantResult_NotActive;
+      if (gift_loc != 0xFFFFu) {
+        // Pass 0xFFFF as the registry id (chest/shop convention): the slot is
+        // always overridden when present in the table and falls back to the
+        // vanilla 300-rupee code (0x46) when absent. Passing either location's
+        // registry fallback instead would mis-grant 300 rupees when a seed
+        // placed that same registry item here.
+        result = Rando_GrantLocation(
+            gift_loc, 0xFFFFu, 0x46,
+            kRandoGrantPresentation_Animated, 0, 0);
+      }
+      if (result == kRandoGrantResult_NotActive)
+        ShopItem_HandleReceipt(k, 0x46);
+      else if (!Sprite_GrantResultIsTerminal(result)) {
+        sprite_ai_state[k] = 0;
+        return;
+      }
       dung_savegame_state_bits |= 0x4000;
       sprite_ai_state[k] = 2;
-      ShopItem_HandleReceipt(k, 0x46);
     } else {
       sprite_ai_state[k] = 0;
     }
     break;
+  }
   case 2:
     sprite_ai_state[k] = 0;
     break;
@@ -25142,7 +26742,79 @@ void NiceThiefUnderRock(int k) {  // 9ef14f
   Sprite_ShowSolicitedMessage(k, sprite_subtype2[k] == 5 ? 0x177 : 0x178);
 }
 
+// add-rando-shopsanity — shared front-end for the seven vanilla shop-slot
+// handlers. Returns true when the slot is an ACTIVE UNCHECKED check and this
+// call fully handled the sprite's frame: the check sells the PLACED item at
+// the derived price and bypasses every vanilla refusal gate except
+// affordability — the vanilla gates ("you already own a shield", "need an
+// empty bottle", "health/ammo full") belong to the vanilla ITEM, and keeping
+// them on a check would make it missable (the location-guard bug class).
+// Checked slots / axis-off return false -> the vanilla body runs (vanilla
+// restock at the vanilla price; Rando_ShopGrant's already-checked branch keeps
+// a re-buy from re-granting the placed item). Rando_ShopSlotCheckInfo
+// re-verifies "unchecked" every frame, so a bought slot can't sell twice.
+// The purchase transaction charges rupees, despawns the slot, and marks the
+// location checked BEFORE Link_ReceiveItem's receipt ancilla exists — and the
+// inventory grant for non-direct-grant classes lives INSIDE that ancilla
+// (the legacy receipt path cannot grant when Ancilla_AllocInit finds no free
+// slot and nothing evictable — its rotation only reuses sparkle /
+// wall-arrow slots, never bombs or the boomerang). With all five slots held
+// by non-evictable ancillae the paid, consumed check would grant NOTHING and
+// leave Link holding up air: a permanent seed-killer (external-review P1).
+// Preflight the shared free-or-evictable receipt-capacity contract and refuse
+// the sale for those frames; it self-resolves when the bombs pop.
+
+static bool ShopItem_ShopsanityCheckSlot(int k, uint8 vanilla_code) {
+  uint16 price;
+  if (!Rando_ShopSlotCheckInfo(dungeon_room_index, g_ram[kRam_RandoOverworldDoor],
+                               sprite_subtype[k], NULL, NULL, &price))
+    return false;
+  SpriteDraw_ShopItem(k);  // routes to the check-slot draw
+  if (Sprite_ReturnIfInactive(k))
+    return true;
+  Sprite_BehaveAsBarrier(k);
+  if (ShopItem_CheckForAPress(k)) {
+    if (price > link_rupees_goal) {
+      Sprite_ShowMessageUnconditional(0x17c);
+      ShopItem_PlayBeep(k);
+    } else {
+      // Resolve "this would grant nothing" BEFORE the grant moves the
+      // inventory it reasons about. A slot holding a 5th bottle or a maxed
+      // progressive resolves AcceptedNoOp: the sale still TERMINATES and
+      // consumes the check (refusing instead would be a refusal the player can
+      // never clear, i.e. a missable location), but charging full price for a
+      // provably empty delivery is not something the refusal contract ever
+      // signed up for -- it was written for free sites. Skip the debit.
+      bool no_op = Rando_ShopSlotGrantIsNoOp(
+          dungeon_room_index, g_ram[kRam_RandoOverworldDoor], sprite_subtype[k]);
+      RandoGrantResult result = Rando_ShopGrant(
+          dungeon_room_index, g_ram[kRam_RandoOverworldDoor],
+          (uint8)(sprite_subtype[k] - 1), vanilla_code,
+          kRandoGrantPresentation_Animated, 0, 0);
+      if (result == kRandoGrantResult_Accepted) {
+        // Delivery accepted first; payment and source consumption follow.
+        if (!no_op)
+          Sprite_ApplyPostGrantPrice(price);
+        sprite_state[k] = 0;
+        ShopKeeper_RapidTerminateReceiveItem();
+      } else if (result == kRandoGrantResult_AlreadyChecked) {
+        // Defensive same-frame replay: clean up without charging twice.
+        sprite_state[k] = 0;
+      } else if (result == kRandoGrantResult_NotActive) {
+        // The slot ceased to be an active check between resolution and input;
+        // let its ordinary vanilla/restock handler process this same press.
+        return false;
+      } else {
+        ShopItem_PlayBeep(k);
+      }
+    }
+  }
+  return true;
+}
+
 void ShopItem_RedPotion150(int k) {  // 9ef16e
+  if (ShopItem_ShopsanityCheckSlot(k, 0x2e))
+    return;
   SpriteDraw_ShopItem(k);
   if (Sprite_ReturnIfInactive(k))
     return;
@@ -25162,7 +26834,11 @@ void ShopItem_RedPotion150(int k) {  // 9ef16e
 }
 
 void ShopKeeper_SpawnShopItem(int k, int pos, int what) {  // 9ef1b3
-  static const int8 kShopKeeper_ItemX[3] = {-44, 8, 60};
+  // Slots 0..2 are the vanilla three; slot 3 (X=104) is the Retro genericKeys
+  // buyable generic-key column (added only under Rando_IsGenericKeysActive). The
+  // X offset is to the right of the vanilla three — playtest-tunable if it
+  // overlaps room geometry in any host shop.
+  static const int8 kShopKeeper_ItemX[4] = {-44, 8, 60, 104};
   SpriteSpawnInfo info;
   int j = Sprite_SpawnDynamicallyEx(k, 0xbb, &info, 12);
   assert(j >= 0);
@@ -25170,9 +26846,19 @@ void ShopKeeper_SpawnShopItem(int k, int pos, int what) {  // 9ef1b3
   Sprite_SetX(j, info.r0_x + kShopKeeper_ItemX[pos]);
   Sprite_SetY(j, info.r2_y + 0x27);
   sprite_flags2[j] |= 4;
+  // Retro shop dispatch (#53): record the 0-based slot position (stored as
+  // pos+1 so 0 means "unset") on the spawned item sprite so
+  // ShopItem_HandleReceipt can recover the (room, door, pos) tuple needed to
+  // resolve the ALTTPR shop-slot location. Gated on rando-active so vanilla /
+  // RAM-compare runs leave sprite_subtype[] untouched (the field is otherwise
+  // unread by the 0xBB shop-item handlers).
+  if (enhanced_features1 & kFeatures1_RandomizerActive)
+    sprite_subtype[j] = (uint8)(pos + 1);
 }
 
 void ShopItem_FighterShield(int k) {  // 9ef1f2
+  if (ShopItem_ShopsanityCheckSlot(k, 0x04))
+    return;
   SpriteDraw_ShopItem(k);
   if (Sprite_ReturnIfInactive(k))
     return;
@@ -25196,6 +26882,8 @@ void ShopItem_FighterShield(int k) {  // 9ef1f2
 }
 
 void ShopItem_FireShield(int k) {  // 9ef230
+  if (ShopItem_ShopsanityCheckSlot(k, 0x05))
+    return;
   SpriteDraw_ShopItem(k);
   if (Sprite_ReturnIfInactive(k))
     return;
@@ -25228,6 +26916,8 @@ void ShopItem_MakeShieldsDeflect(int k) {  // 9ef261
 }
 
 void ShopItem_Heart(int k) {  // 9ef27d
+  if (ShopItem_ShopsanityCheckSlot(k, 0x42))
+    return;
   SpriteDraw_ShopItem(k);
   if (Sprite_ReturnIfInactive(k))
     return;
@@ -25246,12 +26936,14 @@ void ShopItem_Heart(int k) {  // 9ef27d
 }
 
 void ShopItem_Arrows(int k) {  // 9ef2af
+  if (ShopItem_ShopsanityCheckSlot(k, 0x44))
+    return;
   SpriteDraw_ShopItem(k);
   if (Sprite_ReturnIfInactive(k))
     return;
   Sprite_BehaveAsBarrier(k);
   if (ShopItem_CheckForAPress(k)) {
-    if (link_num_arrows == kMaxArrowsForLevel[link_arrow_upgrades]) {
+    if (link_num_arrows == Hud_Capacity(0x9ef2c5, 0xdb58, link_arrow_upgrades)) {
       Sprite_ShowSolicitedMessage(k, 0x16e);
       ShopItem_PlayBeep(k);
     } else if (ShopItem_HandleCost(30)) {
@@ -25265,12 +26957,14 @@ void ShopItem_Arrows(int k) {  // 9ef2af
 }
 
 void ShopItem_Bombs(int k) {  // 9ef2f0
+  if (ShopItem_ShopsanityCheckSlot(k, 0x31))
+    return;
   SpriteDraw_ShopItem(k);
   if (Sprite_ReturnIfInactive(k))
     return;
   Sprite_BehaveAsBarrier(k);
   if (ShopItem_CheckForAPress(k)) {
-    if (link_item_bombs == kMaxBombsForLevel[link_bomb_upgrades]) {
+    if (link_item_bombs == Hud_Capacity(0x9ef306, 0xdb48, link_bomb_upgrades)) {
       Sprite_ShowSolicitedMessage(k, 0x16e);
       ShopItem_PlayBeep(k);
     } else if (ShopItem_HandleCost(50)) {
@@ -25284,6 +26978,8 @@ void ShopItem_Bombs(int k) {  // 9ef2f0
 }
 
 void ShopItem_Bee(int k) {  // 9ef322
+  if (ShopItem_ShopsanityCheckSlot(k, 0x0e))
+    return;
   SpriteDraw_ShopItem(k);
   if (Sprite_ReturnIfInactive(k))
     return;
@@ -25302,12 +26998,51 @@ void ShopItem_Bee(int k) {  // 9ef322
   }
 }
 
+// Retro genericKeys — the buyable generic small-key shop slot (ALTTPR ShopKey,
+// price 100, unlimited supply). Mirrors ShopItem_Heart's purchase shape: deduct
+// the rupees, despawn this item, grant one shared generic key, and show the
+// direct-grant confirmation cue. "Unlimited" = re-enter the shop room to buy
+// again (the slot respawns on room load, like every vanilla shop item). Only
+// spawned under Rando_IsGenericKeysActive(), so there is no vanilla path here.
+void ShopItem_GenericKey(int k) {
+  SpriteDraw_ShopItem(k);
+  if (Sprite_ReturnIfInactive(k))
+    return;
+  Sprite_BehaveAsBarrier(k);
+  if (ShopItem_CheckForAPress(k)) {
+    if (ShopItem_HandleCost(100)) {
+      sprite_state[k] = 0;
+      item_receipt_method = 0;
+      Rando_GrantGenericKeyPurchase();
+      // GenericKey maps to the small-key bundle in kDirectGrantIcons[] (gfx
+      // 0x0f via direct_grant_icons.yaml), so this also pops the key icon.
+      Rando_ShowDirectGrantConfirmation((uint8)ITEM_GenericKey);
+    } else {
+      Sprite_ShowMessageUnconditional(0x17c);
+      ShopItem_PlayBeep(k);
+    }
+  }
+}
+
 void ShopItem_HandleReceipt(int k, uint8 item) {  // 9ef366
   static const uint16 kShopKeeper_GiveItemMsgs[7] = {0x168, 0x167, 0x167, 0x16c, 0x169, 0x16a, 0x16b};
   item_receipt_method = 0;
+  // Randomized unchecked shop slots transact before payment in
+  // ShopItem_ShopsanityCheckSlot. Every path reaching this legacy helper is a
+  // vanilla/non-shop receipt or a checked shopsanity restock.
   Link_ReceiveItem(item, 0);
   int j = sprite_subtype2[k];
   if (j >= 7) {
+    if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+        sprite_subtype[k] != 0) {
+      // Plain Retro shops keep their vanilla repeatable economy, but their
+      // identity-pinned tracker row is recorded after the caller-owned item and
+      // payment succeed. The helper validates tuple + generated receive code;
+      // shopsanity checked restocks and absent rows remain no-ops.
+      (void)Rando_CommitRepeatableShopIdentity(
+          dungeon_room_index, g_ram[kRam_RandoOverworldDoor],
+          (uint8)(sprite_subtype[k] - 1), item);
+    }
     Sprite_ShowMessageUnconditional(kShopKeeper_GiveItemMsgs[j - 7]);
     ShopKeeper_RapidTerminateReceiveItem();
   }
@@ -25330,44 +27065,172 @@ bool ShopItem_HandleCost(int amt) {  // 9ef39e
   return true;
 }
 
-void SpriteDraw_ShopItem(int k) {  // 9ef4ce
-  static const DrawMultipleData kShopKeeper_ItemWithPrice_Dmd[35] = {
-    {-4, 16, 0x0231, 0},
-    { 4, 16, 0x0213, 0},
-    {12, 16, 0x0230, 0},
-    { 0,  0, 0x02c0, 2},
-    { 0, 11, 0x036c, 2},
-    { 0, 16, 0x0213, 0},
-    { 0, 16, 0x0213, 0},
-    { 8, 16, 0x0230, 0},
-    { 0,  0, 0x04ce, 2},
-    { 4, 12, 0x0338, 0},
-    {-4, 16, 0x0213, 0},
-    { 4, 16, 0x0230, 0},
-    {12, 16, 0x0230, 0},
-    { 0,  0, 0x08cc, 2},
-    { 4, 12, 0x0338, 0},
-    { 0, 16, 0x0231, 0},
-    { 0, 16, 0x0231, 0},
-    { 8, 16, 0x0230, 0},
-    { 4,  8, 0x0329, 0},
-    { 4, 11, 0x0338, 0},
-    {-4, 16, 0x0203, 0},
-    {-4, 16, 0x0203, 0},
-    { 4, 16, 0x0230, 0},
-    { 0,  0, 0x04c4, 2},
-    { 0, 11, 0x0338, 0},
-    { 0, 16, 0x0213, 0},
-    { 0, 16, 0x0213, 0},
-    { 8, 16, 0x0230, 0},
-    { 0,  0, 0x04e8, 2},
-    { 0, 11, 0x036c, 2},
-    { 0, 16, 0x0231, 0},
-    { 0, 16, 0x0231, 0},
-    { 8, 16, 0x0230, 0},
-    { 4,  8, 0x0ff4, 0},
-    { 4, 11, 0x0338, 0},
+// 7 kinds x 5 rows (kinds 0..6 = subtype2 7..13). File-scope so the
+// shopsanity check-slot draw below can reuse each kind's item tiles
+// (rows 3-4 of its group); SpriteDraw_ShopItem's vanilla path indexes it
+// unchanged. Within each kind the y:16 ext:0 rows are the PRICE digits and
+// the ext:2 big tile is the item graphic.
+static const DrawMultipleData kShopKeeper_ItemWithPrice_Dmd[35] = {
+  {-4, 16, 0x0231, 0},
+  { 4, 16, 0x0213, 0},
+  {12, 16, 0x0230, 0},
+  { 0,  0, 0x02c0, 2},
+  { 0, 11, 0x036c, 2},
+  { 0, 16, 0x0213, 0},
+  { 0, 16, 0x0213, 0},
+  { 8, 16, 0x0230, 0},
+  { 0,  0, 0x04ce, 2},
+  { 4, 12, 0x0338, 0},
+  {-4, 16, 0x0213, 0},
+  { 4, 16, 0x0230, 0},
+  {12, 16, 0x0230, 0},
+  { 0,  0, 0x08cc, 2},
+  { 4, 12, 0x0338, 0},
+  { 0, 16, 0x0231, 0},
+  { 0, 16, 0x0231, 0},
+  { 8, 16, 0x0230, 0},
+  { 4,  8, 0x0329, 0},
+  { 4, 11, 0x0338, 0},
+  {-4, 16, 0x0203, 0},
+  {-4, 16, 0x0203, 0},
+  { 4, 16, 0x0230, 0},
+  { 0,  0, 0x04c4, 2},
+  { 0, 11, 0x0338, 0},
+  { 0, 16, 0x0213, 0},
+  { 0, 16, 0x0213, 0},
+  { 8, 16, 0x0230, 0},
+  { 0,  0, 0x04e8, 2},
+  { 0, 11, 0x036c, 2},
+  { 0, 16, 0x0231, 0},
+  { 0, 16, 0x0231, 0},
+  { 8, 16, 0x0230, 0},
+  { 4,  8, 0x0ff4, 0},
+  { 4, 11, 0x0338, 0},
+};
+
+// add-rando-shopsanity — draw an unchecked check slot: dynamic price digits
+// (all ten glyphs exist in shop GFX — map grounded in upstream
+// shopkeeper.asm DrawPrice `.digit_properties`) + the placed item's icon via
+// the shared field-item resolver, with the sparkle tile (0x0338, present in
+// every shop's GFX) as the generic cue when no exact icon can draw.
+static void SpriteDraw_ShopCheckSlot(int k, uint16 loc, uint16 price) {
+  static const uint16 kShopPriceDigitChar[10] = {
+    0x0230, 0x0231, 0x0202, 0x0203, 0x0212,
+    0x0213, 0x0222, 0x0223, 0x0232, 0x0233,
   };
+  DrawMultipleData dmd[5];
+  int n = 0;
+  uint8 digits[3];
+  int nd = 0;
+  uint16 v = price;
+  do { digits[nd++] = (uint8)(v % 10); v /= 10; } while (v && nd < 3);
+  // Vanilla digit layout: 3 digits at x=-4/4/12, 2 at x=0/8 (y=16, small).
+  int x0 = (nd == 3) ? -4 : 0;
+  for (int i = 0; i < nd; i++) {
+    dmd[n].x = (int8)(x0 + 8 * i);
+    dmd[n].y = 16;
+    dmd[n].char_flags = kShopPriceDigitChar[digits[nd - 1 - i]];
+    dmd[n].ext = 0;
+    n++;
+  }
+  uint8 gfx, big, oam_flags;
+  int icon = Rando_GetShopCheckIcon(loc, &gfx, &big, &oam_flags);
+  if (icon == 0) {
+    // Truthful vanilla placement — the kind's own item tiles (rows 3-4 of
+    // its 5-row group).
+    int j = sprite_subtype2[k] - 7;
+    dmd[n++] = kShopKeeper_ItemWithPrice_Dmd[j * 5 + 3];
+    dmd[n++] = kShopKeeper_ItemWithPrice_Dmd[j * 5 + 4];
+    Sprite_DrawMultiplePlayerDeferred(k, dmd, n, NULL);
+    return;
+  }
+  // Each shop column owns an icon quad (see the ownership map at
+  // Rando_ShopIconSlotStage: pos 0 = the bird quad 0x0E.., pos 1 = the shop
+  // sheets' page-1 zero quad 0x10C.., pos 2 = the shared recv slot 0x24..)
+  // so all three placed items render concurrently; the generic check cue
+  // draws for no-icon placements (icon == 2), a failed decode, a custom-
+  // palette conflict, or pos 2 while a receipt animation owns the recv
+  // slot. The icon rides the SAME deferred dmd block as the digits — never
+  // a separate Oam_AllocateFromRegion*(8): in shop rooms that
+  // overflow-rotates into parked scratch entries (invisible icon) and the
+  // cursor disturbance stomps a price digit (the F12 OAM-buffer diagnosis).
+  // Total block stays <= vanilla's 5 entries per slot.
+  static const uint8 kRandoShopIconTopChar[3] = {0x0E, 0x0C, 0x24};
+  static const uint8 kRandoShopIconPageBit[3] = {0x00, 0x01, 0x00};
+  uint8 pos = (uint8)(sprite_subtype[k] - 1);
+  bool mine = icon == 1 && Rando_ShopIconSlotStage(pos, gfx);
+  PrepOamCoordsRet info;
+  if (mine && !Sprite_PrepOamCoordOrDoubleRet(k, &info)) {
+    // Final OAM attr must be the resolver's oam_flags (palette row for custom
+    // art etc.) plus the column's char-page bit, not the shop sprite's:
+    // Sprite_DrawMultiple XORs each entry's high byte with the live prep
+    // flags, so pre-XOR them away.
+    uint8 hi = (uint8)((oam_flags | kRandoShopIconPageBit[pos]) ^ info.flags);
+    uint8 top = kRandoShopIconTopChar[pos], bot = (uint8)(top + 0x10);
+    if (big) {
+      dmd[n].x = 0; dmd[n].y = 0;
+      dmd[n].char_flags = (uint16)(top | hi << 8); dmd[n].ext = 2; n++;
+    } else {
+      dmd[n].x = 4; dmd[n].y = 0;
+      dmd[n].char_flags = (uint16)(top | hi << 8); dmd[n].ext = 0; n++;
+      dmd[n].x = 4; dmd[n].y = 8;
+      dmd[n].char_flags = (uint16)(bot | hi << 8); dmd[n].ext = 0; n++;
+    }
+  } else {
+    dmd[n].x = 4; dmd[n].y = 4; dmd[n].char_flags = 0x0338; dmd[n].ext = 0; n++;
+  }
+  Sprite_DrawMultiplePlayerDeferred(k, dmd, n, NULL);
+}
+
+void SpriteDraw_ShopItem(int k) {  // 9ef4ce
+  // Kinds 0..6 = subtype2 7..13 (vanilla shop items) draw from the file-scope
+  // kShopKeeper_ItemWithPrice_Dmd (e.g. RedPotion: 0x0231/0x0213/0x0230 =
+  // "150", 0x02c0 = bottle). Phase B Slice 3b take-any items (subtype2 14/15)
+  // draw price-less per-item icons separately below, from those item tiles.
+  //
+  // add-rando-shopsanity — an unchecked check slot draws the PLACED item at
+  // the derived price instead of the vanilla kind (never a vanilla-item
+  // lookalike; checked slots fall through to the vanilla rows = restock).
+  if (sprite_subtype2[k] >= 7 && sprite_subtype2[k] <= 13) {
+    uint16 loc, price;
+    if (Rando_ShopSlotCheckInfo(dungeon_room_index, g_ram[kRam_RandoOverworldDoor],
+                                sprite_subtype[k], &loc, NULL, &price)) {
+      SpriteDraw_ShopCheckSlot(k, loc, price);
+      return;
+    }
+  }
+  // Phase B Slice 3b — take-any per-item icon (price-less). Item tiles only:
+  //   kind 14 = heart  -> the Heart kind's item tiles (0x0329 / 0x0338)
+  //   kind 15 = potion -> RedPotion's item big-tile (0x02c0); also used for the
+  //                       weapon cave's sword/rupee (no sword tile in shop GFX).
+  // Both are present in every host room's GFX (those rooms sell RedPotion + a
+  // heart in vanilla). The "150"/"10" the player saw earlier was me drawing the
+  // price-digit rows; these draw only the item.
+  // Retro genericKeys buyable slot (kind 16): price "100" digit tiles + an item
+  // icon. Digit tiles are the shop's price font ('1'=0x0231, '0'=0x0230) used by
+  // the vanilla price rows above; the icon reuses RedPotion's big-tile (0x02c0,
+  // loaded in every standard shop) as a placeholder — there is no confirmed key
+  // tile in shop GFX (same constraint the take-any sword fell back on). The
+  // "100" makes the slot unambiguous; swap 0x02c0 to a real key tile if one is
+  // present in shop GFX at playtest. Must precede the >=14 take-any branch.
+  if (sprite_subtype2[k] == 16) {
+    static const DrawMultipleData kGenericKeySlot[4] = {
+      {-4, 16, 0x0231, 0}, { 4, 16, 0x0230, 0}, {12, 16, 0x0230, 0},
+      { 0,  0, 0x02c0, 2} };
+    Sprite_DrawMultiplePlayerDeferred(k, kGenericKeySlot, 4, NULL);
+    return;
+  }
+  if (sprite_subtype2[k] >= 14) {
+    static const DrawMultipleData kTakeAnyHeart[2] = {
+      {4, 8, 0x0329, 0}, {4, 11, 0x0338, 0} };
+    static const DrawMultipleData kTakeAnyPotion[1] = {
+      {0, 0, 0x02c0, 2} };
+    if (sprite_subtype2[k] == 14)
+      Sprite_DrawMultiplePlayerDeferred(k, kTakeAnyHeart, 2, NULL);
+    else
+      Sprite_DrawMultiplePlayerDeferred(k, kTakeAnyPotion, 1, NULL);
+    return;
+  }
   Sprite_DrawMultiplePlayerDeferred(k, &kShopKeeper_ItemWithPrice_Dmd[(sprite_subtype2[k] - 7) * 5], 5, NULL);
 }
 
@@ -25875,4 +27738,3 @@ void Faerie_HandleMovement(int k) {  // 9efd1c
     sprite_z_vel[k] = -5;
   }
 }
-

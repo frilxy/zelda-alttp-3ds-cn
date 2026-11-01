@@ -1,5 +1,6 @@
 #include "ancilla.h"
 #include "variables.h"
+#include "mods.h"
 #include "sprite.h"
 #include "hud.h"
 #include "load_gfx.h"
@@ -11,19 +12,45 @@
 #include "dungeon.h"
 #include "sprite_main.h"
 #include "assets.h"
+#include "features.h"
+#include "zelda_rtl.h"
+#include "rando/rando.h"
+#include "rando/rando_placement.h"
+#include "rando/dungeon_ids.h"
+#include "rando/item_ids.h"
+#include "rando/location_ids.h"
 
-static const uint8 kAncilla_Pflags[68] = {
+// Type 0x44 is the Phase B Slice 9 rando icon-receipt ancilla
+// (Ancilla44_RandoIconReceipt — dispatched via kAncilla_Funcs[type-1], i.e.
+// funcs index 67). Its Pflag below lives at kAncilla_Pflags[0x44] (index 68)
+// and is 8 (reserves 2 OAM entries) for the 8x16 (two-tile) icon draw,
+// matching Ancilla22_ItemReceipt.
+static const uint8 kAncilla_Pflags[69] = {
   0,    8,  0xc, 0x10, 0x10,    4, 0x10, 0x18,    8,    8,    8,    0, 0x14, 0, 0x10, 0x28,
   0x18, 0x10, 0x10, 0x10, 0x10,  0xc,    8,    8, 0x50,    0, 0x10,    8, 0x40, 0,  0xc, 0x24,
   0x10,  0xc,    8, 0x10, 0x10,    4,  0xc, 0x1c,    0, 0x10, 0x14, 0x14, 0x10, 8, 0x20, 0x10,
   0x10, 0x10,    4,    0, 0x80, 0x10,    4, 0x30, 0x14, 0x10,    0, 0x10,    0, 0,    8,    0,
-  0x10,    8, 0x78, 0x80,
+  0x10,    8, 0x78, 0x80, 8,
 };
 static const int8 kFireRod_Xvel2[12] = {0, 0, -40, 40, 0, 0, -48, 48, 0, 0, -64, 64};
 static const int8 kFireRod_Yvel2[12] = {-40, 40, 0, 0, -48, 48, 0, 0, -64, 64, 0, 0};
 static const uint8 kTagalongLayerBits[4] = {0x20, 0x10, 0x30, 0x20};
 static const uint8 kBombos_Sfx[8] = {0x80, 0x80, 0x80, 0, 0, 0x40, 0x40, 0x40};
 const uint8 kBomb_Tab0[11] = {0xA0, 6, 4, 4, 4, 4, 4, 6, 6, 6, 6};
+
+static bool CutsceneFastForwardEnabled(void) {
+  return (enhanced_features0 & kFeatures0_CutsceneFastForward) &&
+         !ZeldaIsEmulatorAttached();
+}
+
+static bool FastFanfareEnabled(void) {
+  return (enhanced_features0 & kFeatures0_FastFanfare) &&
+         !ZeldaIsEmulatorAttached();
+}
+
+static uint8 CutsceneClampTimer8(uint8 value, uint8 cap) {
+  return CutsceneFastForwardEnabled() && value > cap ? cap : value;
+}
 
 #define swordbeam_temp_x (*(uint16*)(g_ram+0x1580E))
 #define swordbeam_temp_y (*(uint16*)(g_ram+0x15810))
@@ -249,7 +276,11 @@ static const uint8 kTravelBird_Draw_Char[3] = {0xe, 0, 2};
 static const uint8 kTravelBird_Draw_Flags[3] = {0x22, 0x2e, 0x2e};
 static const int8 kSomarianBlock_Coll_X[12] = {0, 0, -8, 8, 0, 0, 0, 0, 8, -8, -8, 8};
 static const int8 kSomarianBlock_Coll_Y[12] = {-8, 8, 0, 0, 0, 0, 0, 0, -8, 8, -8, 8};
-static HandlerFuncK *const kAncilla_Funcs[67] = {
+// Phase B Slice 9 — type 0x44 (index 67) is Ancilla44_RandoIconReceipt, the
+// rando direct-grant icon-pop ancilla. Defined below near the AncillaAdd_*
+// helpers.
+void Ancilla44_RandoIconReceipt(int k);
+static HandlerFuncK *const kAncilla_Funcs[68] = {
   &Ancilla01_SomariaBullet,
   &Ancilla02_FireRodShot,
   &Ancilla_Empty,
@@ -317,6 +348,7 @@ static HandlerFuncK *const kAncilla_Funcs[67] = {
   &Ancilla41_WaterfallSplash,
   &Ancilla42_HappinessPondRupees,
   &Ancilla43_GanonsTowerCutscene,
+  &Ancilla44_RandoIconReceipt,
 };
 uint16 Ancilla_GetX(int k) {
   return ancilla_x_lo[k] | ancilla_x_hi[k] << 8;
@@ -347,7 +379,7 @@ int Ancilla_AllocHigh() {
 static void Ancilla_SetOam(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8 flags, uint8 big) {
   uint8 yval = 0xf0;
   int xt = enhanced_features0 & kFeatures0_ExtendScreen64 ? 0x40 : 0;
-  if ((uint16)(x + xt) < 256 + xt * 2 && y < 256) {
+  if ((uint16)(x + ZeldaWidePictureShift() + xt) < 256 + xt * 2 && y < 256) {
     big |= (x >> 8) & 1;
     oam->x = x;
     if (y < 0xf0)
@@ -363,7 +395,7 @@ static void Ancilla_SetOam_Safe(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, 
   uint8 yval = 0xf0;
   oam->x = x;
   int xt = enhanced_features0 & kFeatures0_ExtendScreen64 ? 0x48 : 0;
-  if ((uint16)(x + 0x80) < (0x180 + xt)) {
+  if ((uint16)(x + ZeldaWidePictureShift() + 0x80) < (0x180 + xt)) {
     big |= (x >> 8) & 1;
     if ((uint16)(y + 0x10) < 0x100)
       yval = y;
@@ -459,7 +491,7 @@ void AddBirdCommon(int k) {
   ancilla_G[k] = 0;
 
   int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
-  Ancilla_SetXY(k, BG2HOFS_copy2 - 16 - xt, link_y_coord - 8);
+  Ancilla_SetXY(k, BG2HOFS_copy2 - ZeldaWidePictureShift() - 16 - xt, link_y_coord - 8);
 }
 
 ProjectSpeedRet Bomb_ProjectSpeedTowardsPlayer(int k, uint16 x, uint16 y, uint8 vel) {  // 84eb63
@@ -2335,6 +2367,28 @@ void Ancilla32_BlastWallFireball(int k) {  // 88aa35
   Ancilla_SetOam(GetOamCurPtr(), pt.x, pt.y, kBlastWallFireball_Char[blastwall_var12[k] & 8 ? 0 : blastwall_var12[k] & 4 ? 1 : 2], 0x22, 0);
 }
 
+// Medallion shuffle (rando): in vanilla the entrance-open is hardcoded per spell
+// (Ether opens Misery Mire on screen 0x70, Quake opens Turtle Rock on 0x47, and
+// Bombos opens nothing). Under medallion_shuffle the required medallion can be
+// any of the three, so each spell handler routes its cast medallion through here
+// and we open whichever screen the player is standing on iff that medallion
+// matches the shuffled assignment. Mirrors the two vanilla open blocks exactly
+// (event-bit + Ancilla_CheckForEntranceTrigger gate, trigger_special_entrance
+// 3=MM / 4=TR). Entrance index 0 = MM, 1 = TR.
+static void Ancilla_RandoTryOpenMedallionEntrance(uint8 cast_medallion) {
+  if (BYTE(overworld_screen_index) == 0x70 && !(save_ow_event_info[0x70] & 0x20) &&
+      Rando_MedallionOpens(cast_medallion, 0) && Ancilla_CheckForEntranceTrigger(2)) {
+    trigger_special_entrance = 3;
+    subsubmodule_index = 0;
+    BYTE(R16) = 0;
+  } else if (BYTE(overworld_screen_index) == 0x47 && !(save_ow_event_info[0x47] & 0x20) &&
+             Rando_MedallionOpens(cast_medallion, 1) && Ancilla_CheckForEntranceTrigger(3)) {
+    trigger_special_entrance = 4;
+    subsubmodule_index = 0;
+    BYTE(R16) = 0;
+  }
+}
+
 void Ancilla18_EtherSpell(int k) {  // 88aaa0
   if (submodule_index)
     return;
@@ -2476,7 +2530,10 @@ void EtherSpell_HandleRadialSpin(int k) {  // 88abef
   link_cant_change_direction = 0;
   flag_unk1 = 0;
 
-  if (BYTE(overworld_screen_index) == 0x70 && !(save_ow_event_info[0x70] & 0x20) && Ancilla_CheckForEntranceTrigger(2)) {
+  if (Rando_GetMedallionAssignment() != NULL) {
+    // Medallion shuffle: open whichever entrance this Ether cast matches.
+    Ancilla_RandoTryOpenMedallionEntrance(ITEM_Ether);
+  } else if (BYTE(overworld_screen_index) == 0x70 && !(save_ow_event_info[0x70] & 0x20) && Ancilla_CheckForEntranceTrigger(2)) {
     trigger_special_entrance = 3;
     subsubmodule_index = 0;
     BYTE(R16) = 0;
@@ -2784,6 +2841,11 @@ void BombosSpell_ControlBlasting(int kk) {  // 88b40d
   step_counter_for_spin_attack = 0;
   link_cant_change_direction = 0;
   flag_unk1 = 0;
+  // Medallion shuffle: Bombos never opens an entrance in vanilla, but it can be
+  // the assigned medallion for MM/TR under the shuffle. Gated on an installed
+  // assignment so the vanilla Bombos cast stays a no-op here (RAM-compare safe).
+  if (Rando_GetMedallionAssignment() != NULL)
+    Ancilla_RandoTryOpenMedallionEntrance(ITEM_Bombos);
   if (link_player_handler_state != kPlayerState_ReceivingBombos) {
     link_player_handler_state = kPlayerState_Ground;
     link_delay_timer_spin_attack = 0;
@@ -2861,7 +2923,10 @@ void Ancilla1C_QuakeSpell(int k) {  // 88b66a
   flag_unk1 = 0;
   bg1_x_offset = 0;
   bg1_y_offset = 0;
-  if (BYTE(overworld_screen_index) == 0x47 && !(save_ow_event_info[0x47] & 0x20) && Ancilla_CheckForEntranceTrigger(3)) {
+  if (Rando_GetMedallionAssignment() != NULL) {
+    // Medallion shuffle: open whichever entrance this Quake cast matches.
+    Ancilla_RandoTryOpenMedallionEntrance(ITEM_Quake);
+  } else if (BYTE(overworld_screen_index) == 0x47 && !(save_ow_event_info[0x47] & 0x20) && Ancilla_CheckForEntranceTrigger(3)) {
     trigger_special_entrance = 4;
     subsubmodule_index = 0;
     BYTE(R16) = 0;
@@ -3384,7 +3449,9 @@ void Ancilla22_ItemReceipt(int k) {  // 88c38a
     goto label_b;
   }
 
-  if (ancilla_item_to_link[k] == 1 && ancilla_step[k] != 2) {
+  // A quest can drop what the Master Sword sets off: its branches then
+  // always skip ($88:C3BD, $88:C412, $88:C5CF).
+  if (ancilla_item_to_link[k] == 1 && ancilla_step[k] != 2 && Mods_RomByte(0x88c3bd, 0xd0) == 0xd0) {
     if (ancilla_timer[k] == 0)
       goto label_a;
     if (ancilla_timer[k] != 17)
@@ -3398,14 +3465,21 @@ void Ancilla22_ItemReceipt(int k) {  // 88c38a
   if (a == 0)
     goto label_a;
   if (a == 1) {
-    if (ancilla_item_to_link[k] != 0x37 && ancilla_item_to_link[k] != 0x38 && ancilla_item_to_link[k] != 0x39 || zelda_read_apui00() == 0)
+    bool fast_boss_prize = ItemReceipt_IsFastBossPrize(
+        ancilla_item_to_link[k], ancilla_step[k], player_is_indoors != 0,
+        FastFanfareEnabled());
+    if (!ItemReceipt_ShouldWaitForPendantFanfare(
+            ancilla_item_to_link[k], zelda_read_apui00(), fast_boss_prize)) {
+      if (fast_boss_prize && ancilla_item_to_link[k] != 0x20)
+        music_control = 0xf1;
       goto endif_6;
+    }
     ancilla_aux_timer[k]++;
   }
   goto endif_1;
 
 label_a:
-  if (ancilla_item_to_link[k] == 1 && !ancilla_step[k]) {
+  if (ancilla_item_to_link[k] == 1 && !ancilla_step[k] && Mods_RomByte(0x88c412, 0xd0) == 0xd0) {
     sound_effect_ambient = 5;
     music_control = 2;
   }
@@ -3418,6 +3492,11 @@ endif_11:
   item_receipt_method = 0;
   a = ancilla_item_to_link[k];
   if (a == 23 && link_heart_pieces == 0) {
+    // rando-exempt: PoH-rollover shared logic — when link_heart_pieces=0
+    // after increment (4/4 rolled over), grant a BossHeartContainer. The
+    // dispatch for each specific PoH placement happens at its spawn site
+    // (chest / standing / dig); the rollover is a counter-increment side
+    // effect that's the same regardless of which PoH was collected.
     Link_ReceiveItem(0x26, 0);
     ancilla_type[k] = 0;
     flag_unk1 = 0;
@@ -3433,6 +3512,11 @@ endif_11:
   } else if (a == 0x3e) {
     flag_is_link_immobilized = 0;
     if (link_health_capacity != 0xa0) {
+      // rando-exempt: receipt-dispatcher consumption — code 0x3e is the
+      // unified BossHeartContainer grant that all upstream callers reach
+      // (Link_ReceiveItem(0x3e, 0) from sprite_main.c boss drops + ancilla
+      // chest grants). The actual ALTTPR location dispatch happens at the
+      // call site (the boss handler / chest opener), not here.
       link_health_capacity += 8;
       link_hearts_filler += 8;
       Ancilla_Sfx3_Near(0xd);
@@ -3448,7 +3532,17 @@ endif_11:
   ancilla_type[k] = 0;
   flag_unk1 = 0;
   a = ancilla_item_to_link[k];
-  if (ancilla_step[k] == 3 && a != 0x10 && a != 0x26 && a != 0xf && a != 0x20) {
+  // A step-3 (item_receipt_method=3) falling-prize receipt warps Link out of the
+  // dungeon after a boss prize. PrepareDungeonExitFromBossFight() is meaningful
+  // ONLY indoors — it does FindInByteArray(kDungeonExit_From, dungeon_room_index)
+  // + assert/index, which on the overworld reads a stale room id and indexes OOB
+  // (crash / bogus warp). The Ether/Bombos tablets reach this via the same method-3
+  // falling prize; vanilla is safe only because medallions (0x10/0x0f) are excluded.
+  // Under rando a non-medallion tablet item is NOT excluded, so also require
+  // player_is_indoors. Vanilla unaffected: boss prizes are always indoors, and
+  // overworld tablets are always medallions (already excluded).
+  if (ancilla_step[k] == 3 && player_is_indoors &&
+      a != 0x10 && a != 0x26 && a != 0xf && a != 0x20) {
     PrepareDungeonExitFromBossFight();
   }
 
@@ -3475,9 +3569,25 @@ endif_6:
     else
       msg = kReceiveItemMsgs[ancilla_item_to_link[k]];
   }
+  // Rando: progressive sword/shield reuse vanilla LttP receive codes whose
+  // receipt text was authored for a different acquisition context — or is a
+  // dead table entry never fired in vanilla (red shield comes from a shop,
+  // gold sword from the fountain, neither via this ancilla). Correct the text
+  // so it matches the gear actually granted. See progressive_to_lttp() in
+  // rando/rando.c. Affected codes:
+  //   0x01 master sword -> text is Sahasrahla's pedestal telepathy
+  //   0x03 gold sword   -> text is the Boomerang receipt (dead entry)
+  //   0x05 red shield   -> text is "You found the Mirror Shield!"
+  if (msg != -1 && (enhanced_features1 & kFeatures1_RandomizerActive)) {
+    uint8 gear_code = ancilla_item_to_link[k];
+    if (gear_code == 0x01 || gear_code == 0x03)
+      msg = 0x77;  // "Great!  Your sword is stronger!"
+    else if (gear_code == 0x05)
+      msg = 0x90;  // "Your shield is improved! ... against fireballs!"
+  }
   if (msg != -1) {
     dialogue_message_index = msg;
-    if (msg == 0x70)
+    if (msg == 0x70 && Mods_RomByte(0x88c5cf, 0xd0) == 0xd0)
       sound_effect_ambient = 9;
     Main_ShowTextMessage();
   }
@@ -3495,7 +3605,13 @@ endif_1:
   if (ancilla_item_to_link[k] == 0x20) {
     ancilla_z[k] = 0;
     AncillaAdd_OccasionalSparkle(k);
-    if (zelda_read_apui00() == 0) {
+    bool fast_crystal = ItemReceipt_IsFastBossPrize(
+        0x20, ancilla_step[k], player_is_indoors != 0,
+        FastFanfareEnabled());
+    ancilla_aux_timer[k] = ItemReceipt_TickCrystalFanfare(
+        ancilla_aux_timer[k], fast_crystal);
+    if (ItemReceipt_ShouldAdvanceCrystalFanfare(
+            zelda_read_apui00(), ancilla_aux_timer[k], fast_crystal)) {
       music_control = 0x1a;
       ItemReceipt_TransmuteToRisingCrystal(k);
       return;
@@ -3719,34 +3835,185 @@ void ObjectSplash_Draw(int k) {  // 88ca22
   }
 }
 
+// A type-0x29 tablet prize owns one frozen 18-byte grant token in otherwise
+// unused per-ancilla bytes. Keep this bytewise and explicit: g_ram is not
+// guaranteed to align a C struct, and ancilla_arr4 is live receive-item draw
+// state and must never be part of this ABI.
+static void Ancilla29_ClearRandoGrantToken(int k) {
+  ancilla_U[k] = 0;
+}
+
+static void Ancilla29_StoreRandoGrantToken(
+    int k, const RandoDeferredGrantToken *token) {
+  uint8 b[sizeof(*token)];
+  memcpy(b, token, sizeof(b));
+  ancilla_U[k] = b[0];
+  ancilla_K[k] = b[1];
+  ancilla_A[k] = b[2];
+  ancilla_B[k] = b[3];
+  ancilla_arr1[k] = b[4];
+  ancilla_S[k] = b[5];
+  ancilla_arr26[k] = b[6];
+  ancilla_arr25[k] = b[7];
+  ancilla_arr22[k] = b[8];
+  ancilla_H[k] = b[9];
+  ancilla_arr23[k] = b[10];
+  ancilla_T[k] = b[11];
+  ancilla_arr24[k] = b[12];
+  ancilla_tile_attr[k] = b[13];
+  ancilla_R[k] = b[14];
+  ancilla_dir[k] = b[15];
+  ancilla_floor2[k] = b[16];
+  ancilla_objprio[k] = b[17];
+}
+
+static bool Ancilla29_LoadRandoGrantToken(
+    int k, RandoDeferredGrantToken *token) {
+  if (ancilla_U[k] != (uint8)kRandoDeferredGrantTokenVersion)
+    return false;
+  uint8 b[sizeof(*token)];
+  b[0] = ancilla_U[k];
+  b[1] = ancilla_K[k];
+  b[2] = ancilla_A[k];
+  b[3] = ancilla_B[k];
+  b[4] = ancilla_arr1[k];
+  b[5] = ancilla_S[k];
+  b[6] = ancilla_arr26[k];
+  b[7] = ancilla_arr25[k];
+  b[8] = ancilla_arr22[k];
+  b[9] = ancilla_H[k];
+  b[10] = ancilla_arr23[k];
+  b[11] = ancilla_T[k];
+  b[12] = ancilla_arr24[k];
+  b[13] = ancilla_tile_attr[k];
+  b[14] = ancilla_R[k];
+  b[15] = ancilla_dir[k];
+  b[16] = ancilla_floor2[k];
+  b[17] = ancilla_objprio[k];
+  memcpy(token, b, sizeof(b));
+  return true;
+}
+
+static OamEnt *Ancilla29_DrawRandoGrant(
+    int k, int x, int y, const RandoDeferredGrantToken *token) {
+  const RandoGrantPlan *plan = &token->plan;
+  if (!plan->display_valid)
+    return Ancilla_ReceiveItem_Draw(k, x, y);
+  if ((plan->display_gfx & 0x80) &&
+      g_recv_item_slot_owner == plan->display_gfx)
+    Rando_ApplyCustomItemGfxPalette(plan->display_gfx);
+  OamEnt *oam = GetOamCurPtr();
+  Ancilla_SetOam(oam++, x, y, 0x24, plan->display_oam_flags,
+                 plan->display_big);
+  if (plan->display_big == 0)
+    Ancilla_SetOam(oam++, x, y + 8, 0x34, plan->display_oam_flags, 0);
+  return oam;
+}
+
+static bool Ancilla29_CommitStoredRandoGrant(
+    int k, RandoGrantPresentation presentation, RandoGrantResult *out_result) {
+  RandoDeferredGrantToken token;
+  if (!Ancilla29_LoadRandoGrantToken(k, &token))
+    return false;
+  uint8 saved_custom_spell = flag_custom_spell_anim_active;
+  uint8 saved_force_sword = link_force_hold_sword_up;
+  uint8 saved_handler = link_player_handler_state;
+  uint8 saved_damage_disable = link_disable_sprite_damage;
+  uint8 saved_immobilized = flag_is_link_immobilized;
+  uint8 saved_menu_block = flag_block_link_menu;
+
+  // Match the vanilla handoff order: tear down tablet ownership before the
+  // receive transaction creates its own hold-up state. If commit cannot
+  // accept, restore the cutscene byte-for-byte and leave the prize retryable.
+  flag_custom_spell_anim_active = 0;
+  link_force_hold_sword_up = 0;
+  link_player_handler_state = 0;
+  link_disable_sprite_damage = 0;
+  flag_is_link_immobilized = 0;
+  flag_block_link_menu = 0;
+  // Free THIS slot before delivering: the vanilla receipt allocates from the
+  // same 5-slot pool (Ancilla_AllocInit scans 0..4), so leaving it occupied can
+  // silently degrade delivery to the quiet fallback -- losing the receipt and,
+  // for a Direct plan, the confirmation icon entirely. Same inversion fixed for
+  // boss prizes in a5ef5eb0; restored below when delivery did not happen.
+  uint8 saved_ancilla_type = ancilla_type[k];
+  ancilla_type[k] = 0;
+  RandoGrantResult result = Rando_CommitPreparedGrant(
+      &token, presentation, 3, 0);
+  if (out_result != NULL)
+    *out_result = result;
+  if (result == kRandoGrantResult_Accepted ||
+      result == kRandoGrantResult_AlreadyChecked) {
+    Ancilla29_ClearRandoGrantToken(k);
+  } else if (result == kRandoGrantResult_Retryable) {
+    ancilla_type[k] = saved_ancilla_type;
+    // Capacity/resource pressure can change on a later frame. Preserve the
+    // exact tablet state and frozen token so collision can retry losslessly.
+    flag_custom_spell_anim_active = saved_custom_spell;
+    link_force_hold_sword_up = saved_force_sword;
+    link_player_handler_state = saved_handler;
+    link_disable_sprite_damage = saved_damage_disable;
+    flag_is_link_immobilized = saved_immobilized;
+    flag_block_link_menu = saved_menu_block;
+  } else {
+    ancilla_type[k] = saved_ancilla_type;
+    // Invalid/corrupt tokens and vanished placements cannot become valid by
+    // colliding again. Fail closed (no grant/check mutation) but release every
+    // tablet-owned lock and discard the poisoned ancilla/token so the player
+    // cannot be trapped in an infinite collision retry.
+    ancilla_type[k] = 0;
+    Ancilla29_ClearRandoGrantToken(k);
+    button_b_frames = 0;
+    link_delay_timer_spin_attack = 0;
+  }
+  return true;
+}
+
 void Ancilla29_MilestoneItemReceipt(int k) {  // 88ca8c
   if (ancilla_item_to_link[k] != 0x10 && ancilla_item_to_link[k] != 0x0f) {
-    if (dung_savegame_state_bits & 0x4000) {
-      ancilla_type[k] = 0;
-      return;
-    }
-
-    if (!(dung_savegame_state_bits & 0x8000))
-      return;
-
-    if (byte_7E04C2 != 0) {
-      if (byte_7E04C2 == 1) {
-        if (ancilla_item_to_link[k] == 0x20) {
-          sound_effect_ambient = 0x0f;
-          DecodeAnimatedSpriteTile_variable(0x28);
-        } else {
-          DecodeAnimatedSpriteTile_variable(0x23);
-        }
+    // This whole block sequences the BOSS-PRIZE falling sprite behind the
+    // dungeon's heart-container handshake (dung_savegame_state_bits 0x4000/
+    // 0x8000) and decodes the prize tiles. It only ever runs for a non-medallion
+    // code, which in vanilla means a boss prize — always INDOORS. The Ether/
+    // Bombos tablets reuse this same falling-prize ancilla but on the OVERWORLD;
+    // vanilla is safe there only because both tablets grant a medallion (0x10/
+    // 0x0f), which takes the else branch and skips this block entirely. Under
+    // rando the tablet can hold any item, so a non-medallion code reaches here
+    // on the overworld where dung_savegame_state_bits is stale garbage — the
+    // 0x8000 gate would freeze the prize (or 0x4000 would silently delete it).
+    // Gate the entire dungeon handshake on player_is_indoors so an overworld
+    // tablet prize falls and is collectable immediately. Vanilla unaffected:
+    // its only non-medallion falling prizes are boss prizes (indoors). (A crystal
+    // 0x20 placed at a tablet would still run the rising-crystal path on the
+    // overworld — out of scope here; crystals are prize-pool, not item-pool.)
+    if (player_is_indoors) {
+      if (dung_savegame_state_bits & 0x4000) {
+        ancilla_type[k] = 0;
+        return;
       }
-      byte_7E04C2--;
-      return;
-    }
-    if (!ancilla_arr3[k] && ancilla_item_to_link[k] == 0x20) {
-      ancilla_arr3[k] = 1;
-      palette_sp6r_indoors = 4;
-      overworld_palette_aux_or_main = 0x200;
-      Palette_Load_SpriteEnvironment_Dungeon();
-      flag_update_cgram_in_nmi++;
+
+      if (!(dung_savegame_state_bits & 0x8000))
+        return;
+
+      if (byte_7E04C2 != 0) {
+        if (byte_7E04C2 == 1) {
+          if (ancilla_item_to_link[k] == 0x20) {
+            sound_effect_ambient = 0x0f;
+            DecodeAnimatedSpriteTile_variable(0x28);
+          } else {
+            DecodeAnimatedSpriteTile_variable(0x23);
+          }
+        }
+        byte_7E04C2--;
+        return;
+      }
+      if (!ancilla_arr3[k] && ancilla_item_to_link[k] == 0x20) {
+        ancilla_arr3[k] = 1;
+        palette_sp6r_indoors = 4;
+        overworld_palette_aux_or_main = 0x200;
+        Palette_Load_SpriteEnvironment_Dungeon();
+        flag_update_cgram_in_nmi++;
+      }
     }
   } else {
     if (ancilla_G[k]) {
@@ -3761,14 +4028,51 @@ void Ancilla29_MilestoneItemReceipt(int k) {  // 88ca8c
   if (submodule_index == 0) {
     CheckPlayerCollOut coll_out;
     if (ancilla_z[k] < 24 && Ancilla_CheckLinkCollision(k, 2, &coll_out) && related_to_hookshot == 0 && link_auxiliary_state == 0) {
+      if (Ancilla29_CommitStoredRandoGrant(
+              k, kRandoGrantPresentation_Animated, NULL))
+        return;
+
+      uint8 receive_item = ancilla_item_to_link[k];
+      if (player_is_indoors &&
+          (receive_item == 0x20 || receive_item == 0x37 ||
+           receive_item == 0x38 || receive_item == 0x39)) {
+        // Free THIS slot before delivering. The grant spawns the vanilla
+        // receipt, which allocates from the same 5-slot pool (Ancilla_AllocInit
+        // scans 0..4); with the pool full, Link_ReceiveItem silently takes its
+        // quiet fallback — no receipt, so no fanfare and no rising-crystal
+        // cutscene, i.e. exactly the softlock this dispatch is meant to avoid,
+        // except the grant would still report Accepted with the prize banked
+        // and the location checked, leaving nothing to retry. Vanilla cleared
+        // the slot first for this reason; the transaction rework moved the
+        // clear after the call. Restore it when delivery did NOT happen, so a
+        // retryable refusal still leaves the prize on the floor.
+        uint8 saved_type = ancilla_type[k];
+        ancilla_type[k] = 0;
+        RandoGrantResult result = Rando_GrantBossPrizeReceipt(
+            BYTE(cur_palace_index_x2) >> 1, receive_item,
+            kRandoGrantPresentation_Animated, 3, 0);
+        if (result == kRandoGrantResult_Accepted ||
+            result == kRandoGrantResult_AlreadyChecked)
+          return;
+        ancilla_type[k] = saved_type;
+        if (result != kRandoGrantResult_NotActive)
+          return;
+      }
+      // Most falling-prize ancillas determine their LttP code upstream at the
+      // spawn site. Boss prizes are the exception under rando: dispatch at
+      // receipt time so falling before pickup leaves the prize uncollected.
       ancilla_type[k] = 0;
-      if (link_player_handler_state == kPlayerState_ReceivingEther || link_player_handler_state == kPlayerState_ReceivingBombos) {
+      // Ether/Bombos tablet receipts arrive with the spell-cutscene player
+      // state still latched (sword held up, custom-anim flag, receiving
+      // handler); this collision is the only place vanilla releases it.
+      if (link_player_handler_state == kPlayerState_ReceivingEther ||
+          link_player_handler_state == kPlayerState_ReceivingBombos) {
         flag_custom_spell_anim_active = 0;
         link_force_hold_sword_up = 0;
         link_player_handler_state = 0;
       }
       item_receipt_method = 3;
-      Link_ReceiveItem(ancilla_item_to_link[k], 0);
+      Link_ReceiveItem(receive_item, 0);
       return;
     }
 
@@ -3787,7 +4091,10 @@ void Ancilla29_MilestoneItemReceipt(int k) {  // 88ca8c
 
   Point16U pt;
   Ancilla_PrepAdjustedOamCoord(k, &pt);
-  OamEnt *oam = Ancilla_ReceiveItem_Draw(k, pt.x, pt.y - ancilla_z[k]);
+  RandoDeferredGrantToken token;
+  OamEnt *oam = Ancilla29_LoadRandoGrantToken(k, &token)
+      ? Ancilla29_DrawRandoGrant(k, pt.x, pt.y - ancilla_z[k], &token)
+      : Ancilla_ReceiveItem_Draw(k, pt.x, pt.y - ancilla_z[k]);
 
   if (sign8(--ancilla_aux_timer[k])) {
     ancilla_aux_timer[k] = 9;
@@ -3815,17 +4122,33 @@ void ItemReceipt_TransmuteToRisingCrystal(int k) {  // 88cbe4
 void Ancilla_RisingCrystal(int k) {  // 88cbf2
   ancilla_z[k] = 0;
   AncillaAdd_OccasionalSparkle(k);
-  uint8 yy = ancilla_y_vel[k] - 1;
-  if (yy < 0xf0)
-    yy = 0xf0;
-  ancilla_y_vel[k] = yy;
-  Ancilla_MoveY(k);
+  if (CutsceneFastForwardEnabled()) {
+    // The rise is purely visual. Land just above the handoff threshold so the
+    // normal transition below still owns every prize/fade/cutscene side effect.
+    ancilla_y_vel[k] = 0xf0;
+    Ancilla_SetY(k, BG2VOFS_copy + 0x48);
+  } else {
+    uint8 yy = ancilla_y_vel[k] - 1;
+    if (yy < 0xf0)
+      yy = 0xf0;
+    ancilla_y_vel[k] = yy;
+    Ancilla_MoveY(k);
+  }
 
   uint16 y = Ancilla_GetY(k) - BG2VOFS_copy;
   if (y < 0x49) {
     Ancilla_SetY(k, 0x49 + BG2VOFS_copy);
     if (!submodule_index) {
-      link_has_crystals |= kDungeonCrystalPendantBit[BYTE(cur_palace_index_x2) >> 1];
+      // §6.6 dispatch (falling boss-prize receipt →
+      // Rando_DispatchVanillaGrant → prize_item_direct_grant) already grants
+      // the PLACED prize's bit when rando is active. Leaving this line
+      // unguarded would double-OR the current dungeon's vanilla crystal on top
+      // of the placed bit when prize_shuffle (Phase A default) puts a
+      // different prize here.
+      // Suppress under rando-active; the dispatch path owns the bit.
+      if (!(enhanced_features1 & kFeatures1_RandomizerActive))
+        // rando-exempt: vanilla-only fall-through; dispatch path above owns the bit when rando is active.
+        link_has_crystals |= kDungeonCrystalPendantBit[BYTE(cur_palace_index_x2) >> 1];
       submodule_index = 0x18;
       subsubmodule_index = 0;
       memset(aux_palette_buffer + 0x20, 0, sizeof(uint16) * 0x60);
@@ -3886,10 +4209,38 @@ lbl_else:
   if (ancilla_step[k] == 1)
     goto label_b;
   if (ancilla_step[k] == 2) {
+    breaktowerseal_var5 = CutsceneClampTimer8(breaktowerseal_var5, 12);
     if (--breaktowerseal_var5 == 0) {
-      trigger_special_entrance = 5;
-      subsubmodule_index = 0;
-      BYTE(R16) = 0;
+      // #82 Inverted: the GT crystal-barrier break cutscene. In vanilla the
+      // seal-break triggers special-entrance 5 (the warp into the now-open
+      // Ganon's Tower). In Inverted the GT entrance sits at a different
+      // overworld location, so z3randomizer inverted.asm GanonTowerAnimation
+      // does NOT trigger the special entrance; instead it just plays the
+      // barrier-break SFX/music and tears down the cutscene-freeze state in
+      // place, leaving the player free to walk to the (relocated) GT entrance.
+      // Mirror that: skip the special-entrance trigger and clear the cutscene
+      // bookkeeping (entrance-cutscene id, sub-sub-module, OAM-skip, immobilize
+      // flag, sprite-freeze, BG shake) the way the asm STZs them, then queue the
+      // break SFX (SFX3=0x1B), music request 2, and SFX1=9. Gated on the active
+      // Inverted rando world-state so vanilla / Open / Standard / Retro take the
+      // original special-entrance warp byte-for-byte.
+      if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+          Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */) {
+        sound_effect_2 = 0x1b;            // SFX3 (barrier-break)
+        trigger_special_entrance = 0;     // OWEntranceCutscene = 0 (no warp)
+        subsubmodule_index = 0;           // SubSubModule
+        nmi_disable_core_updates = 0;     // SkipOAM
+        flag_is_link_immobilized = 0;     // CutsceneFlag
+        flag_unk1 = 0;                    // FreezeSprites
+        bg1_x_offset = 0;                 // BG1ShakeV (word)
+        bg1_y_offset = 0;                 // BG1ShakeH (word)
+        music_control = 2;                // MusicControlRequest
+        sound_effect_ambient = 9;         // SFX1
+      } else {
+        trigger_special_entrance = 5;
+        subsubmodule_index = 0;
+        BYTE(R16) = 0;
+      }
       ancilla_step[k]++;
     }
   } else {
@@ -4014,9 +4365,25 @@ void Ancilla36_Flute(int k) {  // 88cfaa
     } else {
       CheckPlayerCollOut coll_out;
       if (Ancilla_CheckLinkCollision(k, 2, &coll_out) && !related_to_hookshot && link_auxiliary_state == 0) {
+        // Free the slot before delivering (see the tablet site above and
+        // a5ef5eb0): the receipt competes for the same 5-slot pool, and a dig
+        // on the overworld easily has sparkles/dust live.
+        uint8 saved_ancilla_type = ancilla_type[k];
         ancilla_type[k] = 0;
-        item_receipt_method = 0;
-        Link_ReceiveItem(0x14, 0);
+        RandoGrantResult grant = Rando_GrantLocation(
+            LOC_Flute_Spot, ITEM_OcarinaInactive, 0x14,
+            kRandoGrantPresentation_Animated, 0, 0);
+        if (grant == kRandoGrantResult_NotActive) {
+          item_receipt_method = 0;
+          Link_ReceiveItem(0x14, 0);
+        } else if (grant == kRandoGrantResult_Retryable) {
+          // Transient only (a potion needing an empty bottle). Put the dug-up
+          // item back so it stays collectable.
+          ancilla_type[k] = saved_ancilla_type;
+        }
+        // Accepted / AlreadyChecked / Invalid all leave the slot freed: an
+        // Invalid plan can never become valid by colliding again, and keeping
+        // the ancilla alive would leave it floating and re-colliding forever.
         return;
       }
     }
@@ -4025,7 +4392,21 @@ void Ancilla36_Flute(int k) {  // 88cfaa
   Point16U pt;
   Ancilla_PrepAdjustedOamCoord(k, &pt);
   OamEnt *oam = GetOamCurPtr();
-  Ancilla_SetOam(oam, pt.x, pt.y - (int8)ancilla_z[k], 0x24, HIBYTE(oam_priority_value) | 4, 2);
+  // Field item sprites: show the PLACED item flying out of the dig instead of
+  // the vanilla flute. Same slot/draw scheme as Rando_TryDrawFieldItemSprite
+  // (gfx loaded on demand into chars 0x24/0x34; size+palette from the icon).
+  // The spawn (AncillaAdd_DugUpFlute) only reserves a second OAM entry when the
+  // icon was 8x16 at spawn time, so gate the second tile on that reservation.
+  uint8 gfx, big, flags;
+  if (Rando_GetFieldItemIcon(LOC_Flute_Spot, ITEM_OcarinaInactive, &gfx, &big, &flags)) {
+    Rando_EnsureRecvItemSlotGfx(gfx);
+    int y = pt.y - (int8)ancilla_z[k];
+    Ancilla_SetOam(oam, pt.x, y, 0x24, flags, big);
+    if (big == 0 && ancilla_numspr[k] >= 8)
+      Ancilla_SetOam(oam + 1, pt.x, y + 8, 0x34, flags, 0);
+  } else {
+    Ancilla_SetOam(oam, pt.x, pt.y - (int8)ancilla_z[k], 0x24, HIBYTE(oam_priority_value) | 4, 2);
+  }
   if (oam->y == 0xf0)
     ancilla_type[k] = 0;
 }
@@ -4109,6 +4490,11 @@ void Ancilla38_CutsceneDuck(int k) {  // 88d1d8
 
   if (!(frame_counter & 31))
     Ancilla_Sfx3_Pan(k, 0x1e);
+  if (CutsceneFastForwardEnabled()) {
+    if (!ancilla_L[k] && ancilla_item_to_link[k] > 4)
+      ancilla_item_to_link[k] = 4;
+    ancilla_x_vel[k] += sign8(ancilla_x_vel[k]) ? -2 : 2;
+  }
 
   if (sign8(--ancilla_arr3[k])) {
     ancilla_arr3[k] = 3;
@@ -4157,7 +4543,16 @@ after_stuff:
   if (!sign16(info.x) && info.x >= 248) {
     ancilla_type[k] = 0;
     submodule_index = 0;
+    // rando-exempt: cosmetic — post-duck-cutscene flute-upgrade visual state.
+    // link_item_flute=3 is gameplay-equivalent to =2 (level 2); the upgrade
+    // is purely the "flying flute" sprite swap. Not a grant. (audit.md §0.2.3)
     link_item_flute = 3;
+    // Rando flute/shovel decouple: remember the flute is now activated so the
+    // item-menu toggle restores level 3 (not 2) when switching back from the
+    // shovel. Activating the flute requires it to have been the selected slot,
+    // so this never disturbs a shovel selection. No-op outside rando.
+    if (enhanced_features1 & kFeatures1_RandomizerActive)
+      g_rando_flute_shovel_owned |= kRandoFluteShovel_Flute | kRandoFluteShovel_FluteActive;
   }
 }
 
@@ -4171,7 +4566,15 @@ void Ancilla23_LinkPoof(int k) {  // 88d3bc
       if (!ancilla_step[k]) {
         link_animation_steps = 0;
         link_visibility_status = 0;
-        link_is_bunny = link_is_bunny_mirror = BYTE(overworld_screen_index) & 0x40 ? 1 : 0;
+        // #82 Inverted: DecideIfBunnyByScreenIndex (z3randomizer bugfixes.asm).
+        // The poof resolves bunny status from the screen's world bit. Vanilla:
+        // bunny in the DARK world (bit set); Inverted: bunny in the LIGHT world.
+        bool poof_away_world =
+            ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+             Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */)
+              ? !(BYTE(overworld_screen_index) & 0x40)
+              :  (BYTE(overworld_screen_index) & 0x40);
+        link_is_bunny = link_is_bunny_mirror = poof_away_world ? 1 : 0;
         if (link_is_bunny)
           LoadGearPalettes_bunny();
         else
@@ -4637,7 +5040,7 @@ void Ancilla27_Duck(int k) {  // 88dde8
 
   if (ancilla_timer[k]) {
     int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
-    Ancilla_SetXY(k, BG2HOFS_copy2 - 16 - xt, link_y_coord - 8);
+    Ancilla_SetXY(k, BG2HOFS_copy2 - ZeldaWidePictureShift() - 16 - xt, link_y_coord - 8);
     return;
   }
 
@@ -5529,10 +5932,16 @@ void GameOverText_Draw() {  // 88f5c4
   oam_cur_ptr = 0x800;
   oam_ext_cur_ptr = 0xa20;
   OamEnt *oam = GetOamCurPtr();
+  // The letters have their place on the game's screen, which the WIDE
+  // picture drawn beside the game's camera, or moved up at the bottom of an
+  // area, moves its sprites away from.
+  int shift = ZeldaWidePictureShift();
+  uint16 y = 0x57 - g_wide_picture_rows;
   int k = flag_for_boomerang_in_place;
   do {
-    Ancilla_SetOam(oam + 0, Ancilla_GetX(k), 0x57, kGameOverText_Chars[k * 2 + 0], 0x3c, 0);
-    Ancilla_SetOam(oam + 1, Ancilla_GetX(k), 0x5f, kGameOverText_Chars[k * 2 + 1], 0x3c, 0);
+    uint16 x = Ancilla_GetX(k) - shift;
+    Ancilla_SetOam(oam + 0, x, y, kGameOverText_Chars[k * 2 + 0], 0x3c, 0);
+    Ancilla_SetOam(oam + 1, x, y + 8, kGameOverText_Chars[k * 2 + 1], 0x3c, 0);
   } while (oam += 2, --k >= 0);
 }
 
@@ -5982,6 +6391,9 @@ int AncillaAdd_FallingPrize(uint8 a, uint8 item_idx, uint8 yv) {  // 898bc1
   int k = Ancilla_AddAncilla(a, yv);
   if (k < 0)
     return k;
+  // Type 0x29 slots can be reused after a deferred tablet grant. A vanilla
+  // falling prize must clear the token marker before any handler frame.
+  Ancilla29_ClearRandoGrantToken(k);
   uint8 item_type = kFallingItem_Type[item_idx];
   ancilla_item_to_link[k] = item_type;
   if (item_type == 0x10 || item_type == 0xf)
@@ -6000,7 +6412,8 @@ int AncillaAdd_FallingPrize(uint8 a, uint8 item_idx, uint8 yv) {  // 898bc1
 
   int x, y;
   if (item_idx != 0 && item_idx != 5) {
-    if (BYTE(cur_palace_index_x2) == 20) {
+    // A quest can leave this case out: its branch then always skips ($89:8C26).
+    if (BYTE(cur_palace_index_x2) == 20 && Mods_RomByte(0x898c26, 0xd0) == 0xd0) {
       x = (link_x_coord & 0xff00) | 0x100;
       y = (link_y_coord & 0xff00) | 0x100;
     } else {
@@ -6013,6 +6426,254 @@ int AncillaAdd_FallingPrize(uint8 a, uint8 item_idx, uint8 yv) {  // 898bc1
   }
   Ancilla_SetXY(k, x, y);
   return k;
+}
+
+// §6.5 helper for tablet dispatch. Spawns a falling-prize ancilla on the
+// vanilla tablet trajectory (`fallback_idx`) but uses an arbitrary `lttp_code`
+// as the displayed + granted item. The receive-item VRAM slot is loaded
+// immediately so the falling sprite shows the randomized item for its whole
+// descent, not only after Link catches it.
+//
+// Used by Ether/Bombos tablet handlers — lets rando place arbitrary items
+// at the tablet slots without losing the dash-cutscene visual.
+int AncillaAdd_FallingPrizeRando(uint8 a,
+                                 const RandoDeferredGrantToken *token,
+                                 uint8 fallback_idx, uint8 yv) {
+  if (token == NULL)
+    return -1;
+  if (fallback_idx >= 7) fallback_idx = 0;
+  int k = AncillaAdd_FallingPrize(a, fallback_idx, yv);
+  if (k >= 0) {
+    Ancilla29_StoreRandoGrantToken(k, token);
+    if (token->plan.disposition == kRandoGrantDisposition_Receive &&
+        token->plan.receive_code < 76) {
+      ancilla_item_to_link[k] = token->plan.receive_code;
+      link_receiveitem_index = token->plan.receive_code;
+    }
+    if (token->plan.display_valid)
+      Rando_EnsureRecvItemSlotGfx(token->plan.display_gfx);
+  }
+  return k;
+}
+
+int Ancilla_RandoFallingPrizeSelfCheck(void) {
+  static uint8 saved_ram[sizeof(g_ram)], snapshot_ram[sizeof(g_ram)];
+  uint8 saved_checked[kRandoCheckedBitmapBytes];
+  const RandoPlacementTable *saved_placement = Placement_GetActive();
+  const char *failure = NULL;
+  RandoPlacement entry = {7000, ITEM_Rupee1};
+  RandoPlacementTable table = {&entry, 1};
+  RandoDeferredGrantToken token, loaded, reparsed;
+  int k = 2;
+
+#define TABLET_CHECK(expr, message) \
+  do { if (!(expr)) { failure = (message); goto cleanup; } } while (0)
+
+  memcpy(saved_ram, g_ram, sizeof(saved_ram));
+  memcpy(saved_checked, g_rando_checked_bitmap, sizeof(saved_checked));
+  Placement_Install(&table);
+  memset(g_rando_checked_bitmap, 0, sizeof(g_rando_checked_bitmap));
+  memset(ancilla_type, 0, 10);
+  link_rupees_goal = 0;
+  TABLET_CHECK(Rando_PrepareGrant(7000, ITEM_Rupee1, 0x34, &token) ==
+                    kRandoGrantResult_Accepted,
+                "prepare fixture failed");
+
+  // Scatter ABI: all 18 bytes round-trip through the audited field list and
+  // the live receive-item animation byte remains untouched.
+  ancilla_arr4[k] = 0x5a;
+  Ancilla29_StoreRandoGrantToken(k, &token);
+  memset(&loaded, 0, sizeof(loaded));
+  TABLET_CHECK(Ancilla29_LoadRandoGrantToken(k, &loaded) &&
+                    memcmp(&loaded, &token, sizeof(token)) == 0 &&
+                    ancilla_arr4[k] == 0x5a,
+                "scatter round-trip or arr4 isolation failed");
+
+  // Base-snapshot/RAM round-trip: no process-local pointer or sidecar is
+  // needed to recover the token.
+  memcpy(snapshot_ram, g_ram, sizeof(g_ram));
+  memset(g_ram, 0, sizeof(g_ram));
+  memcpy(g_ram, snapshot_ram, sizeof(g_ram));
+  memset(&loaded, 0, sizeof(loaded));
+  TABLET_CHECK(Ancilla29_LoadRandoGrantToken(k, &loaded) &&
+                    memcmp(&loaded, &token, sizeof(token)) == 0,
+                "snapshot RAM round-trip failed");
+
+  // Cancelling the falling visual never commits. A later tablet interaction
+  // can prepare the same location again from current state.
+  ancilla_type[k] = 0;
+  Ancilla29_ClearRandoGrantToken(k);
+  TABLET_CHECK(!Rando_IsLocationChecked(7000) &&
+                    Rando_PrepareGrant(7000, ITEM_Rupee1, 0x34, &reparsed) ==
+                        kRandoGrantResult_Accepted,
+                "cancel/reprepare changed the check");
+
+  // A capacity change between prepare and collision leaves both the token and
+  // tablet cutscene state intact; no vanilla item is substituted.
+  //
+  // Uses a LOOSE POTION, not a bottle: since fix-grant-refusal-contract a 5th
+  // bottle is a PERMANENT refusal and terminates instead of retrying, so it can
+  // no longer exercise the retry-preservation path. A potion with no empty
+  // bottle is the transient refusal that still must preserve caller state.
+  entry.item_id = ITEM_BluePotion;
+  // rando-exempt: self-check fixture; the whole g_ram is restored at
+  // `cleanup:` before this function returns.
+  link_bottle_info[0] = 2;  // one empty bottle: the potion prepares
+  TABLET_CHECK(Rando_PrepareGrant(7000, ITEM_BluePotion, 0x2e, &reparsed) ==
+                    kRandoGrantResult_Accepted,
+                "retry collision fixture did not prepare");
+  ancilla_type[k] = 0x29;
+  Ancilla29_StoreRandoGrantToken(k, &reparsed);
+  memset(link_bottle_info, 3, 4);  // every bottle filled: transiently refused
+  flag_custom_spell_anim_active = 7;
+  link_force_hold_sword_up = 6;
+  link_player_handler_state = 5;
+  link_disable_sprite_damage = 4;
+  flag_is_link_immobilized = 3;
+  flag_block_link_menu = 2;
+  RandoGrantResult retry_result = kRandoGrantResult_Invalid;
+  TABLET_CHECK(Ancilla29_CommitStoredRandoGrant(
+                    k, kRandoGrantPresentation_None, &retry_result) &&
+                    retry_result == kRandoGrantResult_Retryable &&
+                    !Rando_IsLocationChecked(7000) &&
+                    ancilla_type[k] == 0x29 &&
+                    ancilla_U[k] == (uint8)kRandoDeferredGrantTokenVersion &&
+                    flag_custom_spell_anim_active == 7 &&
+                    link_force_hold_sword_up == 6 &&
+                    link_player_handler_state == 5 &&
+                    link_disable_sprite_damage == 4 &&
+                    flag_is_link_immobilized == 3 &&
+                    flag_block_link_menu == 2,
+                "retry collision consumed or changed tablet state");
+
+  // A one-byte shared-field clobber must be rejected without granting or
+  // marking, then deterministically tear down the tablet state. Unlike a
+  // Retryable capacity failure above, retaining this poisoned token would
+  // repeat Invalid forever and strand Link in the collision handler.
+  entry.item_id = ITEM_Rupee1;
+  memset(link_bottle_info, 0, 4);
+  link_rupees_goal = 0;
+  TABLET_CHECK(Rando_PrepareGrant(7000, ITEM_Rupee1, 0x34, &reparsed) ==
+                    kRandoGrantResult_Accepted,
+                "corrupt collision fixture did not prepare");
+  ancilla_type[k] = 0x29;
+  Ancilla29_StoreRandoGrantToken(k, &reparsed);
+  ancilla_arr1[k] ^= 1;  // corrupt one plan byte while retaining the marker
+  flag_custom_spell_anim_active = 7;
+  link_force_hold_sword_up = 6;
+  link_player_handler_state = 5;
+  link_disable_sprite_damage = 4;
+  flag_is_link_immobilized = 3;
+  flag_block_link_menu = 2;
+  button_b_frames = 1;
+  link_delay_timer_spin_attack = 9;
+  RandoGrantResult invalid_result = kRandoGrantResult_Accepted;
+  TABLET_CHECK(Ancilla29_CommitStoredRandoGrant(
+                    k, kRandoGrantPresentation_None, &invalid_result) &&
+                    invalid_result == kRandoGrantResult_Invalid &&
+                    !Rando_IsLocationChecked(7000) && link_rupees_goal == 0 &&
+                    ancilla_type[k] == 0 && ancilla_U[k] == 0 &&
+                    flag_custom_spell_anim_active == 0 &&
+                    link_force_hold_sword_up == 0 &&
+                    link_player_handler_state == 0 &&
+                    link_disable_sprite_damage == 0 &&
+                    flag_is_link_immobilized == 0 &&
+                    flag_block_link_menu == 0 && button_b_frames == 0 &&
+                    link_delay_timer_spin_attack == 0,
+                "invalid collision token granted, marked, or retained tablet state");
+
+  entry.item_id = ITEM_Rupee1;
+  memset(link_bottle_info, 0, 4);
+  TABLET_CHECK(Rando_PrepareGrant(7000, ITEM_Rupee1, 0x34, &reparsed) ==
+                    kRandoGrantResult_Accepted,
+                "accepted collision fixture did not reprepare");
+
+  // Collision consumes the stored token exactly once, grants the frozen plan,
+  // marks the location, and clears both the ancilla and marker.
+  ancilla_type[k] = 0x29;
+  Ancilla29_StoreRandoGrantToken(k, &reparsed);
+  RandoGrantResult collision_result = kRandoGrantResult_Invalid;
+  TABLET_CHECK(Ancilla29_CommitStoredRandoGrant(
+                    k, kRandoGrantPresentation_None, &collision_result),
+                "collision token was not recognized");
+  TABLET_CHECK(collision_result == kRandoGrantResult_Accepted,
+                "collision token was not accepted");
+  if (!Rando_IsLocationChecked(7000) || link_rupees_goal != 1) {
+    fprintf(stderr, "tablet collision state: checked=%d rupees_goal=%u\n",
+            Rando_IsLocationChecked(7000) ? 1 : 0,
+            (unsigned)link_rupees_goal);
+    failure = "collision did not grant and mark";
+    goto cleanup;
+  }
+  TABLET_CHECK(ancilla_type[k] == 0 && ancilla_U[k] == 0,
+                "collision did not clear ancilla and marker");
+
+  // A vanilla/base falling prize clears a stale token marker on slot reuse.
+  memset(ancilla_type, 0, 10);
+  for (int i = 0; i < 5; i++)
+    ancilla_U[i] = (uint8)kRandoDeferredGrantTokenVersion;
+  k = AncillaAdd_FallingPrize(0x29, 1, 4);
+  TABLET_CHECK(k >= 0 && ancilla_U[k] == 0,
+                "base falling prize retained a token marker");
+
+  // A boss prize must start the VANILLA receipt, not the floating direct-grant
+  // icon. The receipt is what plays the fanfare and — for a crystal —
+  // transmutes into the rising-crystal cutscene whose tail sets
+  // submodule_index = 0x18, the only exit from a sealed boss room. Direct-
+  // granting alone banked the crystal and softlocked the player in Palace of
+  // Darkness; nothing here caught it, because this file's other cases assert
+  // the plan/token layer rather than driving a real prize delivery.
+  {
+    static RandoPlacement prize_entry[1];
+    uint16 prize_loc = Rando_GetBossPrizeLocation(kGameDungeon_PalaceOfDarkness);
+    TABLET_CHECK(prize_loc != 0xFFFFu, "PoD has no boss prize location");
+    // A non-PoD crystal at PoD also proves the PLACED prize is what gets
+    // granted, not the dungeon's vanilla one.
+    prize_entry[0].location_id = prize_loc;
+    prize_entry[0].item_id = ITEM_Prize_Crystal4;
+    RandoPlacementTable prize_table = {prize_entry, 1};
+    Placement_Install(&prize_table);
+    memset(g_rando_checked_bitmap, 0, sizeof(g_rando_checked_bitmap));
+    memset(ancilla_type, 0, 10);
+    memset(ancilla_item_to_link, 0, 10);
+    // rando-exempt: self-check fixture zeroing; the whole g_ram is restored at
+    // `cleanup:` before this function returns.
+    link_has_crystals = 0;
+    TABLET_CHECK(Rando_GrantBossPrizeReceipt(
+                     kGameDungeon_PalaceOfDarkness, 0x20,
+                     kRandoGrantPresentation_Animated, 3, 0) ==
+                     kRandoGrantResult_Accepted,
+                 "boss prize grant refused");
+    int receipt = -1, icon = -1;
+    for (int i = 0; i < 10; i++) {
+      if (ancilla_type[i] == kAncillaType_ItemReceipt) receipt = i;
+      if (ancilla_type[i] == kAncillaType_RandoIconReceipt) icon = i;
+    }
+    TABLET_CHECK(icon < 0,
+                 "boss prize used the direct-grant icon: no fanfare, and a "
+                 "crystal never reaches the cutscene that exits the boss room");
+    TABLET_CHECK(receipt >= 0 && ancilla_item_to_link[receipt] == 0x20,
+                 "boss prize did not start the vanilla crystal receipt");
+    // Deliberately "some crystal bit", not a specific one: prize_item_direct_grant
+    // permutes 5 of the 7 crystal->bit assignments relative to the in-game
+    // crystal numbering (upstream Item.php: Crystal1=0x02 .. Crystal7=0x08,
+    // matching this fork's own kDungeonCrystalPendantBit x map-glyph
+    // composition). That is a separate, count-preserving pre-existing bug;
+    // pinning an exact bit here would freeze whichever convention is current.
+    TABLET_CHECK(link_has_crystals != 0, "placed crystal bit not granted");
+  }
+
+cleanup:
+  Placement_Install(saved_placement);
+  memcpy(g_rando_checked_bitmap, saved_checked, sizeof(saved_checked));
+  memcpy(g_ram, saved_ram, sizeof(saved_ram));
+#undef TABLET_CHECK
+  if (failure != NULL) {
+    fprintf(stderr, "Ancilla_RandoFallingPrizeSelfCheck: %s\n", failure);
+    return 1;
+  }
+  fprintf(stderr, "[Ancilla_RandoFallingPrizeSelfCheck] OK\n");
+  return 0;
 }
 
 void AncillaAdd_ChargedSpinAttackSparkle() {  // 898cb1
@@ -6418,7 +7079,7 @@ void AncillaAdd_Duck_take_off(uint8 a, uint8 y) {  // 8994fe
     return;
   int k = Ancilla_AddAncilla(a, y);
   if (k >= 0) {
-    ancilla_timer[k] = 0x78;
+    ancilla_timer[k] = CutsceneFastForwardEnabled() ? 0x18 : 0x78;
     ancilla_L[k] = 0;
     ancilla_z_vel[k] = 0;
     ancilla_z[k] = 0;
@@ -6440,6 +7101,11 @@ void AddBirdTravelSomething(uint8 a, uint8 y) {  // 89951d
     link_cant_change_direction &= ~1;
     ancilla_L[k] = 1;
 
+    // The initial Z velocity is paired with the bird's fixed horizontal speed
+    // so its arc reaches z=0 exactly as it reaches Link. Raising only Z velocity
+    // for cutscene fast-forward makes the 8-bit height wrap past zero; the draw
+    // path then treats it as a large negative offset and both riders disappear.
+    // Fast-forward the surrounding dwell/fade, but preserve this arrival arc.
     if (enhanced_features0 & kFeatures0_ExtendScreen64) {
       // todo: tune these better so the angle of attack is better
       ancilla_z_vel[k] = 58;
@@ -6696,7 +7362,7 @@ void AncillaAdd_WaterfallSplash() {  // 899b68
 
 void AncillaAdd_GTCutscene() {  // 899b83
   if (link_state_bits & 0x80 | link_auxiliary_state ||
-     (link_has_crystals & 0x7f) != 0x7f ||
+     !Rando_HasRequiredTowerCrystals() ||
       save_ow_event_info[0x43] & 0x20)
     return;
 
@@ -6783,6 +7449,132 @@ void FireRodShot_BecomeSkullWoodsFire(int k) {  // 899c4f
   ancilla_item_to_link[0] = 0;
   ancilla_step[0] = 0;
 
+}
+
+// ---------------------------------------------------------------------------
+// Phase B Slice 9 — add-rando-confirmation-icons.
+//
+// Ancilla44_RandoIconReceipt is a Z3R-fork-specific addition (not present in
+// vanilla US ROM). It is used by Rando_ShowDirectGrantConfirmation(item_id)
+// to surface a per-item icon above Link's head for direct-grant items
+// (HalfMagic / QuarterMagic / TriforcePiece / prize bits / dungeon-item bits)
+// that bypass Link_ReceiveItem entirely.
+//
+// Rendering mirrors the vanilla receive-item ancilla
+// (Ancilla_ReceiveItem_Draw): the item's animated-sprite tile bundle is DMA'd
+// into the receive-item VRAM slot at spawn via DecodeAnimatedSpriteTile_
+// variable, then the handler draws OAM chars 0x24 (top) and 0x34 (bottom) out
+// of that slot. Selecting the bundle by GFX index — rather than a raw OAM
+// charnum — guarantees the icon matches whatever the vanilla pickup of that
+// item already shows, with no new sprite art. gfx/big/oam_flags come from
+// kDirectGrantIcons[item_id] (codegen output from
+// assets/rando/direct_grant_icons.yaml).
+//
+// Does NOT grant the item — the direct write already happened upstream
+// inside Rando_DispatchVanillaGrant. This ancilla is visual confirmation
+// only; its lifecycle is independent of any inventory state.
+//
+// Per-ancilla state layout (set by AncillaAdd_RandoIconReceipt):
+//   ancilla_G[k]         — OAM size byte ("big"); 0 -> draw a second tile below
+//                          (8x16), 2 -> single tile.
+//   ancilla_L[k]         — precomputed OAM palette/priority byte.
+//   ancilla_aux_timer[k] — frames remaining (this handler decrements it; zero
+//                          ends the ancilla).
+//
+// The icon rises a few pixels for the first part of its lifetime, then holds,
+// matching the receive-item ancilla's float. No item grant, no message.
+// ---------------------------------------------------------------------------
+void Ancilla44_RandoIconReceipt(int k) {
+  // Hold (draw only, don't advance) while the game is mid-transition. Gate
+  // matches `Ancilla22_ItemReceipt`: submodule_index 0 = normal gameplay; 9 =
+  // item-acquisition cutscene; 43 = Master Sword cutscene.
+  if (submodule_index != 0 && submodule_index != 9 && submodule_index != 43)
+    goto draw;
+
+  // Rise slowly for the first part of the lifetime, then hold.
+  if (ancilla_aux_timer[k] >= 24) {
+    uint8 v = ancilla_y_vel[k] - 1;
+    if (v >= 248)              // clamp small negative (rising) velocity
+      ancilla_y_vel[k] = v;
+    Ancilla_MoveY(k);
+  }
+
+  if (ancilla_aux_timer[k] == 0) {
+    ancilla_type[k] = 0;       // terminate
+    return;
+  }
+  ancilla_aux_timer[k]--;
+
+draw:;
+  // Custom-art icons (gfx 0x80 bit): a door/area transition mid-float reloads
+  // SP1-4 and would leave the icon mis-tinted — re-apply the custom palette
+  // while we still own the shared slot. If another consumer re-painted the
+  // slot, the icon is showing that consumer's tiles anyway (the pre-existing
+  // shared-slot "last DMA wins" behavior), so leave the palette alone.
+  if ((ancilla_item_to_link[k] & 0x80) &&
+      g_recv_item_slot_owner == ancilla_item_to_link[k])
+    Rando_ApplyCustomItemGfxPalette(ancilla_item_to_link[k]);
+  Point16U pt;
+  Ancilla_PrepAdjustedOamCoord(k, &pt);
+  OamEnt *oam = GetOamCurPtr();
+  uint8 flags = ancilla_L[k];
+  Ancilla_SetOam(oam, pt.x, pt.y, 0x24, flags, ancilla_G[k]);
+  oam++;
+  if (ancilla_G[k] == 0)
+    Ancilla_SetOam(oam, pt.x, pt.y + 8, 0x34, flags, 0);
+}
+
+// Spawn helper for the rando direct-grant confirmation icon. `gfx` is a
+// DecodeAnimatedSpriteTile_variable index (kReceiveItemGfx-style); `big` is the
+// OAM size byte (kReceiveItem_Tab1-style); `oam_flags` is the precomputed OAM
+// palette/priority byte ((kWishPond2_OamFlags*2)|0x30). Callers gate on
+// gfx != 0 (the audio-only fallback sentinel) before calling; guard here too
+// to keep the no-op contract local.
+bool AncillaAdd_RandoIconReceipt(uint8 gfx, uint8 big, uint8 oam_flags) {
+  if (gfx == 0)
+    return false;
+
+  // Only one receive-item icon may own the shared VRAM slot (chars 0x24/0x34,
+  // repainted by the DecodeAnimatedSpriteTile_variable call below) at a time.
+  // Unlike a vanilla chest pickup, a direct-grant icon floats during free
+  // gameplay without immobilizing Link, so grabbing several items in quick
+  // succession would otherwise leave multiple icons alive — and every live icon
+  // draws those same two chars, so the last DMA wins and the older icons
+  // suddenly render the newest item's tiles. Retire any still-floating rando
+  // icon so this newest grant's DMA is what the player sees.
+  for (int i = 0; i < 5; i++) {
+    if (ancilla_type[i] == kAncillaType_RandoIconReceipt)
+      ancilla_type[i] = 0;
+  }
+
+  int k = Ancilla_AddAncilla(kAncillaType_RandoIconReceipt, 4);
+  if (k < 0)
+    return false;
+
+  // Load the item's tile bundle into the VRAM slot drawn at chars 0x24/0x34 —
+  // the same load AncillaAdd_ItemReceipt performs for a pickup, via the shared
+  // slot helper so custom-art gfx ids (0x80 bit — triforce piece / rupoor,
+  // add-rando-field-item-custom-art) get their tile + SP3-upper palette, and
+  // vanilla ids keep the sword/shield decompress side-loads.
+  Rando_EnsureRecvItemSlotGfx(gfx);
+
+  ancilla_G[k] = big;
+  ancilla_L[k] = oam_flags;
+  // Stash the gfx id so the draw handler can re-apply a custom-art palette if
+  // a transition reloads sprite palettes while the icon is still floating.
+  // (Vanilla code never reads this field for kAncillaType_RandoIconReceipt.)
+  ancilla_item_to_link[k] = gfx;
+  ancilla_step[k] = 0;
+  ancilla_arr4[k] = 0;
+  ancilla_y_vel[k] = 0;
+  ancilla_x_vel[k] = 0;
+  ancilla_z[k] = 0;
+  ancilla_aux_timer[k] = 0x60;   // ~96-frame lifetime, like a normal receipt.
+  ancilla_timer[k] = 0;
+  // Position above Link's head, matching the receive-item ancilla's default
+  // (item_receipt_method == 0): x += 6, y -= 14.
+  Ancilla_SetXY(k, link_x_coord + 6, link_y_coord - 14);
+  return true;
 }
 
 int Ancilla_AddAncilla(uint8 a, uint8 y) {  // 899ce2
@@ -7101,7 +7893,7 @@ int DashTremor_TwiddleOffset(int k) {  // 8ffafe
 
 void Ancilla_TerminateIfOffscreen(int j) {  // 8ffd52
   int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
-  uint16 x = Ancilla_GetX(j) - BG2HOFS_copy2 + xt;
+  uint16 x = Ancilla_GetX(j) - BG2HOFS_copy2 + ZeldaWidePictureShift() + xt;
   uint16 y = Ancilla_GetY(j) - BG2VOFS_copy2;
   if (x >= 244 + xt * 2 || y >= 240)
     ancilla_type[j] = 0;
@@ -7153,4 +7945,3 @@ void Sprite_CreateDeflectedArrow(int k) {  // 9d8040
     Sprite_PlaceWeaponTink(j);
   }
 }
-

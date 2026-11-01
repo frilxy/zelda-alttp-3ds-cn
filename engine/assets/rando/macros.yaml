@@ -1,0 +1,890 @@
+# macros.yaml — Phase A named-macro definitions
+#
+# Per tasks.md §3.4a: each macro pairs 1:1 with a logic-bearing public method
+# on `alttp_vt_randomizer/app/Support/ItemCollection.php`. The file at
+# `app/Support/ItemCollection.php` (MIT-licensed; verified at audit.md §0.10.1)
+# is the upstream source-of-truth.
+#
+# Source-line citations are mechanically derived: each macro has a `source:`
+# field pointing at the PHP method's exact line range. Translation discipline:
+#  - PHP `$this->has('X')` → `HAS_ITEM(X)` (when treated as boolean)
+#  - PHP `$this->has('X', n)` → `HAS_AMOUNT(X, n)`
+#  - PHP `$this->canFoo($world)` → `CanFoo(world)` (macro call passing through
+#    the world parameter)
+#  - PHP `$world->config(...)` and `$world instanceof World\Inverted` →
+#    `WORLDSTATE_EQ(...)` or Phase B placeholder (`OP_TRICK`, etc.) with notes
+#  - PHP item names: ALTTPR's `PegasusBoots` → our `Boots`,
+#    ALTTPR's `TitansMitt` → our `TitanMitt`,
+#    ALTTPR's `BottleWithGoldBee` → our `BottleWithGoodBee`.
+#  - ALTTPR-specific pool variants not modeled in our `item_registry.yaml`
+#    (`BowAndArrows`, `BowAndSilverArrows`, `ShopArrow`, `MasterSword`,
+#    `UncleSword`, `L1SwordAndShield`, `TenBombs`, `OcarinaActive`) are
+#    dropped from Phase A predicates and called out with notes. Phase B
+#    re-introduces them if the corresponding pool option (`assured`,
+#    `randomized weapons`, `rupee bow`, etc.) is added to our settings.
+#
+# Phase B ops referenced: `OP_TRICK`, `OP_DIFFICULTY_AT_LEAST`,
+# `OP_GLITCH_LEVEL_AT_LEAST`. These never evaluate true under Phase A's pinned
+# logic axes (`tricks=none`, `logic=NoGlitches`) — see audit.md §0.10.2.
+
+format_version: 1
+phase: A
+
+macros:
+  # ===========================================================================
+  # has — base lookup. Not a "named macro" in the ALTTPR sense (it's the
+  # one-argument helper that every other predicate calls), but emitted here
+  # so the audit table is 1:1 with PHP. Codegen does NOT emit it — predicate
+  # bodies in our logic.yaml use `HAS_ITEM` / `HAS_AMOUNT` directly.
+  # ===========================================================================
+  - name: Has
+    parameters: [item, at_least]
+    body: "HAS_AMOUNT(item, at_least)"
+    source: "app/Support/ItemCollection.php:256-276"
+    notes: |
+      ALTTPR's $this->has($key, $at_least=1) tests `item_counts[$key] >= $at_least`,
+      with two special branches we drop in Phase A:
+        (a) `if ($at_least === 0) return true` — caller convention; our DSL
+            forbids zero-arity HAS_AMOUNT.
+        (b) `ShopKey` retro-mode generic-key wildcard (lines 271-273) — Phase
+            B retro-mode handles small-key fungibility separately.
+      Predicate bodies SHOULD inline `HAS_ITEM(X)` / `HAS_AMOUNT(X, n)`
+      rather than call `Has(...)`; this macro exists for provenance only.
+
+  # ===========================================================================
+  # heartCount — counts hearts; reduces to HAS_ANY_COUNT-style usage.
+  # ===========================================================================
+  - name: HeartCount
+    parameters: [initial]
+    body: "HAS_ANY_COUNT([PieceOfHeart, BossHeartContainer, StartingHeart], initial)"
+    source: "app/Support/ItemCollection.php:346-359"
+    notes: |
+      ALTTPR's heartCount() iterates Item\Upgrade\Health instances and adds
+      0.25 per PieceOfHeart, 1.0 per BossHeartContainer, with `$initial=3.0`
+      as the starting-hearts seed. Our DSL has no fractional arithmetic; the
+      common usage (`hasHealth($n)`) is the only call site and it reduces to
+      "do you have enough heart-piece-equivalents to total $n". Phase A
+      handles this via `HasHealth(min)` (below) which expands to a single
+      HAS_ANY_COUNT bucket: PoH counts 1, BossHC counts 1, StartingHeart
+      counts 1. Phase B may refine this to handle the 4-PoH-per-container
+      ratio if hard-mode logic demands sub-heart-container granularity.
+
+  # ===========================================================================
+  # canLiftRocks — light-rock gloves test.
+  # ===========================================================================
+  - name: CanLiftRocks
+    parameters: []
+    body: "HAS_ITEM(PowerGlove) OR HAS_ITEM(ProgressiveGlove) OR HAS_ITEM(TitanMitt)"
+    source: "app/Support/ItemCollection.php:366-371"
+    notes: |
+      ALTTPR's `TitansMitt` is our `TitanMitt` (id 15). `ProgressiveGlove`
+      at any level satisfies; the `>= 1` check is implicit since HAS_ITEM
+      tests presence (any count ≥ 1).
+
+  # ===========================================================================
+  # canLiftDarkRocks — heavy-rock test (Titan's Mitt or ProgGlove L2).
+  # ===========================================================================
+  - name: CanLiftDarkRocks
+    parameters: []
+    body: "HAS_ITEM(TitanMitt) OR HAS_AMOUNT(ProgressiveGlove, 2)"
+    source: "app/Support/ItemCollection.php:378-382"
+
+  # ===========================================================================
+  # CanReachSmithPegPocket — the Light-World pocket shared by Magic Bat and
+  # the five bushes east of the Smithy's house. Enter directly through the
+  # Hammer peg, or (outside Inverted) reach northwest Dark World with Pearl +
+  # Mitts and mirror back into the pocket. Inverted's Mirror carries LW -> DW,
+  # so its reverse-world route cannot enter this Light-World pocket.
+  # ===========================================================================
+  - name: CanReachSmithPegPocket
+    parameters: []
+    body: "HAS_ITEM(Hammer) OR ((NOT WORLDSTATE_EQ(inverted)) AND HAS_ITEM(MagicMirror) AND HAS_ITEM(MoonPearl) AND CanLiftDarkRocks() AND OP_REGION_REACHABLE(DarkWorld_NorthWest))"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:108-122; fork terrain screen 0x22"
+
+  # ===========================================================================
+  # CanReachNorthKakPortalPocket — the four Light-World bushes surrounding the
+  # permanent Dark-World portal north of Kakariko. Enter directly through the
+  # north Hammer pegs or the south heavy-rock pile. Outside Inverted, Link can
+  # instead approach the corresponding screen-0x50 coordinate from the north
+  # through bushes and mirror into the pocket without either direct-entry item.
+  # Inverted's Mirror goes LW -> DW and cannot enter this Light-World pocket.
+  # ===========================================================================
+  - name: CanReachNorthKakPortalPocket
+    parameters: []
+    body: "HAS_ITEM(Hammer) OR CanLiftDarkRocks() OR ((NOT WORLDSTATE_EQ(inverted)) AND HAS_ITEM(MagicMirror) AND HAS_ITEM(MoonPearl) AND OP_REGION_REACHABLE(DarkWorld_NorthWest))"
+    source: "app/Region/Standard/DarkWorld/NorthWest.php:143-164; fork terrain screens 0x10/0x50"
+
+  # ===========================================================================
+  # CanReachLakeHyliaIsland — the heart-piece island and its adjacent bush.
+  # Standard reaches it by swimming in northeast Dark World and mirroring;
+  # Inverted reaches the Light-World island directly with Pearl + Flippers.
+  # Keep the named location and terrain check on one predicate.
+  # ===========================================================================
+  - name: CanReachLakeHyliaIsland
+    parameters: []
+    body: "(WORLDSTATE_EQ(inverted) AND HAS_ITEM(MoonPearl) AND HAS_ITEM(Flippers)) OR ((NOT WORLDSTATE_EQ(inverted)) AND HAS_ITEM(Flippers) AND HAS_ITEM(MagicMirror) AND HAS_ITEM(MoonPearl) AND OP_REGION_REACHABLE(DarkWorld_NorthEast))"
+    source: "app/Region/Standard/LightWorld/South.php:165-175; app/Region/Inverted/LightWorld/South.php:214-223"
+
+  # ===========================================================================
+  # CanCutGrass — thick-grass (map16 0x37e) consume set. Fork-original
+  # (add-rando-grass-rock-shuffle): the ONLY engine paths that consume thick
+  # grass are the sword slash (Overworld_ToolAndTileInteraction, attr 0x37e
+  # branch — the hammer branch handles pegs only, and powder-in-hand skips the
+  # grass case) and bombs (Overworld_BombTile k=3 branch). Bushes need no tool
+  # (bare-handed lift) so they carry no cutter macro.
+  # ===========================================================================
+  - name: CanCutGrass
+    parameters: []
+    body: "HasSword(1) OR CanBombThings()"
+    source: "fork: src/overworld.c Overworld_ToolAndTileInteraction / Overworld_BombTile"
+
+  # ===========================================================================
+  # CanBonk — add-rando-bonk-sanity: wake a dormant bonk sprite. Boots dash,
+  # OR a field-cast Quake. The cast needs any sword EXCEPT under swordless,
+  # where the fork's runtime explicitly permits sword-free medallion casts
+  # (player.c LinkItem_Quake, Rando_IsSwordlessActive — external-review round
+  # 2 caught the omission; the first widening wrongly claimed swordless can't
+  # field-cast). Runtime accepts both wake origins at the same choke point
+  # (owner decision 2026-07-18); the sworded arm mirrors upstream
+  # canGetGoodBee, whose macro here carries the same swordless arm for the
+  # same reason.
+  - name: CanBonk
+    parameters: []
+    body: "HAS_ITEM(Boots) OR (HAS_ITEM(Quake) AND (OP_MODEWEAPONS_EQ(swordless) OR HasSword(1)))"
+    source: "fork: boots.asm dash bonk + Entity_ApplyRumbleToSprites quake wake; shape mirrors upstream ItemCollection::canGetGoodBee"
+
+  # TerrainWorldGateLW / TerrainWorldGateDW — world-side bunny gates for
+  # overworld terrain checks (add-rando-grass-rock-shuffle D7). The bunny can
+  # neither lift nor cut, so a terrain object on the AWAY world side needs the
+  # Moon Pearl (or a pearl-bypass glitch tier). World-state aware in ONE entry:
+  # DW objects are home-side in Inverted; LW objects are home-side otherwise —
+  # deliberately better than pot sanity's non-state-aware DW gate (its known
+  # Inverted over-restriction).
+  # ===========================================================================
+  - name: TerrainWorldGateLW
+    parameters: []
+    body: "(NOT WORLDSTATE_EQ(inverted)) OR HAS_ITEM(MoonPearl) OR CanPearlBypass()"
+    source: "fork: add-rando-grass-rock-shuffle design D7"
+
+  - name: TerrainWorldGateDW
+    parameters: []
+    body: "WORLDSTATE_EQ(inverted) OR HAS_ITEM(MoonPearl) OR CanPearlBypass()"
+    source: "fork: add-rando-grass-rock-shuffle design D7"
+
+  # ===========================================================================
+  # canLightTorches — fire source.
+  # ===========================================================================
+  - name: CanLightTorches
+    parameters: []
+    body: "HAS_ITEM(FireRod) OR HAS_ITEM(Lamp)"
+    source: "app/Support/ItemCollection.php:389-392"
+
+  # ===========================================================================
+  # canMeltThings — ice-statue / freezor melt.
+  # ===========================================================================
+  - name: CanMeltThings
+    parameters: [world]
+    body: "HAS_ITEM(FireRod) OR (HAS_ITEM(Bombos) AND (OP_MODEWEAPONS_EQ(swordless) OR HasSword(1)))"
+    source: "app/Support/ItemCollection.php:402-406"
+    notes: |
+      ALTTPR: `FireRod OR (Bombos AND (swordless OR hasSword()))`. The swordless
+      branch landed in Phase B (add-rando-trick-logic-and-axes §4): under
+      swordless the runtime lets you cast Bombos without a sword (see
+      Rando_IsSwordlessActive), so OP_MODEWEAPONS_EQ(swordless) satisfies the
+      cast prerequisite; otherwise a sword is required. Under the default
+      (randomized) OP_MODEWEAPONS_EQ(swordless) is false → reduces to the
+      Phase A shape `FireRod OR (Bombos AND HasSword(1))`, default-digest-preserving.
+
+  # ===========================================================================
+  # canFly — duck fast-travel.
+  # ===========================================================================
+  - name: CanFly
+    parameters: [world]
+    body: "HAS_ITEM(OcarinaInactive) AND (OP_INSTANT_FLUTE() OR CanActivateOcarina(world)) AND OP_OW_FLUTE_VANILLA()"
+    source: "app/Support/ItemCollection.php:415-418"
+    notes: |
+      ALTTPR: `OcarinaActive OR (OcarinaInactive AND canActivateOcarina())`.
+      Our item_registry.yaml has only OcarinaInactive (id 30), but the rando
+      default seed setting promotes that pickup directly to the active/bird-woken
+      state (`link_item_flute = 3` + `kRandoFluteShovel_FluteActive`). If
+      instant_flute=false, the predicate falls back to ALTTPR's separate
+      canActivateOcarina route.
+      add-rando-ow-warp-shuffle: CanFly's DESTINATIONS are the eight vanilla
+      flute spots, baked into every edge/location that references this macro.
+      Under an active flute shuffle those routes no longer exist, so the
+      OP_OW_FLUTE_VANILLA conjunct compiles the whole macro false and flute
+      reachability flows solely through the OW_FluteNet hub (whose feeders
+      use CanUseFluteTravel below — possession+activation, no destinations).
+      With the axis off the op is true and behavior is byte-identical.
+
+  # ===========================================================================
+  # CanUseFluteTravel — flute possession + activation WITHOUT destination
+  # semantics (add-rando-ow-warp-shuffle). CanFly's body verbatim minus the
+  # vanilla-destinations conjunct; gates the zone -> OW_FluteNet hub feeders.
+  # NEVER add OP_OW_FLUTE_VANILLA here — that would dead-end the hub.
+  # ===========================================================================
+  - name: CanUseFluteTravel
+    parameters: [world]
+    body: "HAS_ITEM(OcarinaInactive) AND (OP_INSTANT_FLUTE() OR CanActivateOcarina(world))"
+    source: "ow_graph substrate (design D6)"
+
+  # ===========================================================================
+  # canActivateOcarina — inverted-world ocarina-cutscene gate. PRIVATE in
+  # PHP. CanFly calls it only when the seed opts out of instant flute activation.
+  # ===========================================================================
+  - name: CanActivateOcarina
+    parameters: [world]
+    body: "(NOT WORLDSTATE_EQ(inverted)) OR (HAS_ITEM(MoonPearl) AND (HAS_ITEM(DefeatAgahnim) OR (HAS_ITEM(Hammer) AND CanLiftRocks()) OR CanLiftDarkRocks()))"
+    source: "app/Support/ItemCollection.php:420-428"
+    notes: |
+      ALTTPR's `canActivateOcarina` returns true unconditionally outside
+      Inverted mode; in Inverted, it requires MoonPearl plus a route to
+      the dark-world flute spot (defeated Agahnim, OR pyramid-fairy
+      pocket via Hammer+light-glove, OR Titan's Mitt). DefeatAgahnim is
+      our virtual item (registry id 123). The private modifier in PHP
+      is irrelevant for our purposes — we surface it as a public macro
+      so canFly can call it.
+
+  # ===========================================================================
+  # canSpinSpeed — pegasus-boots dash with hookshot/sword for boosting.
+  # ===========================================================================
+  - name: CanSpinSpeed
+    parameters: []
+    body: "HAS_ITEM(Boots) AND (HasSword(1) OR HAS_ITEM(Hookshot))"
+    source: "app/Support/ItemCollection.php:435-439"
+    notes: |
+      ALTTPR's `PegasusBoots` maps to our `Boots` (item_registry.yaml id 37).
+
+  # ===========================================================================
+  # canAcquireFairy — fairy-catching rules. Drops to settings switch.
+  # ===========================================================================
+  - name: CanAcquireFairy
+    parameters: [world]
+    body: "TRUE()"
+    source: "app/Support/ItemCollection.php:444-450"
+    notes: |
+      ALTTPR returns False when `$world->config('rom.CatchableFairies', true)`
+      is disabled; default is true. Phase A pins fairy-catching as available
+      (we have no setting equivalent yet). Phase B adds a settings switch
+      and replaces the body with `NOT OP_NO_CATCHABLE_FAIRIES()` or similar.
+
+  # ===========================================================================
+  # canBunnyRevive — bottle+net for water-bunny revival.
+  # ===========================================================================
+  - name: CanBunnyRevive
+    parameters: [world]
+    body: "HasABottle() AND HAS_ITEM(BugCatchingNet) AND CanAcquireFairy(world)"
+    source: "app/Support/ItemCollection.php:457-466"
+    notes: |
+      ALTTPR's body conditionally folds in `canAcquireFairy($world)` only
+      when `$world !== null`; in our codegen the parameter is always bound
+      so we keep the macro call unconditional.
+
+  # ===========================================================================
+  # canShootArrows — bow + arrows test (level 1 or 2 for silvers).
+  # ===========================================================================
+  - name: CanShootArrows
+    parameters: [world, min_level]
+    body: "((HAS_ITEM(Bow) OR HAS_ITEM(ProgressiveBow)) AND (min_level EQ 1)) OR ((HAS_ITEM(BowAndSilverArrows) OR HAS_AMOUNT(ProgressiveBow, 2) OR (HAS_ITEM(SilverArrowUpgrade) AND (HAS_ITEM(Bow) OR HAS_ITEM(ProgressiveBow)))) AND (min_level EQ 2))"
+    source: "app/Support/ItemCollection.php:476-493"
+    notes: |
+      ALTTPR's full body is parameterized by min_level (1 default, 2 for
+      silver-only contexts), and gated by `rom.rupeeBow` (drops bow without
+      ShopArrow item). Phase A pins `rupeeBow=false` so the `ShopArrow`
+      branches collapse out. ALTTPR-specific pool variants `BowAndArrows`
+      and `BowAndSilverArrows` are NOT in our item_registry.yaml — they're
+      "assured starting" pool quirks. The `BowAndSilverArrows` branch is
+      retained for compat with assured-silvers settings (Phase B). The
+      DSL `EQ` operator on integer params is a Phase A authoring shorthand;
+      if the grammar rejects it, codegen MUST expand `CanShootArrows(W,1)`
+      and `CanShootArrows(W,2)` into separate macros at substitution time.
+      Pragmatic Phase A: most callers use `CanShootArrows()` with default
+      min_level=1, and we publish `CanShootArrows` as the level-1 variant
+      and `CanShootSilvers` as the level-2 variant (see below).
+
+  # CanShootArrows shorthand: level-1, world-agnostic (the common call site).
+  - name: CanShootArrowsL1
+    parameters: []
+    body: "HAS_ITEM(Bow) OR HAS_ITEM(ProgressiveBow)"
+    source: "app/Support/ItemCollection.php:476-493 (case 1 default branch)"
+    notes: |
+      Phase A simplification: rupeeBow=false → bow alone is sufficient
+      regardless of arrow ammo. This is the form referenced by location
+      predicates like Eastern Palace - Boss (see `01_eastern_palace.yaml`).
+
+  # CanShootArrows shorthand: level-2 (silver arrows for Ganon, etc.).
+  - name: CanShootSilvers
+    parameters: []
+    body: "HAS_AMOUNT(ProgressiveBow, 2) OR (HAS_ITEM(SilverArrowUpgrade) AND (HAS_ITEM(Bow) OR HAS_ITEM(ProgressiveBow)))"
+    source: "app/Support/ItemCollection.php:476-493 (case 2 branch)"
+    notes: |
+      Silver arrows for Ganon damage. ALTTPR's `BowAndSilverArrows` pool
+      variant is not in our registry; reachability requires either
+      ProgressiveBow level 2 OR a regular bow plus the standalone
+      SilverArrowUpgrade item.
+
+  # ===========================================================================
+  # Phase B Slice 2 §49 — Bomb Merchant accessibility (predicate-only model
+  # for the BigRedBomb gate; no item id added to item_registry.yaml).
+  #
+  # ALTTPR upstream models BigRedBomb as a placement-pool item granted by
+  # the Bomb Merchant interaction (location_registry id 236 = Bomb
+  # Merchant). The 4 Pyramid Fairy chests gate on `HAS_ITEM(BigRedBomb)`.
+  # In zelda3-fork's Phase A item_registry the BigRedBomb is NOT modeled
+  # as a separate item — it's transient state granted by the
+  # Bomb-Merchant interaction. Functionally equivalent for reachability:
+  # having the inventory + crystal prereqs to ENTER Bomb Merchant is
+  # equivalent to "able to obtain + deliver a BigRedBomb to the Pyramid
+  # Fairy" (both endpoints are in the same DarkWorld_NorthEast region).
+  #
+  # This macro mirrors the Bomb Merchant predicate (per Inverted/LightWorld/
+  # South.php:90-94 which the Slice 2 H1 fix authored). Use it at Pyramid
+  # Fairy locations as the BigRedBomb-gate proxy.
+  # ===========================================================================
+  - name: CanReachBombMerchant
+    parameters: []
+    body: "HAS_ITEM(MoonPearl) AND OP_HAS_PRIZE(Prize_Crystal5) AND OP_HAS_PRIZE(Prize_Crystal6)"
+    source: "app/Region/Inverted/LightWorld/South.php:90-94 (Bomb Merchant predicate)"
+    notes: |
+      Equivalent to `$items->has('BigRedBomb')` in ALTTPR. The
+      BigRedBomb item itself is NOT in item_registry.yaml; this macro
+      stands in. If item_registry expands later to include BigRedBomb
+      and Bomb Merchant is wired to grant it, the macro body can switch
+      to `HAS_ITEM(BigRedBomb)` and the gate semantics stay identical.
+
+  # ===========================================================================
+  # canBlockLasers — mirror shield (or ProgShield L3).
+  # ===========================================================================
+  - name: CanBlockLasers
+    parameters: []
+    body: "HAS_ITEM(MirrorShield) OR HAS_AMOUNT(ProgressiveShield, 3)"
+    source: "app/Support/ItemCollection.php:500-504"
+
+  # ===========================================================================
+  # canExtendMagic — magic bar headroom for extended sequences.
+  # ===========================================================================
+  - name: CanExtendMagic
+    parameters: [world, bars]
+    body: "HAS_ITEM(HalfMagic) OR HAS_ITEM(QuarterMagic) OR HasBottle(1)"
+    source: "app/Support/ItemCollection.php:513-526"
+    notes: |
+      ALTTPR computes a numeric magic budget:
+        baseMagic = QuarterMagic ? 4 : HalfMagic ? 2 : 1
+        bottleMagic = baseMagic * bottleCount() * magicModifier
+        return (baseMagic + bottleMagic) >= $bars
+      With magicModifier=1.0 (rom.BottleFill.Magic default 0x80) and the
+      common call `canExtendMagic($w, 2.0)`:
+        - QuarterMagic alone: 4+0 = 4 >= 2 ✓
+        - HalfMagic alone:    2+0 = 2 >= 2 ✓
+        - 1 bottle alone:     1+1 = 2 >= 2 ✓
+        - nothing:            1+0 = 1 < 2 ✗
+      So the default-bars-2.0 collapse is `HalfMagic OR QuarterMagic OR
+      HasBottle(1)`. Phase B handles the rare non-default `bars` callers
+      (e.g., `bars=8.0` for long-sequence ice-rod chains) via a higher
+      HAS_ANY_COUNT or by introducing a CanExtendMagicLarge variant.
+      The `bars` parameter is accepted for signature parity but ignored
+      in the Phase A body.
+
+  # ===========================================================================
+  # glitchedLinkInDarkWorld — major-glitches dark-world bunny override.
+  # ===========================================================================
+  - name: GlitchedLinkInDarkWorld
+    parameters: []
+    body: "HAS_ITEM(MoonPearl) OR HasABottle()"
+    source: "app/Support/ItemCollection.php:533-537"
+    notes: |
+      Used only when major-glitches logic is enabled (a Phase B logic axis).
+      Phase A pins `logic=NoGlitches`; predicates that gate on this should
+      add `OP_GLITCH_LEVEL_AT_LEAST(major)` to suppress this branch.
+
+  # ===========================================================================
+  # hasHealth — minimum health budget for damage-bottled sequences.
+  # ===========================================================================
+  - name: HasHealth
+    parameters: [minimum]
+    body: "HAS_ANY_COUNT([PieceOfHeart, BossHeartContainer, StartingHeart], minimum)"
+    source: "app/Support/ItemCollection.php:546-553"
+    notes: |
+      ALTTPR sums `item->power` over Item\Upgrade\Health instances. Our
+      simplification: each heart-bearing item counts 1 toward `minimum`.
+      In practice the only Phase A call site is rare; if hard logic needs
+      sub-container granularity (PieceOfHeart counting as 0.25 each), this
+      macro grows into a Phase B-tagged variant.
+
+  # ===========================================================================
+  # canKillEscapeThings — minimum-firepower test for the uncle/escape segment.
+  # ===========================================================================
+  - name: CanKillEscapeThings
+    parameters: [world]
+    body: "HasSword(1) OR HAS_ITEM(CaneOfSomaria) OR HAS_ITEM(CaneOfByrna) OR HAS_ANY_OF([Bombs1, Bombs3, Bombs10]) OR CanShootArrowsL1() OR HAS_ITEM(Hammer) OR HAS_ITEM(FireRod)"
+    source: "app/Support/ItemCollection.php:562-574"
+    notes: |
+      ALTTPR's body includes `UncleSword` (Standard-mode uncle gift item
+      that doesn't exist in our pool — we use ProgressiveSword from
+      RescuedZelda forward). Its `TenBombs` branch remains an explicit
+      Bombs1/Bombs3/Bombs10 inventory test here rather than composing with
+      CanBombThings(), because general bomb access is renewable while the
+      Standard escape must still receive a concrete sphere-0 ammo refill.
+      HasSword(1) covers the sword case (any sword satisfies "escape kill").
+      Enemizer's `enemyHealth='default'` gate on the bomb/byrna branches is
+      dropped: Phase A pins enemizer off.
+      The `ignoreCanKillEscapeThings` config switch is also dropped
+      (Standard-mode escape Phase B feature).
+
+  # ===========================================================================
+  # canKillMostThings — general-purpose enemy-kill predicate.
+  # ===========================================================================
+  - name: CanKillMostThings
+    parameters: [world, enemies]
+    body: "HasSword(1) OR HAS_ITEM(CaneOfSomaria) OR CanShootArrowsL1() OR HAS_ITEM(Hammer) OR HAS_ITEM(FireRod) OR (CanBombThings() AND (enemies LT 6)) OR (HAS_ITEM(CaneOfByrna) AND ((enemies LT 6) OR CanExtendMagic(world, 2)))"
+    source: "app/Support/ItemCollection.php:584-595"
+    notes: |
+      ALTTPR's `enemies` parameter (default 5) gates the bomb/byrna branches
+      ("< 6 enemies you can bomb individually before running out"). The
+      enemizer.enemyHealth='default' gate is dropped (Phase A pins enemizer
+      off). The `enemies LT 6` literal-int comparison is a Phase A authoring
+      shorthand; codegen MUST expand at substitution time to a fixed
+      constant per call site (e.g., `CanKillMostThings(w, 4)` evaluates the
+      branches with `enemies=4` literal, dropping the `enemies LT 6` guard
+      to TRUE()).
+
+  # ===========================================================================
+  # canKillHceThings — world-state-aware Hyrule Castle enemy combat.
+  # ===========================================================================
+  - name: CanKillHceThings
+    parameters: [world]
+    body: "(WORLDSTATE_EQ(standard) AND CanKillEscapeThings(world)) OR ((WORLDSTATE_EQ(open) OR WORLDSTATE_EQ(retro) OR WORLDSTATE_EQ(inverted)) AND CanKillMostThings(world, 5))"
+    source: "app/Region/Open/HyruleCastleEscape.php:24-56; app/Region/Standard/HyruleCastleEscape.php:65-97"
+    notes: |
+      Standard's opening escape needs a concrete weapon or bomb refill. Open
+      and Retro bypass that sequence, while Inverted enters from its own
+      overworld, so generated HCE enemy/drop/pot checks use ordinary renewable-
+      bomb combat in those modes. Static Inverted locations may still install
+      their own authoritative per-location overrides.
+
+  # ===========================================================================
+  # CanKillBoss — boss-shuffle runtime dispatch (add-rando-shuffles-and-minigames).
+  # Resolves the boss CURRENTLY ASSIGNED to <dungeon> (boss-shuffle) and evaluates
+  # that boss's kill predicate. boss_shuffle OFF ⇒ the assignment is the vanilla
+  # identity, so this is byte-identical to the inline CanKill<VanillaBoss> macro
+  # it replaces at each dungeon's `- Boss`/`- Prize` location. The argument is the
+  # DUNGEON (HCE..GT), not a boss — the dungeon picks the boss at eval time. GT's
+  # internal miniboss gauntlet + the pinned Agahnim slots keep their direct
+  # CanKill<Boss> calls (they are never shuffled).
+  # ===========================================================================
+  - name: CanKillBoss
+    parameters: [dungeon]
+    body: "OP_CAN_KILL_BOSS(dungeon)"
+    source: "app/Boss.php (Boss::canBeat for the dungeon's assigned boss; resolved at eval)"
+
+  # ===========================================================================
+  # NeedsBossSoul / NeedsEnemySoul (add-enemy-souls). Wrap a soul-item
+  # requirement so it binds only at (or above) its souls_shuffle tier: below the
+  # tier the NOT collapses the disjunction to true and the pre-souls predicate
+  # is unchanged (souls_shuffle=off placement byte-identical). Boss/prize
+  # locations do NOT need these - OP_CAN_KILL_BOSS resolves the ASSIGNED boss's
+  # soul internally (eval_can_kill_boss). These macros are for STATIC sites:
+  # GT refights, goal predicates, kill-gated rooms, enemy-check rows.
+  # ===========================================================================
+  - name: NeedsBossSoul
+    parameters: [soul]
+    body: "(NOT OP_SOULS_TIER_AT_LEAST(bosses)) OR HAS_ITEM(soul)"
+  - name: NeedsEnemySoul
+    parameters: [soul]
+    body: "(NOT OP_SOULS_TIER_AT_LEAST(bosses_enemies)) OR HAS_ITEM(soul)"
+  # NeedsNpcSoul (add-npc-souls). Same collapse pattern keyed on the
+  # independent npc_souls toggle: off leaves every gated predicate at its
+  # pre-npc-souls value (placement byte-identical).
+  - name: NeedsNpcSoul
+    parameters: [soul]
+    body: "(NOT OP_NPC_SOULS_ACTIVE()) OR HAS_ITEM(soul)"
+
+  # ===========================================================================
+  # canBombThings — ordinary-world bomb access is universally renewable.
+  # ===========================================================================
+  - name: CanBombThings
+    parameters: []
+    body: "TRUE()"
+    source: "app/Support/ItemCollection.php:602-605"
+    notes: |
+      ALTTPR returns true unconditionally: ordinary drops, terrain secrets,
+      and shops make bombs renewable without a permanent bomb-bag item. This
+      port previously item-gated the macro under the false premise that ALTTPR
+      pre-grants 10 bomb ammo. Standard escape safety is handled separately by
+      CanKillEscapeThings's explicit Bombs1/Bombs3/Bombs10 branch and the
+      runtime escape refill.
+
+  # ===========================================================================
+  # canGetGoodBee — golden bee acquisition.
+  # ===========================================================================
+  - name: CanGetGoodBee
+    parameters: []
+    body: "HAS_ITEM(BugCatchingNet) AND HasABottle() AND (HAS_ITEM(Boots) OR (HAS_ITEM(Quake) AND (OP_MODEWEAPONS_EQ(swordless) OR HasSword(1))))"
+    source: "app/Support/ItemCollection.php:612-618"
+    notes: |
+      ALTTPR's `PegasusBoots` maps to our `Boots`. The boots-or-sword+quake
+      branches reflect the two ways to stagger-stun the bee swarm.
+
+  # ===========================================================================
+  # hasSword — min-level sword test, treating UncleSword as ProgressiveSword.
+  # ===========================================================================
+  - name: HasSword
+    parameters: [min_level]
+    body: "HAS_AMOUNT(ProgressiveSword, min_level) OR HAS_ITEM(L1Sword) OR HAS_ITEM(L2Sword) OR HAS_ITEM(L3Sword) OR HAS_ITEM(L4Sword)"
+    source: "app/Support/ItemCollection.php:627-657"
+    notes: |
+      ALTTPR's hasSword has 4-way min_level switch (1..4) and folds
+      UncleSword + ProgressiveSword(min_level-1), L1SwordAndShield, and
+      MasterSword into the lower-tier disjuncts. Our item_registry.yaml
+      does not model UncleSword (we use ProgressiveSword from
+      RescuedZelda), L1SwordAndShield (a Standard-mode starting bundle),
+      or MasterSword (an item alias for L2Sword). The Phase A body
+      collapses to:
+        - HAS_AMOUNT(ProgressiveSword, min_level) — generalizes all 4 cases
+        - any absolute L1..L4 sword counts as "have any sword" for
+          min_level=1, but a literal L2Sword does NOT satisfy
+          HAS_AMOUNT(ProgressiveSword, 2). For accurate min_level>=2 in
+          absolute-sword mode, callers SHOULD use HasSword2/3/4 variants.
+      The min_level parameter substitution happens at codegen time.
+
+  - name: HasSword2
+    parameters: []
+    body: "HAS_AMOUNT(ProgressiveSword, 2) OR HAS_ITEM(L2Sword) OR HAS_ITEM(L3Sword) OR HAS_ITEM(L4Sword)"
+    source: "app/Support/ItemCollection.php:639-645 (case 2 branch)"
+    notes: |
+      Explicit min_level=2 form. UncleSword + ProgressiveSword (i.e., level
+      1.5) is dropped (no UncleSword in our pool).
+
+  - name: HasSword3
+    parameters: []
+    body: "HAS_AMOUNT(ProgressiveSword, 3) OR HAS_ITEM(L3Sword) OR HAS_ITEM(L4Sword)"
+    source: "app/Support/ItemCollection.php:634-638 (case 3 branch)"
+
+  - name: HasSword4
+    parameters: []
+    body: "HAS_AMOUNT(ProgressiveSword, 4) OR HAS_ITEM(L4Sword)"
+    source: "app/Support/ItemCollection.php:630-633 (case 4 branch)"
+
+  # ===========================================================================
+  # hasArmor — min-level armor test.
+  # ===========================================================================
+  - name: HasArmor
+    parameters: [min_level]
+    body: "HAS_AMOUNT(ProgressiveArmor, min_level) OR HAS_ITEM(BlueMail) OR HAS_ITEM(RedMail)"
+    source: "app/Support/ItemCollection.php:666-678"
+    notes: |
+      ALTTPR's hasArmor switches on min_level (1 or 2). At min_level=2 the
+      BlueMail branch drops (only RedMail or ProgressiveArmor>=2 satisfies).
+      The Phase A parametric form leaves both BlueMail and RedMail in the
+      disjunct; callers needing min_level=2 strictness should use HasArmor2.
+
+  - name: HasArmor2
+    parameters: []
+    body: "HAS_AMOUNT(ProgressiveArmor, 2) OR HAS_ITEM(RedMail)"
+    source: "app/Support/ItemCollection.php:669-672 (case 2 branch)"
+
+  # ===========================================================================
+  # hasBottle — N-bottle test (counts only bottles, not bottle contents
+  # individually — multiple-bottle predicates count distinct bottle items).
+  # ===========================================================================
+  - name: HasBottle
+    parameters: [at_least]
+    body: "HAS_ANY_COUNT([BottleEmpty, BottleWithFairy, BottleWithBee, BottleWithGoodBee, BottleWithRedPotion, BottleWithGreenPotion, BottleWithBluePotion], at_least)"
+    source: "app/Support/ItemCollection.php:687-690"
+    notes: |
+      ALTTPR's hasBottle calls bottleCount() which filters
+      `Item\Bottle` instances. Our bottle taxonomy in item_registry.yaml
+      (ids 43-49) covers all bottle states; HAS_ANY_COUNT sums them.
+      Note: ALTTPR also references a bare `Bottle` item name in hasABottle
+      (line 716) — that's the "Bottle" base-class name in the upstream
+      Item enum, which we model as `BottleEmpty`.
+
+  # ===========================================================================
+  # bottleCount — counter helper, returns int. Emit as macro for citation;
+  # predicate bodies should use HAS_ANY_COUNT([bottles...], N) directly.
+  # ===========================================================================
+  - name: BottleCount
+    parameters: [at_least]
+    body: "HAS_ANY_COUNT([BottleEmpty, BottleWithFairy, BottleWithBee, BottleWithGoodBee, BottleWithRedPotion, BottleWithGreenPotion, BottleWithBluePotion], at_least)"
+    source: "app/Support/ItemCollection.php:697-702"
+    notes: |
+      bottleCount() returns an integer; our DSL has no integer-returning
+      macros (only boolean predicates). The provenance-faithful form is
+      "have at_least N bottles", identical to HasBottle. Predicate bodies
+      should call HasBottle(N) instead.
+
+  # ===========================================================================
+  # Phase B Slice 4 §56 — trick-aware named macros.
+  #
+  # Each macro pairs a trick id from `op_registry.yaml:tricks:` with the
+  # vanilla item prerequisite for that trick (e.g., boots-clip requires
+  # boots in the inventory in addition to the trick bit being set).
+  # Settings axes:
+  #   - settings.tricks (uint8 LE, 1 bit per trick)
+  #   - settings.logic  (NoGlitches=0..NoLogic=4) — glitch level
+  #
+  # Default settings (tricks=0, logic=no_glitches) cause every macro
+  # below to evaluate FALSE, preserving Phase A corpus byte-identity.
+  # ===========================================================================
+  - name: CanBootsClip
+    parameters: []
+    body: "(OP_TRICK(boots_clip) OR OP_GLITCH_LEVEL_AT_LEAST(overworld_glitches)) AND HAS_ITEM(Boots)"
+    source: "config/logic.php:9,18,28 (canBootsClip @ OWG/HMG/MG) + region `config('canBootsClip') && has('PegasusBoots')`"
+    notes: |
+      Mirrors ALTTPR's `$world->config('canBootsClip', false) &&
+      $items->has('PegasusBoots')`. canBootsClip is an OverworldGlitches-group
+      flag — config/logic.php enables it at OverworldGlitches (line 9), HybridMG
+      (18), AND MajorGlitches (28) — so the glitch-level disjunct is
+      OP_GLITCH_LEVEL_AT_LEAST(overworld_glitches) (true at logic>=1). The boots
+      prereq applies to BOTH the trick and the glitch-level path.
+
+      Phase D (add-rando-major-glitch §5) folds the glitch level into the macro
+      (was trick-bit-only). The fork's trick BIT remains as an independent
+      fine-grained opt-in (a fork extension over ALTTPR, which drives the
+      technique purely from the logic level). Default (logic=0, tricks=0)
+      collapses both disjuncts to false → the trick-only form → digest-identical;
+      verified on the NoGlitches + b-tricks-* corpus entries (unchanged).
+      OWG/MG seeds move (faithful — ALTTPR enables boots-clip at those tiers).
+
+  - name: CanFakeFlippers
+    parameters: []
+    body: "OP_TRICK(fake_flippers) OR OP_GLITCH_LEVEL_AT_LEAST(overworld_glitches)"
+    source: "config/logic.php:7,16,26 (canFakeFlipper @ OWG/HMG/MG)"
+    notes: |
+      ALTTPR `config('canFakeFlipper', false)` — no item prereq (fake-flippers
+      needs only the technique). canFakeFlipper is an OWG-group flag
+      (config/logic.php enables it at OverworldGlitches line 7, HybridMG 16,
+      MajorGlitches 26), so the level disjunct is
+      OP_GLITCH_LEVEL_AT_LEAST(overworld_glitches). Phase D folds the level in;
+      the trick bit stays an independent fork opt-in. Callers compose
+      `HAS_ITEM(Flippers) OR CanFakeFlippers()`. Default (logic=0, tricks=0) →
+      false → digest-identical.
+
+  - name: CanDarkRoomNav
+    parameters: []
+    body: "OP_TRICK(dark_room_nav)"
+    source: "ALTTPR `item.require.Lamp=0` config-flag equivalent"
+    notes: |
+      Mirrors ALTTPR's `item.require.Lamp=0` config — when the trick is
+      on, dark-room predicates that gate on Lamp can be bypassed.
+      Usage: `HAS_ITEM(Lamp) OR CanDarkRoomNav()`.
+
+  - name: CanBombJump
+    parameters: []
+    body: "OP_TRICK(bomb_jump) AND CanBombThings()"
+    source: "ALTTPR `canBombJump` toggle"
+    notes: |
+      Bomb-knockback vault. Composes with CanBombThings() (Phase A:
+      always TRUE since bombs are universally available, but kept for
+      symmetry with no-bombs-from-start Phase B variants).
+
+  - name: CanBunnyRevival
+    parameters: [world]
+    body: "OP_TRICK(bunny_revival) AND CanBunnyRevive(world)"
+    source: "ALTTPR `canBunnyRevive` config flag (customizer toggle, NOT a logic-level flag)"
+    notes: |
+      Bunny-state recovery mid-movement. Composes with the CanBunnyRevive
+      bottle+net prereq macro (already in Phase A).
+
+      DELIBERATELY trick-bit-only, NOT folded with a glitch level (unlike
+      CanBootsClip/CanFakeFlippers/CanPearlBypass in Phase D §5). `canBunnyRevive`
+      is NOT enabled by ANY entry in config/logic.php — the OWG/HMG/MG flag sets
+      use `canSuperBunny` + `canDungeonRevive`, never `canBunnyRevive` (verified
+      by an apply-time grep: `canBunnyRevive => true` appears nowhere in config/).
+      It is a standalone customizer toggle upstream. Folding a glitch-level
+      disjunct here would over-reach. Do NOT "fix" this to match the siblings.
+
+  - name: CanPearlBypass
+    parameters: []
+    body: "(OP_TRICK(pearl_bypass) OR (OP_GLITCH_LEVEL_AT_LEAST(major_glitches) AND (NOT OP_GLITCH_LEVEL_AT_LEAST(hybrid_major_glitches)))) AND HasABottle()"
+    source: "config/logic.php:33 (canOWYBA @ MajorGlitches ONLY) + region `config('canOWYBA') && hasABottle()`"
+    notes: |
+      ALTTPR `config('canOWYBA', false) && $items->hasABottle()` — Over-World
+      Y-Button-Aim, the bottle-assisted dark-world bunny traversal. canOWYBA is a
+      MajorGlitches-EXCLUSIVE flag: config/logic.php enables it ONLY at
+      MajorGlitches (line 33), NOT at OverworldGlitches or HybridMG.
+
+      Because the fork enum numbers MajorGlitches=2 < HybridMajorGlitches=3, the
+      monotone OP_GLITCH_LEVEL_AT_LEAST(>=) cannot express "MG but not HMG" with a
+      single threshold. The MG-exclusive form is
+      `OP_GLITCH_LEVEL_AT_LEAST(major_glitches) AND NOT
+      OP_GLITCH_LEVEL_AT_LEAST(hybrid_major_glitches)`, true only at logic==2
+      (at logic==4 NoLogic it is false, but NoLogic short-circuits reachability,
+      so it never matters). See design.md D4 + the glitch-logic-tier-model memo.
+
+      Phase D (§5) folds this in; the trick bit stays an independent fork opt-in;
+      the bottle prereq applies to BOTH paths. Usage:
+      `HAS_ITEM(MoonPearl) OR CanPearlBypass()`. Default (logic=0, tricks=0) →
+      false → digest-identical. MG seeds move (OWYBA now in logic at MG);
+      HMG/OWG seeds do NOT gain OWYBA (correct — MG-exclusive).
+
+  - name: CanHookshotClip
+    parameters: []
+    body: "OP_TRICK(hookshot_clip) AND HAS_ITEM(Hookshot)"
+    source: "ALTTPR `canHookshotClip` toggle"
+    notes: |
+      Hookshot through wall onto unreachable target. Requires hookshot
+      in inventory; the trick bit toggles whether the glitch is in
+      logic at all.
+
+  - name: CanLobotomy
+    parameters: []
+    body: "OP_TRICK(lobotomy)"
+    source: "Aginah's Cave skip — placeholder for 8th trick slot"
+    notes: |
+      Specific Aginah's Cave skip technique. Reserved for community
+      replacement if a higher-priority Phase B trick emerges.
+
+  # ===========================================================================
+  # F2 — first-class technique macros for the un-modeled glitch techniques
+  # (add-rando-major-glitch frontier F2). ALTTPR's `config('canX', false)` flags
+  # that have NO fork trick bit and were previously stood in for by the raw
+  # OP_GLITCH_LEVEL_AT_LEAST(major_glitches) threshold at ~40 sites. These are
+  # PURE TECHNIQUE GATES (the `config('canX')` half only) — the per-site item
+  # conjunct stays at the call site, exactly as the PHP composes
+  # `config('canX') && <site items>` (the same item can differ per site, e.g.
+  # canSuperSpeed pairs with canSpinSpeed() at most sites but has('PegasusBoots')
+  # at GanonsTower.php:410, so the item CANNOT be baked into the macro).
+  #
+  # Tier→threshold (config/logic.php, the fork enum NoGlitches=0..NoLogic=4):
+  #   OWG-group       → OP_GLITCH_LEVEL_AT_LEAST(overworld_glitches)  (>=1; OWG/HMG/MG)
+  #   canOneFrameClipUW → OP_GLITCH_LEVEL_AT_LEAST(major_glitches)    (>=2; HMG+MG only,
+  #                       since the only non-short-circuited levels >=2 are {MG=2,HMG=3})
+  #   MG-exclusive    → OP_GLITCH_LEVEL_AT_LEAST(major_glitches) AND
+  #                     (NOT OP_GLITCH_LEVEL_AT_LEAST(hybrid_major_glitches))  (true only at MG=2)
+  #
+  # DIGEST-NEUTRAL until wired: defining a macro that no predicate references
+  # emits no bytecode change. The ~40 raw threshold sites still read
+  # OP_GLITCH_LEVEL_AT_LEAST(major_glitches) until F1 reclassifies each to its
+  # matching macro here. Default (logic=0) → every macro false → unchanged.
+  # ===========================================================================
+  - name: CanSuperSpeed
+    parameters: []
+    body: "OP_GLITCH_LEVEL_AT_LEAST(overworld_glitches)"
+    source: "config/logic.php:8,17,27 (canSuperSpeed @ OWG/HMG/MG)"
+    notes: |
+      ALTTPR `config('canSuperSpeed', false)` — boots-dash superspeed traversal.
+      OWG-group flag (OWG line 8, HMG 17, MG 27). Composes at sites with the
+      item helper, e.g. `CanSuperSpeed() AND CanSpinSpeed()` (DesertPalace.php:100,
+      IcePalace.php:146) or `CanSuperSpeed() AND HAS_ITEM(Boots)`
+      (GanonsTower.php:410). Restored + owner-playtest-confirmed on US 1.0
+      (Superspeed, add-jp-glitch-restoration) but has no independent trick bit,
+      so rom_version_status rides the overworld_glitches level (still untested —
+      the level bundles un-restored techniques). See OVERNIGHT_REPORT ledger.
+
+  - name: CanSuperBunny
+    parameters: []
+    body: "OP_GLITCH_LEVEL_AT_LEAST(overworld_glitches)"
+    source: "config/logic.php:6,15,25 (canSuperBunny @ OWG/HMG/MG)"
+    notes: |
+      ALTTPR `config('canSuperBunny', false)` — dark-world super-bunny traversal
+      (moving while in bunny state without the Moon Pearl). OWG-group flag (OWG
+      line 6, HMG 15, MG 25). Per-site item conjunct stays at the call site.
+      NOT restored by add-jp-glitch-restoration → US-1.0 unverified.
+
+  - name: CanMirrorClip
+    parameters: []
+    body: "OP_GLITCH_LEVEL_AT_LEAST(overworld_glitches)"
+    source: "config/logic.php:10,19,29 (canMirrorClip @ OWG/HMG/MG)"
+    notes: |
+      ALTTPR `config('canMirrorClip', false)` — mirror-assisted terrain clip
+      (distinct from the dungeon Mirror Block Erase glitch). OWG-group flag (OWG
+      line 10, HMG 19, MG 29). Typically pairs with has('PegasusBoots') and/or
+      Mirror at the site. NOT restored → US-1.0 unverified.
+
+  - name: CanWaterWalk
+    parameters: []
+    body: "OP_GLITCH_LEVEL_AT_LEAST(overworld_glitches)"
+    source: "config/logic.php:11,20,30 (canWaterWalk @ OWG/HMG/MG)"
+    notes: |
+      ALTTPR `config('canWaterWalk', false)` — boots water-walk. OWG-group flag
+      (OWG line 11, HMG 20, MG 30). Pairs with has('PegasusBoots') at the site.
+      NOT restored → US-1.0 unverified.
+
+  - name: CanDungeonRevive
+    parameters: []
+    body: "OP_GLITCH_LEVEL_AT_LEAST(overworld_glitches)"
+    source: "config/logic.php:12,21,32 (canDungeonRevive @ OWG/HMG/MG)"
+    notes: |
+      ALTTPR `config('canDungeonRevive', false)` — dungeon bunny-revival routing
+      (distinct from the customizer `canBunnyRevive` toggle, which CanBunnyRevival
+      models). OWG-group flag (OWG line 12, HMG 21, MG 32). NOT restored →
+      US-1.0 unverified.
+
+  - name: CanOneFrameClipUW
+    parameters: []
+    body: "OP_GLITCH_LEVEL_AT_LEAST(major_glitches)"
+    source: "config/logic.php:22,35 (canOneFrameClipUW @ HMG/MG — NOT OWG)"
+    notes: |
+      ALTTPR `config('canOneFrameClipUW', false)` — underworld one-frame clip.
+      Enabled at HybridMG (line 22) AND MajorGlitches (line 35) but NOT
+      OverworldGlitches. The threshold OP_GLITCH_LEVEL_AT_LEAST(major_glitches)
+      (>=2) is true at exactly {MG=2, HMG=3} (NoLogic=4 short-circuits
+      reachability), which is precisely the HMG+MG set — the one technique whose
+      enabled-set is expressible as a single monotone threshold above OWG.
+      NOT restored → US-1.0 unverified.
+
+  - name: CanMirrorWrap
+    parameters: []
+    body: "OP_GLITCH_LEVEL_AT_LEAST(major_glitches) AND (NOT OP_GLITCH_LEVEL_AT_LEAST(hybrid_major_glitches))"
+    source: "config/logic.php:31 (canMirrorWrap @ MajorGlitches ONLY)"
+    notes: |
+      ALTTPR `config('canMirrorWrap', false)` — mirror screen-wrap. MajorGlitches-
+      EXCLUSIVE flag (line 31; absent from OWG and HMG). The MG-exclusive form
+      OP_GLITCH_LEVEL_AT_LEAST(major_glitches) AND NOT
+      OP_GLITCH_LEVEL_AT_LEAST(hybrid_major_glitches) is true only at logic==2
+      (the non-monotonic-enum problem — see CanPearlBypass + design.md D4).
+      US-1.0 status = CROSS-VERSION gameplay (deeper romdiff 2026-06-09 CORRECTS
+      an earlier "us10-different" misread): in MirrorWarp_FinalizeAndLoadDestination
+      ($82B260) the warp DESTINATION + Link position + screen-index + camera/scroll
+      math is BYTE-IDENTICAL JP↔US. The ONLY JP↔US delta is the destination
+      screen's overworld MUSIC + ambient-sound selection (the "$7F5B00,x table" is
+      `overworld_music[]`, a WRAM scratch buffer, NOT a destination table; writes
+      differ only at $12C music_control / $12D sound_effect_ambient). So the wrap
+      behaves identically on both ROMs — canMirrorWrap is cross-version ROM like
+      the other un-restored techniques; fork-fidelity / frame-feasibility stays
+      playtest-pending → untested-on-us10. (No us10-different wrap delta exists.)
+
+  - name: CanOneFrameClipOW
+    parameters: []
+    body: "OP_GLITCH_LEVEL_AT_LEAST(major_glitches) AND (NOT OP_GLITCH_LEVEL_AT_LEAST(hybrid_major_glitches))"
+    source: "config/logic.php:34 (canOneFrameClipOW @ MajorGlitches ONLY)"
+    notes: |
+      ALTTPR `config('canOneFrameClipOW', false)` — overworld one-frame clip
+      (the single most common raw threshold, 35 PHP uses). MajorGlitches-EXCLUSIVE
+      (line 34; absent from OWG and HMG). MG-exclusive form (true only at
+      logic==2). NOT restored → US-1.0 unverified.
+
+  - name: CanTransitionWrapped
+    parameters: []
+    body: "OP_GLITCH_LEVEL_AT_LEAST(major_glitches) AND (NOT OP_GLITCH_LEVEL_AT_LEAST(hybrid_major_glitches))"
+    source: "config/logic.php:36 (canTransitionWrapped @ MajorGlitches ONLY)"
+    notes: |
+      ALTTPR `config('canTransitionWrapped', false)` — transition-wrap routing.
+      MajorGlitches-EXCLUSIVE (line 36; absent from OWG and HMG). MG-exclusive
+      form (true only at logic==2). US-1.0 status = CROSS-VERSION gameplay (deeper
+      romdiff 2026-06-09 CORRECTS an earlier "us10-different" misread): in
+      Overworld_FinalizeEntryOntoScreen ($82C242) the Link position
+      (link_x/y_coord) + screen-index ($8A) + camera/scroll math is BYTE-IDENTICAL
+      JP↔US; the divergence (US `LDA $7F5B00,x; LSR` vs JP `LDA $130; CMP #$F1`) is
+      the destination screen's MUSIC selection ONLY (music_unk1==0xf1 gate →
+      music_control/sound_effect_ambient; $7F5B00 = `overworld_music[]` WRAM, NOT a
+      destination table). So transition-wrap behaves identically on both ROMs —
+      cross-version ROM; fork-fidelity / frame-feasibility playtest-pending →
+      untested-on-us10. (No us10-different wrap delta exists.)
+
+  # ===========================================================================
+  # hasABottle — at least one bottle of any kind.
+  # ===========================================================================
+  - name: HasABottle
+    parameters: []
+    body: "HAS_ANY_OF([BottleEmpty, BottleWithFairy, BottleWithBee, BottleWithGoodBee, BottleWithRedPotion, BottleWithGreenPotion, BottleWithBluePotion])"
+    source: "app/Support/ItemCollection.php:709-718"
+    notes: |
+      ALTTPR's hasABottle enumerates `BottleWithBee`, `BottleWithFairy`,
+      `BottleWithRedPotion`, `BottleWithGreenPotion`, `BottleWithBluePotion`,
+      `Bottle` (the base/empty), and `BottleWithGoldBee`. The naming
+      remappings: ALTTPR `Bottle` → our `BottleEmpty`; ALTTPR
+      `BottleWithGoldBee` → our `BottleWithGoodBee`. All 7 of our bottle
+      ids appear in the HAS_ANY_OF list — identical to HasBottle(1) but
+      emits OP_HAS_ANY_OF instead of OP_HAS_ANY_COUNT (saves one operand).

@@ -1,0 +1,258 @@
+# direct_grant_icons.yaml — per-item confirmation-icon table for the §7.6
+# direct-grant visible-confirmation ancilla (OpenSpec change
+# add-rando-confirmation-icons, Phase B Slice 9).
+#
+# WHAT THIS DRIVES
+# ----------------
+# When Rando_DispatchVanillaGrant returns kRandoLttpSkip (a direct-write item
+# that bypasses Link_ReceiveItem — magic upgrades, prize bits, dungeon-item
+# bits, Triforce pieces), Rando_ShowDirectGrantConfirmation(item_id) plays the
+# receive sound, refreshes the HUD, and — using this table — spawns a custom
+# item-receipt ancilla (kAncillaType_RandoIconReceipt) that animates the
+# correct item icon rising above Link's head, exactly like a normal pickup.
+#
+# HOW THE ICON IS RENDERED (read before editing these fields)
+# -----------------------------------------------------------
+# The vanilla receive-item ancilla (Ancilla22_ItemReceipt / AncillaAdd_ItemReceipt
+# in src/misc.c) does NOT reference a fixed tile address in the graphics blob.
+# Instead it DMAs the item's animated-sprite tile bundle into a fixed VRAM tile
+# slot via DecodeAnimatedSpriteTile_variable(gfx), then draws OAM chars 0x24
+# (top) and 0x34 (bottom) out of that slot. The icon's appearance is therefore
+# selected by the GFX-bundle index, NOT by an OAM tile number.
+#
+# So each entry pins three values, all derived from the vanilla receive-item
+# tables in src/misc.c / src/sprite_main.c, indexed by the item's natural LttP
+# receive code:
+#
+#   gfx       - DecodeAnimatedSpriteTile_variable() index = kReceiveItemGfx[lttp].
+#               This is the verified item→sprite-bundle mapping the vanilla
+#               receive animation already uses for that exact item. gfx == 0
+#               is the AUDIO-ONLY SENTINEL (no icon spawned) — no direct-grant
+#               item legitimately maps to bundle 0 (sword/bow), so 0 is a safe
+#               "not mapped" gate.
+#   big       - the OAM size byte = kReceiveItem_Tab1[lttp]. Value 0 means an
+#               8x16 sprite (a second tile, char 0x34, is drawn below the top
+#               char 0x24); value 2 means a single tile.
+#   oam_flags - the OAM palette/priority byte = (kWishPond2_OamFlags[lttp] * 2)
+#               | 0x30, matching Ancilla_ReceiveItem_Draw exactly. The palette
+#               is what distinguishes the three pendants (same gfx 0x23,
+#               different palette → green / red / blue).
+#
+# DISCOVERY METHOD (per tasks.md §1.3 — no guessing)
+# --------------------------------------------------
+# Every mapped value below was computed by indexing the vanilla tables by the
+# direct-grant item's destination RAM cell:
+#   - Find the LttP receive code whose kMemoryLocationToGiveItemTo[code] equals
+#     the cell the direct-grant writes (link_dungeon_map=0xf368, link_compass=
+#     0xf364, link_bigkey=0xf366, link_num_keys=0xf36f, link_which_pendants=
+#     0xf374, link_has_crystals=0xf37a). See prize_item_direct_grant /
+#     dungeon_item_direct_grant in src/rando/rando.c.
+#   - Read gfx = kReceiveItemGfx[code], big = kReceiveItem_Tab1[code],
+#     oam_flags = (kWishPond2_OamFlags[code]*2)|0x30.
+# These reuse the same bundle the vanilla pickup of that item already shows, so
+# the icon is guaranteed to match without any new sprite art.
+#
+# ITEMS LEFT AUDIO-ONLY (gfx: 0) — none remain. HalfMagic / QuarterMagic /
+# TriforcePiece were the last and now have custom art (see CUSTOM-ART GFX IDS
+# below). gfx: 0 stays the audio-only sentinel for any future unmapped item.
+#   - SmallKey_*: SmallKey direct-grant is a Phase B follow-on (it currently
+#     falls through to the vanilla current-dungeon path in
+#     dungeon_item_direct_grant, so it does NOT reach the skip branch today).
+#     The gfx mapping (kReceiveItemGfx[0x24]=0x0f) IS known and is recorded
+#     here so the icon is ready the moment SmallKey direct-grant lands; it is
+#     harmless until then because the code never passes a SmallKey id to the
+#     confirmation helper.
+
+# CUSTOM-ART GFX IDS (add-rando-field-item-custom-art)
+# -----------------------------------------------------
+# gfx values with the 0x80 bit set are NOT vanilla bundle indices: they are
+# kRandoCustomGfx_* ids (src/rando/rando.h), handled by
+# Rando_EnsureRecvItemSlotGfx — the tile comes from the kRandoCustomItemGfx
+# asset (committed source: assets/rando/custom_item_gfx.png) or a re-coloured
+# vanilla bundle, plus a dedicated 8-colour palette loaded into sprite palette
+# 3's upper half. Such entries use oam_flags 0x36 (palette 3, priority 0x30).
+# Keep the ids in sync with the rando.h enum.
+
+icons:
+  # --- custom art (no vanilla receive bundle; see header note) ---
+  Triforce:      { gfx: 0x80, big: 2, oam_flags: 0x36, notes: "imported pedestal goal reward; shared MIT Triforce art" }
+  TriforcePiece: { gfx: 0x80, big: 2, oam_flags: 0x36, notes: "kRandoCustomGfx_TriforcePiece: 16x16 triforce tile (kRandoCustomItemGfx entry 0, MIT z3r art) + green_blue_guard upper-half palette via SP3" }
+  HalfMagic:     { gfx: 0x81, big: 2, oam_flags: 0x36, notes: "kRandoCustomGfx_HalfMagic: 16x16 1/2-magic decanter (kRandoCustomItemGfx entry 1, MIT z3r art) + green_blue_guard upper-half palette via SP3" }
+  QuarterMagic:  { gfx: 0x82, big: 2, oam_flags: 0x36, notes: "kRandoCustomGfx_QuarterMagic: 16x16 1/4-magic decanter (kRandoCustomItemGfx entry 2, MIT z3r art) + green_blue_guard upper-half palette via SP3" }
+  KeyRing_HyruleCastleEscape: { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  KeyRing_EasternPalace:      { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  KeyRing_DesertPalace:       { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  KeyRing_TowerOfHera:        { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  KeyRing_HyruleCastleTower:  { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  KeyRing_PalaceOfDarkness:   { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  KeyRing_SwampPalace:        { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  KeyRing_SkullWoods:         { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  KeyRing_ThievesTown:        { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  KeyRing_IcePalace:          { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  KeyRing_MiseryMire:         { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  KeyRing_TurtleRock:         { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  KeyRing_GanonsTower:        { gfx: 0x86, big: 2, oam_flags: 0x36, notes: "shared Key Ring custom art" }
+  SkeletonKey:                { gfx: 0x87, big: 2, oam_flags: 0x36, notes: "Skeleton Key custom art" }
+
+  # --- prizes: pendants (gfx 0x23, palette distinguishes color) ---
+  Prize_GreenPendant: { gfx: 0x23, big: 2, oam_flags: 0x38, notes: "pendant bundle; green palette (lttp 0x37)" }
+  Prize_RedPendant:   { gfx: 0x23, big: 2, oam_flags: 0x34, notes: "pendant bundle; red palette (lttp 0x39)" }
+  Prize_BluePendant:  { gfx: 0x23, big: 2, oam_flags: 0x32, notes: "pendant bundle; blue palette (lttp 0x38)" }
+
+  # --- prizes: crystals (gfx 0x28, single crystal icon, lttp 0x20) ---
+  Prize_Crystal1: { gfx: 0x28, big: 2, oam_flags: 0x3c, notes: "crystal bundle (lttp 0x20)" }
+  Prize_Crystal2: { gfx: 0x28, big: 2, oam_flags: 0x3c, notes: "crystal bundle (lttp 0x20)" }
+  Prize_Crystal3: { gfx: 0x28, big: 2, oam_flags: 0x3c, notes: "crystal bundle (lttp 0x20)" }
+  Prize_Crystal4: { gfx: 0x28, big: 2, oam_flags: 0x3c, notes: "crystal bundle (lttp 0x20)" }
+  Prize_Crystal5: { gfx: 0x28, big: 2, oam_flags: 0x3c, notes: "crystal bundle (lttp 0x20)" }
+  Prize_Crystal6: { gfx: 0x28, big: 2, oam_flags: 0x3c, notes: "crystal bundle (lttp 0x20)" }
+  Prize_Crystal7: { gfx: 0x28, big: 2, oam_flags: 0x3c, notes: "crystal bundle (lttp 0x20)" }
+
+  # --- dungeon items: BigKey (gfx 0x2f, lttp 0x17) ---
+  BigKey_EasternPalace:    { gfx: 0x22, big: 2, oam_flags: 0x38, notes: "big-key bundle (lttp 0x32 -> link_bigkey 0xf366; gfx 0x22, big 2=Tab1[0x32], oam 0x38 per z3r itemdatatables.asm). Was wrongly lttp 0x17 -> 0xf36b=link_heart_pieces -> gfx 0x2f (heart icon)." }
+  BigKey_DesertPalace:     { gfx: 0x22, big: 2, oam_flags: 0x38, notes: "big-key bundle (lttp 0x32 -> link_bigkey 0xf366; gfx 0x22, big 2=Tab1[0x32], oam 0x38 per z3r itemdatatables.asm). Was wrongly lttp 0x17 -> 0xf36b=link_heart_pieces -> gfx 0x2f (heart icon)." }
+  BigKey_TowerOfHera:      { gfx: 0x22, big: 2, oam_flags: 0x38, notes: "big-key bundle (lttp 0x32 -> link_bigkey 0xf366; gfx 0x22, big 2=Tab1[0x32], oam 0x38 per z3r itemdatatables.asm). Was wrongly lttp 0x17 -> 0xf36b=link_heart_pieces -> gfx 0x2f (heart icon)." }
+  BigKey_PalaceOfDarkness: { gfx: 0x22, big: 2, oam_flags: 0x38, notes: "big-key bundle (lttp 0x32 -> link_bigkey 0xf366; gfx 0x22, big 2=Tab1[0x32], oam 0x38 per z3r itemdatatables.asm). Was wrongly lttp 0x17 -> 0xf36b=link_heart_pieces -> gfx 0x2f (heart icon)." }
+  BigKey_SwampPalace:      { gfx: 0x22, big: 2, oam_flags: 0x38, notes: "big-key bundle (lttp 0x32 -> link_bigkey 0xf366; gfx 0x22, big 2=Tab1[0x32], oam 0x38 per z3r itemdatatables.asm). Was wrongly lttp 0x17 -> 0xf36b=link_heart_pieces -> gfx 0x2f (heart icon)." }
+  BigKey_SkullWoods:       { gfx: 0x22, big: 2, oam_flags: 0x38, notes: "big-key bundle (lttp 0x32 -> link_bigkey 0xf366; gfx 0x22, big 2=Tab1[0x32], oam 0x38 per z3r itemdatatables.asm). Was wrongly lttp 0x17 -> 0xf36b=link_heart_pieces -> gfx 0x2f (heart icon)." }
+  BigKey_ThievesTown:      { gfx: 0x22, big: 2, oam_flags: 0x38, notes: "big-key bundle (lttp 0x32 -> link_bigkey 0xf366; gfx 0x22, big 2=Tab1[0x32], oam 0x38 per z3r itemdatatables.asm). Was wrongly lttp 0x17 -> 0xf36b=link_heart_pieces -> gfx 0x2f (heart icon)." }
+  BigKey_IcePalace:        { gfx: 0x22, big: 2, oam_flags: 0x38, notes: "big-key bundle (lttp 0x32 -> link_bigkey 0xf366; gfx 0x22, big 2=Tab1[0x32], oam 0x38 per z3r itemdatatables.asm). Was wrongly lttp 0x17 -> 0xf36b=link_heart_pieces -> gfx 0x2f (heart icon)." }
+  BigKey_MiseryMire:       { gfx: 0x22, big: 2, oam_flags: 0x38, notes: "big-key bundle (lttp 0x32 -> link_bigkey 0xf366; gfx 0x22, big 2=Tab1[0x32], oam 0x38 per z3r itemdatatables.asm). Was wrongly lttp 0x17 -> 0xf36b=link_heart_pieces -> gfx 0x2f (heart icon)." }
+  BigKey_TurtleRock:       { gfx: 0x22, big: 2, oam_flags: 0x38, notes: "big-key bundle (lttp 0x32 -> link_bigkey 0xf366; gfx 0x22, big 2=Tab1[0x32], oam 0x38 per z3r itemdatatables.asm). Was wrongly lttp 0x17 -> 0xf36b=link_heart_pieces -> gfx 0x2f (heart icon)." }
+  BigKey_GanonsTower:      { gfx: 0x22, big: 2, oam_flags: 0x38, notes: "big-key bundle (lttp 0x32 -> link_bigkey 0xf366; gfx 0x22, big 2=Tab1[0x32], oam 0x38 per z3r itemdatatables.asm). Was wrongly lttp 0x17 -> 0xf36b=link_heart_pieces -> gfx 0x2f (heart icon)." }
+
+  # --- dungeon items: Map (gfx 0x21, lttp 0x33) ---
+  Map_HyruleCastleEscape: { gfx: 0x21, big: 2, oam_flags: 0x38, notes: "map bundle (lttp 0x33)" }
+  Map_EasternPalace:      { gfx: 0x21, big: 2, oam_flags: 0x38, notes: "map bundle (lttp 0x33)" }
+  Map_DesertPalace:       { gfx: 0x21, big: 2, oam_flags: 0x38, notes: "map bundle (lttp 0x33)" }
+  Map_TowerOfHera:        { gfx: 0x21, big: 2, oam_flags: 0x38, notes: "map bundle (lttp 0x33)" }
+  Map_PalaceOfDarkness:   { gfx: 0x21, big: 2, oam_flags: 0x38, notes: "map bundle (lttp 0x33)" }
+  Map_SwampPalace:        { gfx: 0x21, big: 2, oam_flags: 0x38, notes: "map bundle (lttp 0x33)" }
+  Map_SkullWoods:         { gfx: 0x21, big: 2, oam_flags: 0x38, notes: "map bundle (lttp 0x33)" }
+  Map_ThievesTown:        { gfx: 0x21, big: 2, oam_flags: 0x38, notes: "map bundle (lttp 0x33)" }
+  Map_IcePalace:          { gfx: 0x21, big: 2, oam_flags: 0x38, notes: "map bundle (lttp 0x33)" }
+  Map_MiseryMire:         { gfx: 0x21, big: 2, oam_flags: 0x38, notes: "map bundle (lttp 0x33)" }
+  Map_TurtleRock:         { gfx: 0x21, big: 2, oam_flags: 0x38, notes: "map bundle (lttp 0x33)" }
+  Map_GanonsTower:        { gfx: 0x21, big: 2, oam_flags: 0x38, notes: "map bundle (lttp 0x33)" }
+
+  # --- dungeon items: Compass (gfx 0x16, lttp 0x25) ---
+  Compass_EasternPalace:    { gfx: 0x16, big: 2, oam_flags: 0x34, notes: "compass bundle (lttp 0x25)" }
+  Compass_DesertPalace:     { gfx: 0x16, big: 2, oam_flags: 0x34, notes: "compass bundle (lttp 0x25)" }
+  Compass_TowerOfHera:      { gfx: 0x16, big: 2, oam_flags: 0x34, notes: "compass bundle (lttp 0x25)" }
+  Compass_PalaceOfDarkness: { gfx: 0x16, big: 2, oam_flags: 0x34, notes: "compass bundle (lttp 0x25)" }
+  Compass_SwampPalace:      { gfx: 0x16, big: 2, oam_flags: 0x34, notes: "compass bundle (lttp 0x25)" }
+  Compass_SkullWoods:       { gfx: 0x16, big: 2, oam_flags: 0x34, notes: "compass bundle (lttp 0x25)" }
+  Compass_ThievesTown:      { gfx: 0x16, big: 2, oam_flags: 0x34, notes: "compass bundle (lttp 0x25)" }
+  Compass_IcePalace:        { gfx: 0x16, big: 2, oam_flags: 0x34, notes: "compass bundle (lttp 0x25)" }
+  Compass_MiseryMire:       { gfx: 0x16, big: 2, oam_flags: 0x34, notes: "compass bundle (lttp 0x25)" }
+  Compass_TurtleRock:       { gfx: 0x16, big: 2, oam_flags: 0x34, notes: "compass bundle (lttp 0x25)" }
+  Compass_GanonsTower:      { gfx: 0x16, big: 2, oam_flags: 0x34, notes: "compass bundle (lttp 0x25)" }
+
+  # --- dungeon items: SmallKey (gfx 0x0f, lttp 0x24). Direct-grant is a Phase B
+  #     follow-on; recorded now so the icon is ready when SmallKey reaches the
+  #     skip branch (harmless until then — the helper is never passed a SmallKey
+  #     id today). ---
+  SmallKey_HyruleCastleEscape: { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+  SmallKey_EasternPalace:      { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+  SmallKey_DesertPalace:       { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+  SmallKey_TowerOfHera:        { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+  SmallKey_HyruleCastleTower:  { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+  SmallKey_PalaceOfDarkness:   { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+  SmallKey_SwampPalace:        { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+  SmallKey_SkullWoods:         { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+  SmallKey_ThievesTown:        { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+  SmallKey_IcePalace:          { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+  SmallKey_MiseryMire:         { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+  SmallKey_TurtleRock:         { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+  SmallKey_GanonsTower:        { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24)" }
+
+  # --- ALTTPR / Retro direct-grant items with no vanilla LttP receive bundle ---
+  #     These had no LttP code, so on the field (add-rando-field-item-sprites)
+  #     they fell back to the vanilla sprite and at grant they were audio-only.
+  #       GenericKey (Retro shared key) -> small-key bundle (gfx 0x0f).
+  #       Rupoor -> custom art (add-rando-field-item-custom-art): the vanilla
+  #         rupee tile re-coloured by ALTTPR's off_black palette
+  #         (kRandoCustomGfx_Rupoor; matches z3r itemdatatables.asm $59 —
+  #         bundle $24 + PalettesCustom_off_black). Previously the plain
+  #         green-rupee bundle, which read as a normal green rupee.
+  GenericKey: { gfx: 0x0f, big: 0, oam_flags: 0x34, notes: "small-key bundle (lttp 0x24); Retro shared key" }
+  Rupoor:     { gfx: 0x83, big: 0, oam_flags: 0x36, notes: "kRandoCustomGfx_Rupoor: vanilla rupee tile (bundle 0x24) + off_black palette via SP3" }
+
+  # --- souls (add-enemy-souls): one shared icon for the whole family ---
+  Soul_ArmosKnights: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Lanmolas: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Moldorm: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Agahnim: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_HelmasaurKing: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Arrghus: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Mothula: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Blind: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Kholdstare: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Vitreous: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Trinexx: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Ganon: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Raven: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Vulture: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Octorok: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Buzzblob: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Snapdragon: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Hinox: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Moblin: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_MiniHelmasaur: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_BushHoarder: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_MiniMoldorm: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Poe: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Ropa: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Bari: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_HardhatBeetle: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Soldier: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Geldman: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Popo: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Armos: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_WalkingZora: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Crab: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_BallChainTrooper: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Rat: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Rope: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Keese: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Leever: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Eyegore: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Gibdo: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Pengator: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Wizzrobe: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Zazak: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Stalfos: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Pikit: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Gibo: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Tektite: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+
+  # --- NPC souls (add-npc-souls): same shared soul icon ---
+  Soul_Npc_Sahasrahla: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_KingZora: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_Witch: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_MagicBat: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_SickKid: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_BottleMerchant: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_Hobo: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_OldMan: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_Stumpy: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_Catfish: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_WaterfallFairy: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_PyramidFairy: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_HomeSmith: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_FrogSmith: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_MiddleAgedMan: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_DiggingGame: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_ChestGame: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_MazeGameLady: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_MazeGameGuy: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_MMCNpc: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_HypeCaveNpc: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_Kiki: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_BombShopDealer: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+  Soul_Npc_Uncle: { gfx: 0x85, big: 2, oam_flags: 0x36 }
+
+  # TrapDamage / TrapFreeze intentionally do not have fixed entries here.
+  # Runtime dispatch handles the trap effect and skips Link_ReceiveItem; their
+  # field/direct-grant icons are selected by rando.c from the full drawable
+  # good-item decoy pool so traps do not all masquerade as one item.

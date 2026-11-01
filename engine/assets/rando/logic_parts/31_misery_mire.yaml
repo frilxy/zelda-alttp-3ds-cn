@@ -1,0 +1,185 @@
+# 31_misery_mire.yaml — Misery Mire logic graph.
+#
+# Mechanically translated from `app/Region/Standard/MiseryMire.php` (MIT,
+# verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# Translation discipline (audit.md §0.10.2):
+#   - Every predicate cites the PHP file:line range it came from.
+#   - Phase B settings branches dropped (defaults pin them out):
+#       * region.cantTakeDamage (false) → byrna/cape disjuncts collapse to TRUE.
+#       * region.wildCompasses / wildMaps / bossNormalLocation (false/true) →
+#         the wild-* disjuncts collapse to TRUE; setFillRules unreachable.
+#       * itemPlacement !== 'basic' branch dropped; keep only the strict
+#         basic-mode requirement.
+#       * canBunnyRevive, canBootsClip, canOWYBA, canOneFrameClipOW,
+#         mode.weapons === 'swordless' — Phase A pinned false.
+#   - PHP item-name remappings:
+#       * KeyD6 → SmallKey_MiseryMire
+#       * BigKeyD6 → BigKey_MiseryMire
+#       * CompassD6 → Compass_MiseryMire
+#       * MapD6 → Map_MiseryMire
+#       * PegasusBoots → Boots
+#       * RescueZelda → RescuedZelda
+
+format_version: 1
+
+regions:
+  # External parent stub — Mire overworld square (flute warp + moon pearl).
+  # Stubbed here for cross-file region reference; the canonical definition
+  # lives in the DarkWorld_Mire region file (codegen merges across files).
+  - id: DarkWorld_Mire
+    name: "Dark World - Mire (stub)"
+    source: "stub for cross-file region reference"
+
+  - id: MiseryMire_Entrance
+    name: "Misery Mire Entrance"
+    source: "app/Region/Standard/MiseryMire.php:132-154 (can_enter approach tile)"
+
+  - id: MiseryMire_Lobby
+    name: "Misery Mire - Lobby"
+    dungeon: MiseryMire
+    parent: MiseryMire_Entrance
+    source: "app/Region/Standard/MiseryMire.php:15-63"
+
+edges:
+  # First leg of can_enter (php:132-154) — reach the MM approach tile.
+  # After dropping Phase B clauses (canBunnyRevive, canOWYBA, canBootsClip,
+  # canOneFrameClipOW, swordless) and itemPlacement basic-mode strict
+  # health/bottle/armor gate (basic only):
+  #   RescuedZelda
+  #   AND MoonPearl                                  [bottle-bunny branch dropped]
+  #   AND (Boots OR Hookshot)                        [keep strict basic branch]
+  #   AND canKillMostThings(world, 8)
+  #   AND DarkWorld_Mire reachable
+  # CanReachDarkMire factors the flute+moonpearl reach (per worked example 04).
+  #
+  # Phase B Slice 4 §7: re-expand the MoonPearl conjunct's bunny-bypass
+  # alternatives (php:140-149 nested OR-chain). Full PHP structure:
+  #   MoonPearl OR (hasABottle AND (
+  #     (BugCatchingNet AND canBunnyRevive AND (
+  #        (canLiftDarkRocks AND (canFly OR (canBootsClip+Boots)))
+  #        OR (canOWYBA AND MagicMirror)
+  #        OR canOneFrameClipOW))
+  #     OR (canOWYBA AND (
+  #        (canBootsClip+Boots)
+  #        OR canOneFrameClipOW
+  #        OR hasBottle(2)))))
+  # Macro mapping:
+  #   canBunnyRevive + hasABottle + BugCatchingNet → CanBunnyRevival(world)
+  #     (CanBunnyRevival bundles CanBunnyRevive which bundles HasABottle +
+  #      BugCatchingNet — macros.yaml CanBunnyRevival)
+  #   canOWYBA + hasABottle               → CanPearlBypass()
+  #   canBootsClip + Boots                → CanBootsClip()
+  #   canOneFrameClipOW                   → OP_GLITCH_LEVEL_AT_LEAST(major_glitches)
+  # Default (tricks=0, logic=NoGlitches) collapses every new disjunct
+  # to FALSE → predicate reduces to the Phase A shape (MoonPearl AND ...).
+  - from: DarkWorld_Mire
+    to: MiseryMire_Entrance
+    predicate: "HAS_ITEM(RescuedZelda) AND (HAS_ITEM(MoonPearl) OR (CanBunnyRevival(world) AND ((CanLiftDarkRocks() AND (CanFly(world) OR CanBootsClip())) OR (CanPearlBypass() AND HAS_ITEM(MagicMirror)) OR CanOneFrameClipOW())) OR (CanPearlBypass() AND (CanBootsClip() OR CanOneFrameClipOW() OR HasBottle(2)))) AND (HAS_ITEM(Boots) OR HAS_ITEM(Hookshot)) AND CanKillMostThings(world, 8) AND CanReachDarkMire()"
+    source: "app/Region/Standard/MiseryMire.php:132-154 (can_enter — approach)"
+
+  # Second leg — read the medallion tablet to open MM.
+  #   medallion match: ((Bombos in MM-medallion-slot AND has Bombos) OR (Ether...) OR (Quake...))
+  #   AND (swordless OR hasSword)
+  # The medallion-shuffle table is encoded by OP_MEDALLION_OPENS;
+  # swordless mode is Phase A=pinned-off, so HasSword(1) required.
+  - from: MiseryMire_Entrance
+    to: MiseryMire_Lobby
+    # §4 swordless: the medallion cast that opens MM needs a sword in vanilla
+    # (MiseryMire.php:139 `swordless || hasSword()`). Inert under randomized.
+    predicate: "OP_MEDALLION_OPENS(MiseryMire_Entrance) AND (OP_MODEWEAPONS_EQ(swordless) OR HasSword(1))"
+    source: "app/Region/Standard/MiseryMire.php:136-139"
+
+locations:
+  # MM - Big Chest (php:73-75): has(BigKeyD6).
+  - id: "Misery Mire - Big Chest"
+    region: MiseryMire_Lobby
+    can_reach: "HAS_ITEM(BigKey_MiseryMire)"
+    source: "app/Region/Standard/MiseryMire.php:73-75"
+
+  # MM - Spike Chest (php:77-80): (!cantTakeDamage || byrna || cape).
+  # Default cantTakeDamage=false → collapses to TRUE.
+  - id: "Misery Mire - Spike Chest"
+    region: MiseryMire_Lobby
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/MiseryMire.php:77-80"
+
+  # MM - Main Lobby (php:82-84): has(KeyD6) OR has(BigKeyD6).
+  - id: "Misery Mire - Main Lobby"
+    region: MiseryMire_Lobby
+    can_reach: "HAS_ITEM(SmallKey_MiseryMire) OR HAS_ITEM(BigKey_MiseryMire)"
+    source: "app/Region/Standard/MiseryMire.php:82-84"
+
+  # MM - Map Chest (php:86-88): identical to Main Lobby.
+  - id: "Misery Mire - Map Chest"
+    region: MiseryMire_Lobby
+    can_reach: "HAS_ITEM(SmallKey_MiseryMire) OR HAS_ITEM(BigKey_MiseryMire)"
+    source: "app/Region/Standard/MiseryMire.php:86-88"
+
+  # MM - Big Key Chest (php:90-96):
+  #   canLightTorches
+  #   AND ((BigKeyD6 in {Compass Chest, Big Key Chest} AND KeyD6>=2)
+  #        OR KeyD6>=3)
+  # The itemInLocations branches are location-aware placement hints (Phase B).
+  # Phase A conservative: drop the location-pinned 2-key path, keep 3-key path.
+  - id: "Misery Mire - Big Key Chest"
+    region: MiseryMire_Lobby
+    can_reach: "CanLightTorches() AND HAS_AMOUNT(SmallKey_MiseryMire, 3)"
+    source: "app/Region/Standard/MiseryMire.php:90-96"
+
+  # MM - Compass Chest (php:98-104): identical structure to Big Key Chest.
+  - id: "Misery Mire - Compass Chest"
+    region: MiseryMire_Lobby
+    can_reach: "CanLightTorches() AND HAS_AMOUNT(SmallKey_MiseryMire, 3)"
+    source: "app/Region/Standard/MiseryMire.php:98-104"
+
+  # MM - Bridge Chest (php:54 — no setRequirements override): default TRUE.
+  - id: "Misery Mire - Bridge Chest"
+    region: MiseryMire_Lobby
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/MiseryMire.php:54 (no setRequirements)"
+
+  # MM - Boss (php:110-117):
+  #   canEnter
+  #   AND CaneOfSomaria
+  #   AND has(Lamp, item.require.Lamp default 1)
+  #   AND BigKeyD6
+  #   AND boss->canBeat(Vitreous)
+  #   AND wildCompasses/wildMaps disjuncts (collapse to TRUE)
+  # Phase B Slice 4 §7: Lamp gate gains CanDarkRoomNav() alternative
+  # (mirrors `item.require.Lamp=0` config — macros.yaml CanDarkRoomNav).
+  # Default `tricks=0` collapses CanDarkRoomNav() to FALSE → Phase A shape.
+  - id: "Misery Mire - Boss"
+    region: MiseryMire_Lobby
+    can_reach: "HAS_ITEM(CaneOfSomaria) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_MiseryMire) AND CanKillBoss(MiseryMire)"
+    source: "app/Region/Standard/MiseryMire.php:110-117"
+
+  # MM - Prize (php:156 → can_complete = Boss canAccess).
+  # Phase B Slice 4 §7: mirror the Boss Lamp/CanDarkRoomNav substitution.
+  - id: "Misery Mire - Prize"
+    region: MiseryMire_Lobby
+    can_reach: "HAS_ITEM(CaneOfSomaria) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_MiseryMire) AND CanKillBoss(MiseryMire)"
+    source: "app/Region/Standard/MiseryMire.php:106-108, 156 (can_complete = Boss access)"
+
+macros:
+  # CanReachDarkMire — flute warp + moon pearl to the Mire dark-world square.
+  # Inlined verbatim from `logic_examples/04_medallion_entrances.yaml:95-105`.
+  # OcarinaInactive is the registry name for the flute item (item id 30).
+  # Outside Inverted, ALTTPR's activation predicate is unconditional; with the
+  # default instant_flute seed setting, runtime also promotes the pickup to the
+  # active bird-woken flute immediately.
+  # Phase A vanilla routing only — Phase B+ may add entrance-shuffle variants.
+  - name: CanReachDarkMire
+    parameters: []
+    body: "HAS_ITEM(OcarinaInactive) AND HAS_ITEM(MoonPearl)"
+    source: "app/Region/Standard/DarkWorld/Mire.php (region can_enter)"
+
+  # CanKillVitreous — MM boss (Boss.php:115-118).
+  # PHP body: (itemPlacement !== 'basic' || hasSword(2) || canShootArrows)
+  #          AND (Hammer || hasSword || canShootArrows).
+  # Drop `!== 'basic'` advanced branch; keep `hasSword(2) || canShootArrows`
+  # for the first conjunct. Second conjunct stays as-is.
+  - name: CanKillVitreous
+    parameters: [world]
+    body: "((HasSword2() OR CanShootArrowsL1()) AND (HAS_ITEM(Hammer) OR HasSword(1) OR CanShootArrowsL1())) AND NeedsBossSoul(Soul_Vitreous)"
+    source: "app/Boss.php:115-118 (Vitreous can_beat)"

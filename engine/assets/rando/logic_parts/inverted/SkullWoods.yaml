@@ -1,0 +1,107 @@
+# SkullWoods.yaml — Skull Woods Inverted world-state (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/SkullWoods.php`
+# (MIT, verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# The Inverted variant `extends Region\Standard\SkullWoods` and overrides:
+#   1. `Skull Woods - Bridge Room` setRequirements (php:24-26) — drops the
+#       MoonPearl alternative chain from Standard (which gated on the
+#       `canDungeonRevive` trick in Inverted-mode bunny-state).
+#   2. `Skull Woods - Boss` setRequirements (php:28-40) — drops the
+#       Standard's MoonPearl gate (Inverted starts in dark world; pearl
+#       only matters for re-entry to light world).
+#   3. `can_enter` (php:42-50) — drops Standard's MoonPearl/bunny-state
+#       disjunction; Inverted just needs North West Dark World reachable.
+#
+# Inherited (unchanged) from Standard parent (`30_skull_woods.yaml`-pattern
+# but file is `22_skull_woods.yaml` for the Standard variant):
+#   - Compass Chest, Map Chest, Pot Prison, Pinball Room, Big Key Chest,
+#     Big Chest (default TRUE / has(BigKeyD3) respectively).
+#   - Prize predicate = Boss predicate (php:163, inherited).
+#   - setFillRules / setAlwaysAllow on Boss (Standard php:138-151).
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP item-name remappings:
+#       * KeyD3 → SmallKey_SkullWoods
+#       * CompassD3 → Compass_SkullWoods (used only in wildCompasses guard,
+#         which collapses to TRUE per Phase A pin).
+#       * MapD3 → Map_SkullWoods (same).
+#   - Dropped branches:
+#       * itemPlacement === 'basic' damage-budget gate (php:43-48):
+#         (swordless OR hasSword()) AND hasHealth(7) AND hasABottle() —
+#         collapses to TRUE under `itemPlacement !== 'basic'` Phase A pin.
+#       * swordless-mode disjunct in Boss predicate (php:31) — Phase A
+#         pins mode.weapons != swordless → drop, keep `hasSword()`.
+#       * region.wildCompasses / region.wildMaps guards in Boss
+#         (php:35-39) — both default false → guard collapses to TRUE.
+#   - RescuedZelda NOT included: the Inverted override of `can_enter`
+#     (php:42-50) does NOT call `$items->has('RescueZelda')`; the parent's
+#     RescueZelda check (Standard php:154) is replaced wholesale.
+#
+# Status: translated 2026-05-27. Awaiting review + codegen integration.
+
+format_version: 1
+
+regions:
+  # External parent stub — `North West Dark World` in PHP, mapped to our
+  # canonical `DarkWorld_NorthWest` ID (per `43_darkworld.yaml`).
+  - id: DarkWorld_NorthWest
+    name: "Dark World - North West (stub)"
+    source: "stub for cross-file region reference"
+
+  # Re-declared from `22_skull_woods.yaml` — codegen merges (last-wins).
+  - id: SkullWoods
+    name: "Skull Woods"
+    dungeon: SkullWoods
+    source: "app/Region/Inverted/SkullWoods.php:11 (extends Standard\\SkullWoods); base in app/Region/Standard/SkullWoods.php:15-71"
+
+edges:
+  # Inverted `can_enter` (Inverted/SkullWoods.php:42-50). Phase A collapse:
+  #   (itemPlacement!='basic' || <basic-damage-budget>)        [TRUE]
+  #   AND <NorthWestDarkWorld.canEnter>                         [edge to DarkWorld_NorthWest]
+  # The parent region's reachability is handled at the overworld graph;
+  # this edge expresses the in-dungeon entry as TRUE-once-NW-DW-reachable.
+  - from: DarkWorld_NorthWest
+    to: SkullWoods
+    predicate: "TRUE()"
+    source: "app/Region/Inverted/SkullWoods.php:42-50 (can_enter closure)"
+
+locations:
+  # Skull Woods - Bridge Room (Inverted/SkullWoods.php:24-26):
+  #   FireRod
+  # The Inverted override replaces Standard's `FireRod AND (MoonPearl OR
+  # canDungeonRevive-Boots-MagicMirror-or-bottle)` chain with bare FireRod
+  # — in Inverted, no MoonPearl gate (you start dark-world side).
+  - id: "Skull Woods - Bridge Room"
+    region: SkullWoods
+    can_reach: "HAS_ITEM(FireRod)"
+    source: "app/Region/Inverted/SkullWoods.php:24-26"
+
+  # Skull Woods - Boss (Inverted/SkullWoods.php:28-40). Phase A collapse:
+  #   canEnter                                                [enforced by edge]
+  #   AND FireRod
+  #   AND (swordless || hasSword())                           [→ HasSword(1)]
+  #   AND has(KeyD3, 3)
+  #   AND boss.canBeat (Mothula)
+  #   AND wildCompasses/wildMaps guards                       [collapse to TRUE]
+  - id: "Skull Woods - Boss"
+    region: SkullWoods
+    can_reach: "HAS_ITEM(FireRod) AND (OP_MODEWEAPONS_EQ(swordless) OR HasSword(1)) AND HAS_AMOUNT(SmallKey_SkullWoods, 3) AND CanKillBoss(SkullWoods)"
+    source: "app/Region/Inverted/SkullWoods.php:28-40"
+
+  # Skull Woods - Prize: inherited from Standard parent via
+  # `prize_location->setRequirements($this->can_complete)` (Standard
+  # php:163); can_complete = Boss canAccess (Standard php:124-126).
+  # The Boss predicate now follows the Inverted override above.
+  - id: "Skull Woods - Prize"
+    region: SkullWoods
+    can_reach: "HAS_ITEM(FireRod) AND (OP_MODEWEAPONS_EQ(swordless) OR HasSword(1)) AND HAS_AMOUNT(SmallKey_SkullWoods, 3) AND CanKillBoss(SkullWoods)"
+    source: "app/Region/Inverted/SkullWoods.php:28-40 (Prize = can_complete = Boss access)"
+
+locations_notes: |
+  All other Skull Woods locations (Big Chest, Big Key Chest, Compass
+  Chest, Map Chest, Pinball Room, Pot Prison) are inherited verbatim from
+  the Standard parent via `parent::initalize()` (Inverted/SkullWoods.php:20)
+  and are already authored in `assets/rando/logic_parts/22_skull_woods.yaml`.
+  CanKillMothula macro is also defined there; no redefinition here.

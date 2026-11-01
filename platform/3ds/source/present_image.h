@@ -5,8 +5,18 @@
 // not C2D_Color32/byte-swapped RGBA: its alpha byte would color the margins.
 static inline void Platform3DS_ClearBlackTarget(C3D_RenderTarget *target) {
   C2D_Flush();
-  C3D_FrameSplit(0);
+  C3D_FrameSplit(GX_CMDLIST_FLUSH);
   C3D_RenderTargetClear(target, C3D_CLEAR_COLOR, 0, 0);
+}
+
+// FrameEnd(GX_CMDLIST_FLUSH) only cleans its final command segment. Every
+// earlier segment needs its own clean. Citro3D's SyncDisplayTransfer splits
+// with flags=0 inside a frame, so submit pending commands explicitly first.
+static inline void Platform3DS_QueueDisplayTransfer(u32 *source, u32 source_dim,
+    u32 *destination, u32 destination_dim, u32 flags) {
+  C2D_Flush();
+  C3D_FrameSplit(GX_CMDLIST_FLUSH);
+  C3D_SyncDisplayTransfer(source, source_dim, destination, destination_dim, flags);
 }
 
 static void ConfigureArgbTextureEnv(void) {
@@ -60,4 +70,16 @@ static inline bool Platform3DS_DrawMappedImage(C2D_Image image,
   configure();
   C2D_Flush();
   return true;
+}
+
+// A mapped image leaves custom TEV stages live. Solid fades must explicitly
+// consume primary RGBA after Citro2D's lazy solid-mode update.
+static inline void Platform3DS_DrawFadeRect(uint32_t color) {
+  C2D_Flush();
+  C2D_DrawRectSolid(0,0,0.5f,320,240,color);
+  C3D_TexEnv *env=C3D_GetTexEnv(0);C3D_TexEnvInit(env);
+  C3D_TexEnvSrc(env,C3D_Both,GPU_PRIMARY_COLOR,0,0);
+  C3D_TexEnvFunc(env,C3D_Both,GPU_REPLACE);
+  for(int i=1;i<6;i++)C3D_TexEnvInit(C3D_GetTexEnv(i));
+  C2D_Flush();
 }

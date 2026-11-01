@@ -43,6 +43,7 @@ static void request_bottom_redraw(unsigned r){requests|=r;}
 '''+s[a:b]+fn('static void prioritize_bottom_scene(')+fn('static void prioritize_bottom_touch(')+fn('static s32 bottom_worker_priority(')+fn('static void prioritize_bottom_hud(')+fn('static void request_bottom_redraw_on_state_change(')+r'''
 int main(void) {
  request_bottom_redraw_on_state_change();assert(!requests&&priority==0x31);
+ module=14;request_bottom_redraw_on_state_change();assert(!requests&&priority==0x31);
  module=15;request_bottom_redraw_on_state_change();assert(!requests&&priority==0x31);
  module=16;request_bottom_redraw_on_state_change();assert(!requests&&priority==0x31);
  module=7;request_bottom_redraw_on_state_change();assert(requests==1&&priority==0x30&&ss_scene_redraw_pending);

@@ -1,0 +1,105 @@
+# 04_medallion_entrances.yaml — Misery Mire + Turtle Rock medallion entrances
+#
+# Exercises: OP_MEDALLION_OPENS shuffle-aware predicate, multi-prerequisite
+# edges, region predicates that depend on per-seed medallion-shuffle data.
+#
+# Translated from `app/Region/Standard/MiseryMire.php` and `app/Region/
+# Standard/TurtleRock.php` access predicates, plus `app/Region/Standard/
+# Medallions.php`.
+
+format_version: 1
+
+regions:
+  # External parent regions referenced by the edges below. Worked examples
+  # are self-contained subgraphs — stub the overworld regions so the codegen
+  # well-formedness check passes.
+  - id: DarkWorld_Mire
+    name: "Dark World - Mire (stub)"
+    source: "stub for self-contained worked example"
+  - id: DarkWorld_DeathMountain_East
+    name: "Dark World - Death Mountain East (stub)"
+    source: "stub for self-contained worked example"
+
+  - id: MiseryMire_Entrance
+    name: "Misery Mire Entrance"
+    source: "app/Region/Standard/MiseryMire.php:38-45 (can_enter closure)"
+
+  - id: MiseryMire_Lobby
+    name: "Misery Mire - Lobby"
+    dungeon: MiseryMire
+    parent: MiseryMire_Entrance
+    source: "app/Region/Standard/MiseryMire.php:21-50"
+
+  - id: TurtleRock_Entrance
+    name: "Turtle Rock Entrance"
+    source: "app/Region/Standard/TurtleRock.php:38-45 (can_enter closure)"
+
+  - id: TurtleRock_Lobby
+    name: "Turtle Rock - Lobby"
+    dungeon: TurtleRock
+    parent: TurtleRock_Entrance
+    source: "app/Region/Standard/TurtleRock.php:21-50"
+
+edges:
+  - from: DarkWorld_Mire
+    to: MiseryMire_Entrance
+    # Reaching the MM entrance tile requires CanFlyInDarkWorld + boots.
+    predicate: "CanReachDarkMire() AND HAS_ITEM(Boots)"
+    source: "app/Region/Standard/MiseryMire.php:38 (can_enter)"
+
+  - from: MiseryMire_Entrance
+    to: MiseryMire_Lobby
+    # Lobby entry requires the assigned medallion (Bombos/Ether/Quake)
+    # and a sword to read the tablet.
+    predicate: "HasSword(1) AND OP_MEDALLION_OPENS(MiseryMire_Entrance)"
+    source: "app/Region/Standard/MiseryMire.php:42-45"
+
+  - from: DarkWorld_DeathMountain_East
+    to: TurtleRock_Entrance
+    predicate: "HAS_ITEM(Hammer) AND CanLiftDarkRocks() AND HAS_ITEM(MagicMirror)"
+    source: "app/Region/Standard/TurtleRock.php:38 (can_enter)"
+
+  - from: TurtleRock_Entrance
+    to: TurtleRock_Lobby
+    predicate: "HasSword(1) AND OP_MEDALLION_OPENS(TurtleRock_Entrance)"
+    source: "app/Region/Standard/TurtleRock.php:42-45"
+
+locations:
+  - id: "Misery Mire - Big Chest"
+    name: "Misery Mire - Big Chest"
+    region: MiseryMire_Lobby
+    type: BigChest
+    vanilla_item: BigKey_MiseryMire
+    can_reach: "HAS_ITEM(BigKey_MiseryMire)"
+    source: "app/Region/Standard/MiseryMire.php:50"
+
+  - id: "Turtle Rock - Chain Chomps"
+    name: "Turtle Rock - Chain Chomps"
+    region: TurtleRock_Lobby
+    type: Chest
+    vanilla_item: Rupee100
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/TurtleRock.php:60"
+
+macros:
+  - name: HasSword
+    parameters: [min_level]
+    body: "HAS_AMOUNT(ProgressiveSword, min_level) OR HAS_ITEM(L1Sword) OR HAS_ITEM(L2Sword) OR HAS_ITEM(L3Sword) OR HAS_ITEM(L4Sword)"
+    source: "app/Support/ItemCollection.php (hasSword method)"
+
+  - name: CanLiftDarkRocks
+    parameters: []
+    body: "HAS_ITEM(TitanMitt) OR HAS_AMOUNT(ProgressiveGlove, 2)"
+    source: "app/Support/ItemCollection.php (canLiftDarkRocks method)"
+
+  - name: CanReachDarkMire
+    parameters: []
+    # Mire is reached by flute (warp to mire square) + moon pearl, or by
+    # entrance shuffle (Phase C). Phase A predicate covers vanilla routing.
+    # `OcarinaInactive` is the registry name for the flute item (item id 30 —
+    # the dispatch that sets link_item_flute = 2).
+    body: "HAS_ITEM(OcarinaInactive) AND HAS_ITEM(MoonPearl)"
+    source: "app/Region/Standard/DarkWorld/Mire.php (region can_enter)"
+    notes: |
+      Phase B+ may factor this further (e.g., for "swordless" path or
+      glitch-level routes). Phase A's NoGlitches branch only.

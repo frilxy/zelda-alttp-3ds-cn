@@ -1,0 +1,52 @@
+# DarkWorld/Mire.yaml — Inverted DarkWorld Mire (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/DarkWorld/Mire.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `PegasusBoots` → registry-canonical `Boots`.
+#   - PHP `Bottle` → `HasABottle()`.
+#   - Inverted/Mire.php extends Standard/Mire.php. The Inverted
+#     `initialize()` only sets `$this->can_enter` and does NOT override
+#     the Mire Shed - Left/Right per-location predicates. Since
+#     parent::initialize() is NOT called, the Standard predicates for
+#     the sheds do NOT apply; the sheds default to TRUE() per framework.
+#   - Dropped branches: canBootsClip, canOneFrameClipOW, canOWYBA — Phase B.
+#
+# Status: translated 2026-05-27. Awaiting review.
+
+format_version: 1
+
+regions:
+  - id: DarkWorld_Mire
+    name: "Dark World - Mire (Inverted)"
+    source: "app/Region/Inverted/DarkWorld/Mire.php:10-31 (extends Standard/DarkWorld/Mire.php:14-100)"
+
+edges:
+  # Inverted `can_enter` (Mire.php:20-27):
+  #   canFly OR
+  #   (MagicMirror AND South_Light_World_reachable) OR
+  #   <glitch branches drop>
+  # Surviving Phase A:
+  #   CanFly(world) OR
+  #   (HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(LightWorld_South))
+  - from: DarkWorld_South
+    to: DarkWorld_Mire
+    predicate: "CanFly(world) OR (HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(LightWorld_South))"
+    source: "app/Region/Inverted/DarkWorld/Mire.php:20-27 (can_enter)"
+
+locations:
+  # `Mire Shed - Left` — not overridden in Inverted/Mire.php; the Standard
+  # predicate does not carry over (parent::initialize() not called).
+  # Default TRUE() per framework.
+  - id: "Mire Shed - Left"
+    region: DarkWorld_Mire
+    can_reach: "TRUE()"
+    source: "app/Region/Inverted/DarkWorld/Mire.php (not overridden, default TRUE)"
+
+  # `Mire Shed - Right` — same as Left.
+  - id: "Mire Shed - Right"
+    region: DarkWorld_Mire
+    can_reach: "TRUE()"
+    source: "app/Region/Inverted/DarkWorld/Mire.php (not overridden, default TRUE)"

@@ -811,6 +811,8 @@ static void Sfx_MaybeDisableEcho(SpcPlayer *p) {
   }
 }
 
+bool g_spc_panned_sfx;
+
 static void Sfx_ChannelTick(SpcPlayer *p, Channel *c, bool is_continue) {
   uint8 cmd;
 
@@ -853,7 +855,8 @@ static void Sfx_ChannelTick(SpcPlayer *p, Channel *c, bool is_continue) {
         } else {
           c->final_volume = cmd * 2;
           c->pan_flag_with_phase_invert = 10;
-          WriteVolumeToDsp(p, c, (p->sfx_start_arg_pan & 0x80 ? 16 : p->sfx_start_arg_pan & 0x40 ? 4 : 10) << 8);
+          uint8 pan = g_spc_panned_sfx ? p->sfx_start_arg_pan : 0;
+          WriteVolumeToDsp(p, c, (pan & 0x80 ? 16 : pan & 0x40 ? 4 : 10) << 8);
           cmd = p->ram[++p->sfx_sound_ptr_cur];
         }
       }

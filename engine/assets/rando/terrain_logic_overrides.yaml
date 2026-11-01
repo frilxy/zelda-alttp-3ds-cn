@@ -1,0 +1,198 @@
+# terrain_logic_overrides.yaml — reviewed region/predicate overrides for the
+# grass/rock terrain registry (add-rando-grass-rock-shuffle, design.md D6).
+#
+# COMMITTED + human-reviewed, applied by gen_terrain_tables.py --emit on top of
+# its SCREEN_REGIONS defaults (generator-reproducible — never hand-edit
+# terrain.gen.yaml). Directional rule: when in doubt OVER-gate — a too-strict
+# predicate delays a check, a too-weak one lets the placer strand progression.
+#
+# Review round 1 (2026-07-07): all 19 worklist screens resolved below.
+# Grounding = object position analysis (pos -> row/col on the 16px grid) +
+# ALTTPR region PHP (cited per entry; ../alttp_vt_randomizer). Entries marked
+# PLAYTEST carry residual geometry uncertainty in the safe (over-gate)
+# direction — verify during the Phase-7 matrix.
+#
+# Schema (all optional per entry):
+#   - screen: 0xNN            # required
+#     confirmed: <reason>     # review verdict: default binding is correct as-is
+#     region: <RegionName>    # replace the whole-screen default region
+#     gate: '<predicate>'     # AND-ed onto every object on the screen
+#     ranges:                 # pos-scoped sub-area overrides (win over screen-level)
+#       - {lo: 0xNNNN, hi: 0xNNNN, region: <RegionName>, gate: '<predicate>'}
+overrides:
+# --- Light World ---
+- screen: 0x03
+  confirmed: >-
+    West DM 2x2 (03/04/0B/0C): all 16 objects sit within DMW walkability; the
+    Spectacle Rock ledge carries no terrain objects. Region graph gates DM
+    access itself.
+- screen: 0x05
+  region: LightWorld_DeathMountain_East
+  # The 0x05 big area (05/06/0D/0E) IS East DM — the enemy-table DMW binding
+  # covered a west-edge enemy row, not this area's terrain. Both objects
+  # (2 heavy rocks, rows 39-40 cols 44-45, lower East DM) are DME + their
+  # Mitt class gate. Over-gate-safe for anything actually west-reachable.
+- screen: 0x07
+  confirmed: >-
+    Upper East-DM screen (LW Turtle Rock top): LightWorld_DeathMountain_East
+    derived binding is correct; the region graph carries DME access.
+- screen: 0x0F
+  confirmed: >-
+    Single light rock (row 12 col 12) = the Glove rock on the Zora river bank
+    walk (ALTTPR KingZora: canLiftRocks || flippers). NE region + the
+    CanLiftRocks class gate model it exactly.
+- screen: 0x10
+  ranges:
+  # Four bushes surrounding the permanent DW portal north of Kakariko (warp at
+  # row 22 col 23). The pocket's direct entrances are the north Hammer pegs and
+  # south heavy-rock pile. Outside Inverted, the corresponding screen-0x50
+  # coordinate is walkable from the north, supplying an independent mirror route.
+  - {lo: 0x0A2E, hi: 0x0A2E, gate: 'CanReachNorthKakPortalPocket()'}
+  - {lo: 0x0B28, hi: 0x0B28, gate: 'CanReachNorthKakPortalPocket()'}
+  - {lo: 0x0BAA, hi: 0x0BAA, gate: 'CanReachNorthKakPortalPocket()'}
+  - {lo: 0x0BB2, hi: 0x0BB2, gate: 'CanReachNorthKakPortalPocket()'}
+- screen: 0x18
+  ranges:
+  # Kakariko east peg pocket: the map16 0x21B Hammer peg at 0x0AF6 is the
+  # only approach to these two bushes; the surrounding fence blocks access
+  # from the other three sides. Both checks therefore require Hammer.
+  - {lo: 0x0AF8, hi: 0x0AFA, gate: 'HAS_ITEM(Hammer)'}
+- screen: 0x1B
+  confirmed: >-
+    Most castle-grounds bushes are open LightWorld_NorthEast ground. Standard's
+    rain state only delays collection (over-gate direction, safe); the walls
+    walkway is stair-walkable from the same region.
+  ranges:
+  # Two bushes at the southeast edge of the castle grounds sit directly behind
+  # the diagonal pair of light rocks at 0x1D70 and 0x1DF2. The fence closes the
+  # remaining approaches, so each bush requires the Power Glove rock-lift gate.
+  - {lo: 0x1D72, hi: 0x1D72, gate: 'CanLiftRocks()'}
+  - {lo: 0x1DF4, hi: 0x1DF4, gate: 'CanLiftRocks()'}
+- screen: 0x1D
+  confirmed: Castle east field; plain LightWorld_NorthEast.
+- screen: 0x22
+  ranges:
+  # Five bushes in the enclosed pocket east of the Smithy's house. The direct
+  # entrance is the 0x21B Hammer peg at 0x0524; in non-Inverted worlds Link can
+  # instead mirror here from reachable northwest Dark World with Pearl + Mitts.
+  - {lo: 0x0424, hi: 0x0428, gate: 'CanReachSmithPegPocket()'}
+  - {lo: 0x04A4, hi: 0x04A6, gate: 'CanReachSmithPegPocket()'}
+- screen: 0x28
+  confirmed: >-
+    Maze-race strip is free walk-in (ALTTPR Maze Race carries no item
+    requirement); NW binding correct for the whole screen.
+- screen: 0x2A
+  confirmed: Haunted grove has no registrable terrain objects.
+- screen: 0x2D
+  confirmed: >-
+    Both river banks are bridge-walkable from LightWorld_NorthEast;
+    under-the-bridge is a special screen (out of registry scope).
+- screen: 0x30
+  # Desert 2x2 splits three ways (PLAYTEST the boundaries):
+  ranges:
+  # Checkerboard-area rocks (rows 5-6, top plateau): ALTTPR Checkerboard Cave
+  # = canLiftRocks && MagicMirror && Mire access (Standard/LightWorld/
+  # South.php:150-155). Class gate supplies the lift; gate the plateau.
+  # World-state-aware: under Inverted the DW-Mire portal drops onto the
+  # plateau without the Mirror — Inverted Checkerboard Cave is
+  # 'MoonPearl AND canLiftRocks' (Inverted/LightWorld/South.php:171-177,
+  # mirrored in logic_parts/inverted/LightWorld/South.yaml), and the pearl is
+  # already carried by the TerrainWorldGateLW class gate; nothing extra
+  # remains, so the Inverted arm is TRUE here.
+  - {lo: 0x0280, hi: 0x0390, gate: 'WORLDSTATE_EQ(inverted) OR (HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(DarkWorld_Mire))'}
+  # Palace-forecourt bushes (rows 20-21): behind the Book tablet — ALTTPR
+  # Desert Ledge = DesertPalace.canEnter (South.php:161-163). Gate on DP-lobby
+  # reachability, mirroring the canonical `Desert Ledge` row
+  # (logic_parts/41_lightworld_south.yaml): the lobby entry edge carries the
+  # Book gate in vanilla layouts AND is remapped by dungeon-entrance shuffle
+  # (Entrance_ApplyEdgeOverrides), so the forecourt tracks the shuffled graph
+  # instead of a hardcoded vanilla walk-through-DP expansion.
+  - {lo: 0x0A00, hi: 0x0B00, gate: 'OP_REGION_REACHABLE(DesertPalace_Lobby)'}
+  # West-edge bushes rows 40-41 col 3: possibly ON the Desert Ledge lower
+  # level — over-gate with the same Desert Ledge predicate (if they are on
+  # the free sand this only delays junk). PLAYTEST.
+  - {lo: 0x1400, hi: 0x1490, gate: 'OP_REGION_REACHABLE(DesertPalace_Lobby)'}
+  # Remaining objects (south strip bushes + the row-59 Mitt rock) stay plain
+  # LightWorld_South (the walkable band; class gates apply).
+- screen: 0x32
+  ranges:
+  # Cave 45 mirror ledge: this isolated 2x2 bush cluster is on the same ledge
+  # as entrance 0x52 / the Cave 11B south half. Match Cave 45's canonical
+  # access predicate (Standard/LightWorld/South.php:144-148): mirror from
+  # reachable DarkWorld_South, or use an enabled overworld clip route.
+  - {lo: 0x0914, hi: 0x0916, gate: '(HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(DarkWorld_South)) OR CanBootsClip() OR CanOneFrameClipOW()'}
+  - {lo: 0x0994, hi: 0x0996, gate: '(HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(DarkWorld_South)) OR CanBootsClip() OR CanOneFrameClipOW()'}
+- screen: 0x35
+  ranges:
+  # Bush immediately beside the Lake Hylia Island heart piece (overworld-53
+  # item at 24,20; heart-piece sprite at 25,19). It is on the same isolated
+  # island and therefore shares the named location's world-state-aware gate.
+  - {lo: 0x0A30, hi: 0x0A30, gate: 'CanReachLakeHyliaIsland()'}
+  # Three bushes on the separate central island around the 43,30 warp tile.
+  # The warp supplies no ingress: the landmass is surrounded by deep water.
+  # Accept the fork's modeled outdoor swim techniques; no dungeon-entry item
+  # such as Ice Palace's fire source belongs on these outdoor checks.
+  - {lo: 0x0E56, hi: 0x0E56, gate: 'HAS_ITEM(Flippers) OR CanFakeFlippers() OR (CanWaterWalk() AND HAS_ITEM(Boots))'}
+  - {lo: 0x0FD2, hi: 0x0FD2, gate: 'HAS_ITEM(Flippers) OR CanFakeFlippers() OR (CanWaterWalk() AND HAS_ITEM(Boots))'}
+  - {lo: 0x0FDA, hi: 0x0FDA, gate: 'HAS_ITEM(Flippers) OR CanFakeFlippers() OR (CanWaterWalk() AND HAS_ITEM(Boots))'}
+# --- Dark World ---
+- screen: 0x43
+  confirmed: >-
+    DW West DM 2x2: objects within DW-DMW walkability; region graph carries
+    DM access.
+- screen: 0x45
+  confirmed: >-
+    DW East DM: derived DarkWorld_DeathMountain_East binding correct; the
+    heavy-rock crossing between DW-DM halves is carried by the region graph
+    edge + the rocks' own Mitt class gates.
+- screen: 0x47
+  # Left-edge rock wall (cols 7-8, rows 6-18) is consumed from the 0x45 side:
+  # DME region + per-rock class gates are exactly right — no extra gate.
+  ranges:
+  # Mid-screen 2x2 rock diamond (rows 18-19, cols 25-26) sits on the Turtle
+  # Rock upper plateau — reached via the LW peg route (ALTTPR Turtle Rock
+  # canEnter precondition: canLiftDarkRocks && Hammer; the medallion gates
+  # only the door, not the plateau).
+  - {lo: 0x0920, hi: 0x09C0, gate: 'HAS_ITEM(Hammer) AND CanLiftDarkRocks()'}
+- screen: 0x4A
+  region: DarkWorld_NorthWest
+  # The single light pile fronts the Bumper Cave entrance, walked to from the
+  # Village side (ALTTPR Bumper Cave = Standard/DarkWorld/NorthWest.php). The
+  # table's DMW binding covered ledge-side enemies; the ledge itself carries
+  # no terrain objects.
+- screen: 0x58
+  ranges:
+  # Village-of-Outcasts coordinate twin of the Kakariko peg pocket: the map
+  # build has the same 0x21B Hammer peg at 0x0AF6 followed by these bushes.
+  - {lo: 0x0AF8, hi: 0x0AFA, gate: 'HAS_ITEM(Hammer)'}
+- screen: 0x5B
+  confirmed: >-
+    Pyramid bushes sit on stair-walkable tiers from DarkWorld_NorthEast; the
+    Aga2 fall-in hole area is bare.
+- screen: 0x62
+  ranges:
+  # Rows >= 17: the two Mitt piles blocking the smith path + every bush
+  # behind them (the smith-yard cluster rows 22-28). ALTTPR smith chain +
+  # Hammer Pegs gate on canLiftDarkRocks (NorthWest.php:96-100); the peg
+  # circle itself carries no terrain objects, so Hammer is not required for
+  # any row here. PLAYTEST: confirm no south walk-in bypasses the piles (if
+  # one exists this is an over-gate — safe).
+  - {lo: 0x0880, hi: 0x0FFF, gate: 'CanLiftDarkRocks()'}
+- screen: 0x68
+  region: DarkWorld_South
+  # Digging-game area: ALTTPR places it in DW South
+  # (Standard/DarkWorld/South.php), NOT the mirror-derived NW — the DW fence
+  # line puts the whole row-5 band in South.
+- screen: 0x69
+  region: DarkWorld_South
+  # Same DW fence-line band as 0x68 (the field between the digging game and
+  # stumpy's grove): DarkWorld_South, not the LW-mirror NW.
+- screen: 0x6A
+  confirmed: Stumpy grove has no registrable terrain objects.
+- screen: 0x75
+  ranges:
+  # Inverted-only heavy rock on Ice Palace island (row 30 col 40), beside the
+  # entrance at 43,28. Preserve the rock's class-level Mitt gate and add only
+  # the outdoor movement arm of Inverted Ice Palace's entry predicate; melting
+  # capability gates the dungeon door, not this overworld rock.
+  - {lo: 0x0F50, hi: 0x0F50, gate: 'HAS_ITEM(Flippers) OR CanFakeFlippers() OR CanBootsClip() OR CanOneFrameClipOW() OR (CanSuperSpeed() AND CanSpinSpeed())'}

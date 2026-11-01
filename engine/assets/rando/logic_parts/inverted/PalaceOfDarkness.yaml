@@ -1,0 +1,188 @@
+# PalaceOfDarkness.yaml — Palace of Darkness (Dark Palace) Inverted
+# world-state (Phase B Slice 2)
+#
+# Mechanically translated from
+# `../alttp_vt_randomizer/app/Region/Inverted/PalaceOfDarkness.php` (MIT,
+# verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+# Inverted/PalaceOfDarkness.php:10 extends Standard/PalaceOfDarkness; the
+# parent's locations, location predicates, can_complete, and boss closure
+# are inherited unchanged (parent::initalize() at php:20). The override at
+# php:22-32 REPLACES the parent's can_enter closure.
+#
+# Translation discipline (audit.md §0.10.2):
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP item-name remappings (per parent file):
+#       KeyD1     → SmallKey_PalaceOfDarkness
+#       BigKeyD1  → BigKey_PalaceOfDarkness
+#       MapD1     → Map_PalaceOfDarkness
+#       CompassD1 → Compass_PalaceOfDarkness
+#       RescueZelda → RescuedZelda (parent only; Inverted override drops it)
+#   - Phase A axis pins (collapses for inherited location predicates):
+#       * region.wildKeys / wildBigKeys / wildMaps / wildCompasses → false
+#       * region.bossNormalLocation → true
+#       * itemPlacement === 'advanced' / 'basic' → false (standard mode)
+#       * mode.weapons === 'swordless' → false
+#       * accessibility === 'locations' → false (default accessibility=items)
+#       * canOWYBA / canBunnyRevive / canOneFrameClipUW / canOneFrameClipOW /
+#         canBootsClip / canDungeonRevive → all false (NoGlitches)
+#       * item.require.Lamp → 1 (vanilla default)
+#   - Phase B branches dropped from Inverted can_enter (php:22-32):
+#       * `itemPlacement !== 'basic'` disjunct TRUE → the basic-mode
+#         health+bottle+sword inner gate is vacuous.
+#       * `canOneFrameClipOW && getRegion('West Death Mountain')` reroute
+#         (php:30-31) — trick-based reroute, drop until Phase B Slice 4
+#         authors trick predicates.
+#   - Inverted PoD can_enter REPLACES the parent closure: the parent's
+#     `RescueZelda` and `MoonPearl` gates are NOT inherited (the override
+#     drops them — Inverted-mode Link does not need RescueZelda or pearl
+#     to enter PoD, only DarkWorld_NorthEast reachability).
+#   - Inverted parent region: DarkWorld_NorthEast (PHP `North East Dark
+#     World`). In Inverted that overworld region is the natural-start dark
+#     world; canonical id is defined by the eventual
+#     `inverted/DarkWorld/NorthEast.yaml` translation.
+#
+# Boss: Helmasaur King — `CanKillHelmasaurKing` macro is already defined in
+# `20_palace_of_darkness.yaml` (Standard PoD), so this file does NOT
+# re-emit it (codegen "last wins" merge — single canonical macro).
+
+format_version: 1
+
+regions:
+  # External parent stub — Inverted overworld North East dark world (the
+  # natural Inverted starting world). Canonical definition lives in
+  # `inverted/DarkWorld/NorthEast.yaml`.
+  - id: DarkWorld_NorthEast
+    name: "Dark World - North East (stub, Inverted)"
+    world_state_filter: [Inverted]
+    source: "stub for cross-file region reference (Inverted/PalaceOfDarkness.php:29)"
+
+  - id: PalaceOfDarkness
+    name: "Palace of Darkness"
+    dungeon: PalaceOfDarkness
+    world_state_filter: [Inverted]
+    source: "app/Region/Inverted/PalaceOfDarkness.php:10-35 (extends Standard/PalaceOfDarkness.php:15-69)"
+
+edges:
+  # PoD Inverted `can_enter` (Inverted php:22-32) REPLACES the parent
+  # (Standard php:182-192):
+  #   (itemPlacement !== 'basic' || (<basic-mode health/bottle/sword gate>))
+  #   && (getRegion('North East Dark World')->canEnter(...)
+  #       || (canOneFrameClipOW && getRegion('West Death Mountain')))
+  # Phase A: itemPlacement !== 'basic' TRUE → first conjunct TRUE.
+  # canOneFrameClipOW=false → second disjunct collapses to NEDW reach only.
+  # Result: just DarkWorld_NorthEast reachability. RescueZelda and MoonPearl
+  # from the parent's closure are NOT inherited (the Inverted override
+  # replaces the entire closure).
+  - from: DarkWorld_NorthEast
+    to: PalaceOfDarkness
+    predicate: "TRUE()"
+    source: "app/Region/Inverted/PalaceOfDarkness.php:22-32 (can_enter closure)"
+
+locations:
+  # ===========================================================================
+  # All location predicates inherited from Standard parent via
+  # parent::initalize() at Inverted php:20. Source cites resolve to the
+  # Standard file. See `20_palace_of_darkness.yaml` for the canonical
+  # author-time comments; we duplicate the predicate bodies (NOT the long
+  # explanatory comments) here so the codegen merger has Inverted-tagged
+  # location records.
+  # ===========================================================================
+
+  # Shooter Room (Standard php:50) — no setRequirements; default TRUE.
+  - id: "Palace of Darkness - Shooter Room"
+    region: PalaceOfDarkness
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/PalaceOfDarkness.php:50 (inherited)"
+
+  # The Arena - Ledge (Standard php:79-81): canShootArrows.
+  - id: "Palace of Darkness - The Arena - Ledge"
+    region: PalaceOfDarkness
+    can_reach: "CanShootArrowsL1()"
+    source: "app/Region/Standard/PalaceOfDarkness.php:79-81 (inherited)"
+
+  # Big Key Chest (Standard php:83-93). Self-ref advanced branch dropped per
+  # audit; wildKeys=false → KeyD1,5.
+  - id: "Palace of Darkness - Big Key Chest"
+    region: PalaceOfDarkness
+    can_reach: "HAS_AMOUNT(SmallKey_PalaceOfDarkness, 5)"
+    source: "app/Region/Standard/PalaceOfDarkness.php:83-93 (inherited)"
+
+  # The Arena - Bridge (Standard php:95-98).
+  - id: "Palace of Darkness - The Arena - Bridge"
+    region: PalaceOfDarkness
+    can_reach: "HAS_ITEM(SmallKey_PalaceOfDarkness) OR (CanShootArrowsL1() AND HAS_ITEM(Hammer))"
+    source: "app/Region/Standard/PalaceOfDarkness.php:95-98 (inherited)"
+
+  # Big Chest (Standard php:100-105). wildKeys=false → KeyD1,5. setFillRules
+  # forbids self-key placement.
+  - id: "Palace of Darkness - Big Chest"
+    region: PalaceOfDarkness
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_PalaceOfDarkness) AND HAS_AMOUNT(SmallKey_PalaceOfDarkness, 5)"
+    can_place: "NOT OP_ITEM_IS(SmallKey_PalaceOfDarkness)"
+    source: "app/Region/Standard/PalaceOfDarkness.php:100-105 (inherited)"
+
+  # Compass Chest (Standard php:107-109): wildKeys=false → KeyD1,3.
+  - id: "Palace of Darkness - Compass Chest"
+    region: PalaceOfDarkness
+    can_reach: "HAS_AMOUNT(SmallKey_PalaceOfDarkness, 3)"
+    source: "app/Region/Standard/PalaceOfDarkness.php:107-109 (inherited)"
+
+  # Harmless Hellway (Standard php:111-121). Self-ref dropped; wildKeys=false
+  # → KeyD1,5.
+  - id: "Palace of Darkness - Harmless Hellway"
+    region: PalaceOfDarkness
+    can_reach: "HAS_AMOUNT(SmallKey_PalaceOfDarkness, 5)"
+    source: "app/Region/Standard/PalaceOfDarkness.php:111-121 (inherited)"
+
+  # Stalfos Basement (Standard php:123-126).
+  - id: "Palace of Darkness - Stalfos Basement"
+    region: PalaceOfDarkness
+    can_reach: "HAS_ITEM(SmallKey_PalaceOfDarkness) OR (CanShootArrowsL1() AND HAS_ITEM(Hammer))"
+    source: "app/Region/Standard/PalaceOfDarkness.php:123-126 (inherited)"
+
+  # Dark Basement - Left (Standard php:128-132): advanced=false → require
+  # Lamp; wildKeys=false → KeyD1,3.
+  - id: "Palace of Darkness - Dark Basement - Left"
+    region: PalaceOfDarkness
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_AMOUNT(SmallKey_PalaceOfDarkness, 3)"
+    source: "app/Region/Standard/PalaceOfDarkness.php:128-132 (inherited)"
+
+  # Dark Basement - Right (Standard php:134-138): identical body.
+  - id: "Palace of Darkness - Dark Basement - Right"
+    region: PalaceOfDarkness
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_AMOUNT(SmallKey_PalaceOfDarkness, 3)"
+    source: "app/Region/Standard/PalaceOfDarkness.php:134-138 (inherited)"
+
+  # Map Chest (Standard php:140-142): canShootArrows.
+  - id: "Palace of Darkness - Map Chest"
+    region: PalaceOfDarkness
+    can_reach: "CanShootArrowsL1()"
+    source: "app/Region/Standard/PalaceOfDarkness.php:140-142 (inherited)"
+
+  # Dark Maze - Top (Standard php:144-148): wildKeys=false → KeyD1,5;
+  # setFillRules forbids self-key placement.
+  - id: "Palace of Darkness - Dark Maze - Top"
+    region: PalaceOfDarkness
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_AMOUNT(SmallKey_PalaceOfDarkness, 5)"
+    can_place: "NOT OP_ITEM_IS(SmallKey_PalaceOfDarkness)"
+    source: "app/Region/Standard/PalaceOfDarkness.php:144-148 (inherited)"
+
+  # Dark Maze - Bottom (Standard php:150-154): identical body.
+  - id: "Palace of Darkness - Dark Maze - Bottom"
+    region: PalaceOfDarkness
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_AMOUNT(SmallKey_PalaceOfDarkness, 5)"
+    can_place: "NOT OP_ITEM_IS(SmallKey_PalaceOfDarkness)"
+    source: "app/Region/Standard/PalaceOfDarkness.php:150-154 (inherited)"
+
+  # Boss (Standard php:160-180). canEnter enforced by the edge.
+  # wildCompasses/wildMaps clauses vacuous.
+  - id: "Palace of Darkness - Boss"
+    region: PalaceOfDarkness
+    can_reach: "HAS_ITEM(Hammer) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND CanShootArrowsL1() AND HAS_ITEM(BigKey_PalaceOfDarkness) AND HAS_AMOUNT(SmallKey_PalaceOfDarkness, 6) AND CanKillBoss(PalaceOfDarkness)"
+    source: "app/Region/Standard/PalaceOfDarkness.php:160-180 (inherited)"
+
+  # Prize (Standard php:65, 156-158, 194) — can_complete = Boss canAccess.
+  - id: "Palace of Darkness - Prize"
+    region: PalaceOfDarkness
+    can_reach: "HAS_ITEM(Hammer) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND CanShootArrowsL1() AND HAS_ITEM(BigKey_PalaceOfDarkness) AND HAS_AMOUNT(SmallKey_PalaceOfDarkness, 6) AND CanKillBoss(PalaceOfDarkness)"
+    source: "app/Region/Standard/PalaceOfDarkness.php:65, 156-158, 194 (inherited; can_complete = Boss access)"

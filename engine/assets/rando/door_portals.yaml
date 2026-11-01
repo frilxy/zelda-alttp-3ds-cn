@@ -1,0 +1,70 @@
+# door_portals.yaml — per-portal access gates for the door-shuffle oracle
+# (add-rando-door-shuffle, design §1b).
+#
+# The fork's region bitset carries ~one region per dungeon, so the oracle
+# cannot infer from it WHICH portals (entrances/drops) of a multi-portal
+# dungeon are independently enterable. Each row maps a reference portal lobby
+# (kDoorTblPortals name) to the fork region whose reachability gates it, plus
+# an optional extra predicate (compiled into the static stream — no oracle
+# recursion: gates reference fork regions + items only, keeping the seeding
+# monotone).
+#
+# `fork_region: null` = the portal is NEVER independently enterable under the
+# fork's logic model (TR's ledge doors are interior-route-only in the fork,
+# exactly like ALTTPR PHP standard) — it can still be REACHED from inside and
+# is a valid stitch target; it just never seeds the oracle flood.
+#
+# Conservatism note: a too-strong gate can only under-seed the oracle
+# (placer refuses, never certifies-unbeatable); a too-weak gate is the
+# dangerous direction. When in doubt, match the fork's vanilla logic for the
+# same access (cited per row).
+
+format_version: 1
+portals:
+  # Hyrule Castle — pinned at MVP (never shuffled); gates kept correct anyway.
+  - { name: "Hyrule Castle Lobby",      fork_region: HyruleCastleEscape }
+  - { name: "Hyrule Castle West Lobby", fork_region: HyruleCastleEscape }
+  - { name: "Hyrule Castle East Lobby", fork_region: HyruleCastleEscape }
+  - { name: "Sanctuary",                fork_region: HyruleCastleEscape }
+  - { name: "Sewers Rat Path",          fork_region: HyruleCastleEscape }
+
+  - { name: "Eastern Lobby",            fork_region: EasternPalace_Lobby }
+
+  # Desert: the three front lobbies interconnect via the entrance ledge; the
+  # back entrance needs lifting a rock from the West exit
+  # (10_desert_palace.yaml PastLanmolas edge: CanLiftRocks).
+  - { name: "Desert Main Lobby",        fork_region: DesertPalace_Lobby }
+  - { name: "Desert West Lobby",        fork_region: DesertPalace_Lobby }
+  - { name: "Desert East Lobby",        fork_region: DesertPalace_Lobby }
+  - { name: "Desert Back Lobby",        fork_region: DesertPalace_Lobby, predicate: "CanLiftRocks()" }
+
+  - { name: "Hera Lobby",               fork_region: TowerOfHera_Lobby }
+  - { name: "Tower Lobby",              fork_region: HyruleCastleTower }
+  - { name: "PoD Lobby",                fork_region: PalaceOfDarkness }
+  - { name: "Swamp Lobby",              fork_region: SwampPalace }  # pinned at MVP
+
+  # Skull Woods: every lobby/drop sits in the same DW-northwest forest area
+  # the fork's SkullWoods region gates (22_skull_woods.yaml).
+  - { name: "Skull 1 Lobby",            fork_region: SkullWoods }
+  - { name: "Skull 2 East Lobby",       fork_region: SkullWoods }
+  - { name: "Skull 2 West Lobby",       fork_region: SkullWoods }
+  - { name: "Skull 3 Lobby",            fork_region: SkullWoods }
+  - { name: "Skull Pinball",            fork_region: SkullWoods }
+  - { name: "Skull Left Drop",          fork_region: SkullWoods }
+  - { name: "Skull Pot Circle",         fork_region: SkullWoods }
+  - { name: "Skull Back Drop",          fork_region: SkullWoods }
+
+  - { name: "Thieves Lobby",            fork_region: ThievesTown }
+  - { name: "Ice Lobby",                fork_region: IcePalace_Lobby }
+  - { name: "Mire Lobby",               fork_region: MiseryMire_Entrance }
+
+  # Turtle Rock: only the main (medallion) entrance is independently
+  # enterable in the fork's model; the laser-bridge/ledge doors are
+  # interior-route-only (32_turtle_rock.yaml Eye Bridge predicates carry no
+  # mirror-ledge path).
+  - { name: "TR Main Lobby",            fork_region: TurtleRock_Entrance }
+  - { name: "TR Eye Bridge",            fork_region: null }
+  - { name: "TR Big Chest Entrance",    fork_region: null }
+  - { name: "TR Lazy Eyes",             fork_region: null }
+
+  - { name: "GT Lobby",                 fork_region: GanonsTower_Lobby }

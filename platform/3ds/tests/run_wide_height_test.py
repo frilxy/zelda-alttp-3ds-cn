@@ -16,13 +16,15 @@ code=r'''
 #include "snes/ppu.h"
 #include "platform_3ds.h"
 struct Config g_config;
+static bool g_autosave=true;
 static Ppu ppu;
 static struct {Ppu *ppu;} g_zenv={&ppu};
 static int g_display_mode,g_wide_edge_mode,g_turbo_multiplier=5;
 static int g_snes_width,g_snes_height,g_ppu_render_flags;
-uint32 g_wanted_zelda_features;
+uint32 g_wanted_zelda_features,g_wanted_zelda_features1;
 static unsigned resize_count;
 #define Platform3DS_LogRuntime(...) ((void)0)
+static bool BuildActiveModList(const char *l,char *o,size_t n){(void)l;(void)o;(void)n;return false;}
 static void ZeldaApplyRendererSize(void){resize_count++;}
 void Platform3DS_SetDisplayMode(enum Platform3DSDisplayMode mode){g_display_mode=mode;}
 void PpuSetExtraSideSpace(Ppu *p,int l,int r,int b){p->extraLeftCur=l;p->extraRightCur=r;p->extraBottomCur=b;}
@@ -50,7 +52,7 @@ int main(void) {
   g_display_mode=boot;g_config.features0=kFeatures0_MiscBugFixes;
   Platform3DS_ApplyConfig(&g_config);BootSize();
   if(old)g_ppu_render_flags|=kPpuRenderFlags_Old3DS;
-  int flags=kPpuRenderFlags_NewRenderer|(old?kPpuRenderFlags_Old3DS:0);
+  int flags=kPpuRenderFlags_NewRenderer|kPpuRenderFlags_FastPaths|(old?kPpuRenderFlags_Old3DS:0);
   check(boot,flags);
   for(int n=0;n<100;n++)for(int mode=0;mode<3;mode++) {
    ZeldaSet3DSDisplayMode(mode);check(mode,flags);

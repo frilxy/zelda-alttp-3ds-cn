@@ -1,0 +1,33 @@
+{
+  "algorithm_registry_fingerprint": "efe80ac37d7ca95aa216bfc9fa2de6b0cbd0b4842110929678b39347dbf2d4d2",
+  "base_location_count": 324,
+  "base_region_count": 40,
+  "format_version": 1,
+  "location_count": 6364,
+  "location_type_counts": {
+    "BigChest": 11,
+    "Bonk": 10,
+    "Chest": 154,
+    "Dash": 3,
+    "Dig": 2,
+    "Drop": 12,
+    "Enemy": 1232,
+    "EnemyDrop": 14,
+    "Grass": 3717,
+    "Medallion": 2,
+    "Npc": 14,
+    "Pedestal": 1,
+    "Pot": 803,
+    "Prize_Crystal": 7,
+    "Prize_Event": 5,
+    "Prize_Pendant": 3,
+    "Rock": 264,
+    "Shop": 27,
+    "ShopUpgrade": 2,
+    "Standing": 19,
+    "TakeAny": 62
+  },
+  "provenance_fingerprint": "8835a614e9d5f6d417724ac200a58c93c3f9259b6ddcef364857292a43a3b217",
+  "region_count": 251,
+  "text_registry_fingerprint": "a0239e25d489196e8b8a42a1c70980eb59ffe79210258f2d9291ac173ff0b959"
+}

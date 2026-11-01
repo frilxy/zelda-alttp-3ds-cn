@@ -1,4 +1,6 @@
 #include "overlord.h"
+#include "mods.h"
+#include "dungeon.h"
 #include "sprite.h"
 #include "misc.h"
 #include "sprite_main.h"
@@ -190,6 +192,7 @@ void Overlord18_InvisibleStalfos(int k) {  // 89b7f5
     sprite_E[j] = 1;
     sprite_flags2[j] = 3;
     sprite_D[j] = 2;
+    (void)Rando_AssignScriptedEnemyCheck(j, k, (uint8)(3 - tmp_counter), 0xa7);
   } while (!sign8(--tmp_counter));
 }
 
@@ -267,8 +270,8 @@ void Overlord14_TileRoom(int k) {  // 89b9e8
     overlord_gen2[k] = 0x81;
     return;
   }
-  if (++overlord_gen1[k] != 22)
-    overlord_gen2[k] = 0xE0;
+  if (++overlord_gen1[k] != Mods_RomByte(0x89ba1d, 22))
+    overlord_gen2[k] = Mods_RomByte(0x89ba21, 0xE0);
   else
     overlord_type[k] = 0;
 }
@@ -288,8 +291,8 @@ int TileRoom_SpawnTile(int k) {  // 89ba56
     return j;
   sprite_E[j] = 1;
   int i = overlord_gen1[k];
-  sprite_x_lo[j] = kSpawnFlyingTile_X[i];
-  sprite_y_lo[j] = kSpawnFlyingTile_Y[i] - 8;
+  sprite_x_lo[j] = MODS_U8(kSpawnFlyingTile_X, 0x89ba2a)[i];
+  sprite_y_lo[j] = MODS_U8(kSpawnFlyingTile_Y, 0x89ba40)[i] - 8;
   sprite_y_hi[j] = overlord_y_hi[k];
   sprite_x_hi[j] = overlord_x_hi[k];
   sprite_floor[j] = overlord_floor[k];
@@ -331,21 +334,28 @@ void Overlord10_PirogusuSpawner_left(int k) {  // 89baac
   }
 }
 
+// The ROM's bytes from $89:BB24 to $89:BBB1, read the way the game reads
+// them: the six paths of crumbling tiles, the moves (x low, x high, y low,
+// y high bytes, 4 each, at $BB90), the paths' lengths ($BBA0) and addresses
+// ($BBA6 low bytes, $BBAC high). The last step of the last path is the first
+// byte of the moves, 0x10: its move then comes from the bytes that follow.
+static const uint8 kCrumbleTileRom[142] = {
+    0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x03, 0x03, 0x03,
+    0x03, 0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x01, 0x03, 0x00, 0x03, 0x01,
+    0x03, 0x00, 0x03, 0x01, 0x03, 0x00, 0x03, 0x01, 0x03, 0x00, 0x03, 0x01, 0x03, 0x00, 0x03, 0x01,
+    0x03, 0x00, 0x03, 0x01, 0x03, 0x00, 0x03, 0x01, 0x03, 0x00, 0x03, 0x01, 0x03, 0x00, 0x03, 0x01,
+    0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x02, 0x02,
+    0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x10, 0xf0, 0x00, 0x00,
+    0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x10, 0xf0, 0x00, 0x00, 0x00, 0xff, 0x1a, 0x2a, 0x0c, 0x0b,
+    0x0c, 0x0b, 0x24, 0x3d, 0x66, 0x71, 0x7b, 0x86, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
+};
+
+static uint8 CrumbleTileByte(const uint8 *rom, uint16 addr) {
+  return addr >= 0xbb24 && addr < 0xbbb2 ? rom[addr - 0xbb24] : 0;
+}
+
 void Overlord0A_FallingSquare(int k) {  // 89bbb2
-  static const uint8 kCrumbleTilePathData[108 + 1] = {
-    2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3,
-    3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 3, 1, 3, 0, 3, 1,
-    3, 0, 3, 1, 3, 0, 3, 1, 3, 0, 3, 1, 3, 0, 3, 1,
-    3, 0, 3, 1, 3, 0, 3, 1, 3, 0, 3, 1, 3, 0, 3, 1,
-    3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2,
-    2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0xff
-  };
-  static const uint8 kCrumbleTilePathOffs[7] = {
-    0, 25, 66, 77, 87, 98, 108
-  };
-  static const int8 kCrumbleTilePath_X[4] = { 16, -16, 0, 0 };
-  static const int8 kCrumbleTilePath_Y[4] = { 0, 0, 16, -16 };
   if (overlord_gen2[k]) {
     if (overlord_gen3[k]) {
       overlord_gen2[k]--;
@@ -358,21 +368,17 @@ void Overlord0A_FallingSquare(int k) {  // 89bbb2
     return;
   }
 
-  overlord_gen2[k] = 16;
+  overlord_gen2[k] = Mods_RomByte(0x89bbdd, 16);
   SpawnFallingTile(k);
+  const uint8 *rom = MODS_U8(kCrumbleTileRom, 0x89bb24);
   int j = overlord_type[k] - 10;
-  int i = overlord_gen1[k]++;
-  if (i == kCrumbleTilePathOffs[j + 1] - kCrumbleTilePathOffs[j]) {
+  uint8 i = ++overlord_gen1[k];
+  if (CrumbleTileByte(rom, 0xbba0 + j) == i)
     overlord_type[k] = 0;
-  }
-  int t = kCrumbleTilePathData[kCrumbleTilePathOffs[j] + i];
-  if (t == 0xff) {
-    Overlord_SetX(k, Overlord_GetX(k) + 0xc1a);
-    Overlord_SetY(k, Overlord_GetY(k) + 0xbb66);
-  } else {
-    Overlord_SetX(k, Overlord_GetX(k) + kCrumbleTilePath_X[t]);
-    Overlord_SetY(k, Overlord_GetY(k) + kCrumbleTilePath_Y[t]);
-  }
+  uint16 path = CrumbleTileByte(rom, 0xbba6 + j) | CrumbleTileByte(rom, 0xbbac + j) << 8;
+  uint8 t = CrumbleTileByte(rom, path + i - 1);
+  Overlord_SetX(k, Overlord_GetX(k) + (CrumbleTileByte(rom, 0xbb90 + t) | CrumbleTileByte(rom, 0xbb94 + t) << 8));
+  Overlord_SetY(k, Overlord_GetY(k) + (CrumbleTileByte(rom, 0xbb98 + t) | CrumbleTileByte(rom, 0xbb9c + t) << 8));
 }
 
 void SpawnFallingTile(int k) {  // 89bc31
@@ -413,13 +419,13 @@ void Overlord08_BlobSpawner(int k) {  // 89bcc3
     overlord_gen2[k]--;
     return;
   }
-  overlord_gen2[k] = 0xa0;
+  overlord_gen2[k] = Mods_RomByte(0x89bccd, 0xa0);
   int n = 0;
   for (int i = 0; i != 16; i++) {
     if (sprite_state[i] != 0 && sprite_type[i] == 0x8f)
       n++;
   }
-  if (n >= 5)
+  if (n >= Mods_RomByte(0x89bce9, 5))
     return;
 
   SpriteSpawnInfo info;
@@ -442,6 +448,13 @@ void Overlord08_BlobSpawner(int k) {  // 89bcc3
 void Overlord07_MovingFloor(int k) {  // 89bd3f
   if (sprite_state[0] == 4) {
     overlord_type[k] = 0;
+    // A quest can add a tile as the floor stops: JML $3E8100 there ($89:BD46),
+    // whose code ($3E:8103 on) gives the x, y and kind of tile.
+    if (Mods_RomByte(0x89bd46, 0x9e) == 0x5c)
+      Dungeon_UpdateTileMapWithCommonTile(
+          Mods_RomByte(0x3e8104, 0) | Mods_RomByte(0x3e8108, 0) << 8,
+          Mods_RomByte(0x3e810c, 0) | Mods_RomByte(0x3e8110, 0) << 8,
+          Mods_RomByte(0x3e8114, 0));
     BYTE(dung_floor_move_flags) = 1;
     return;
   }
@@ -487,6 +500,8 @@ void Overlord05_FallingStalfos(int k) {  // 89be0f
     sprite_z[j] = 224;
     sprite_floor[j] = overlord_floor[k];
     sprite_D[j] = 0; // zelda bug: unitialized
+    if (!Rando_AssignScriptedEnemyCheck(j, k, 0, 0x85))
+      return;
     Sprite_Overlord_PlayFallingSfx(j);
   }
 }
@@ -515,16 +530,18 @@ void Overlord06_BadSwitchSnake(int k) {  // 89be75
   sprite_z[j] = 192;
   sprite_E[j] = 192;
 
-  sprite_flags3[j] |= 0x10;
-  sprite_floor[j] = overlord_floor[k];
-  SpriteSfx_QueueSfx2WithPan(j, 0x20);
   uint8 type = overlord_type[k];
   overlord_type[k] = 0;
+  sprite_flags3[j] |= 0x10;
+  sprite_floor[j] = overlord_floor[k];
   if (type == 26) {
     sprite_type[j] = 74;
     Sprite_TransmuteToBomb(j);
     sprite_delay_aux1[j] = 112;
+  } else if (!Rando_AssignScriptedEnemyCheck(j, k, 0, 0x6e)) {
+    return;
   }
+  SpriteSfx_QueueSfx2WithPan(j, 0x20);
 }
 
 void Overlord02_FullRoomCannons(int k) {  // 89bf09
@@ -650,4 +667,3 @@ void ArmosCoordinator_DisableCoercion(int k) {  // 9dedcb
   for (int j = 5; j >= 0; j--)
     sprite_ai_state[j] = 0;
 }
-

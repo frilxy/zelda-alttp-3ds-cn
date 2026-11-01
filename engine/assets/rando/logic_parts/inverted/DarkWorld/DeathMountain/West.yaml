@@ -1,0 +1,63 @@
+# DarkWorld/DeathMountain/West.yaml — Inverted DarkWorld Death Mountain West (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/DarkWorld/DeathMountain/West.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `PegasusBoots` → registry-canonical `Boots`.
+#   - PHP `Bottle` → `HasABottle()` via macro.
+#   - PHP `Lamp` with `item.require.Lamp=1` default → HAS_ITEM(Lamp).
+#   - Inverted/DeathMountain/West.php extends Standard/.../West.php. The
+#     Inverted constructor (php:24) removes the "Dark Death Mountain Fairy"
+#     shop. The Inverted `initialize()` overrides Spike Cave + `can_enter`;
+#     it does NOT call parent::initialize().
+#   - Dropped branches: canBootsClip, canOneFrameClipOW, canOWYBA,
+#     region.cantTakeDamage — Phase B logic axes.
+#
+# Status: translated 2026-05-27. Awaiting review.
+
+format_version: 1
+
+regions:
+  - id: DarkWorld_DeathMountain_West
+    name: "Dark World - Death Mountain West (Inverted)"
+    source: "app/Region/Inverted/DarkWorld/DeathMountain/West.php:11-58 (extends Standard/DarkWorld/DeathMountain/West.php:14-75)"
+
+edges:
+  # Inverted `can_enter` (West.php:46-53):
+  #   canFly OR
+  #   (canLiftRocks AND Lamp) OR
+  #   <canBootsClip dropped> OR
+  #   <canOWYBA+bottle dropped> OR
+  #   <canOneFrameClipOW dropped>
+  # Surviving Phase A:
+  #   CanFly(world) OR (CanLiftRocks() AND HAS_ITEM(Lamp))
+  #
+  # Inverted: Link is in dark world natively; the canonical entry route
+  # to dark-DM-west is flute (canFly) or the rock+lamp climb up the
+  # dark-side mountain.
+  - from: DarkWorld_South
+    to: DarkWorld_DeathMountain_West
+    predicate: "CanFly(world) OR (CanLiftRocks() AND HAS_ITEM(Lamp))"
+    source: "app/Region/Inverted/DarkWorld/DeathMountain/West.php:46-53 (can_enter)"
+
+locations:
+  # `Spike Cave` (Inverted/West.php:35-44):
+  #   Hammer AND canLiftRocks AND (
+  #     (canExtendMagic AND Cape) OR
+  #     ((!region.cantTakeDamage OR canExtendMagic) AND CaneOfByrna)
+  #   )
+  # Phase A pins region.cantTakeDamage=false → !cantTakeDamage=TRUE → the
+  # inner CaneOfByrna disjunct's first half is satisfied, so the byrna
+  # branch reduces to HAS_ITEM(CaneOfByrna). Surviving Phase A:
+  #   HAS_ITEM(Hammer) AND CanLiftRocks() AND
+  #   ((CanExtendMagic(world, 1) AND HAS_ITEM(Cape)) OR HAS_ITEM(CaneOfByrna))
+  - id: "Spike Cave"
+    region: DarkWorld_DeathMountain_West
+    can_reach: "HAS_ITEM(Hammer) AND CanLiftRocks() AND ((CanExtendMagic(world, 1) AND HAS_ITEM(Cape)) OR HAS_ITEM(CaneOfByrna))"
+    source: "app/Region/Inverted/DarkWorld/DeathMountain/West.php:35-44"
+
+# NOTE: The "Dark Death Mountain Fairy" shop is REMOVED in Inverted
+# (Inverted/West.php:24 $this->shops->removeItem(...)). Even if shops were
+# tracked as placement locations, this slot would be absent in Inverted.

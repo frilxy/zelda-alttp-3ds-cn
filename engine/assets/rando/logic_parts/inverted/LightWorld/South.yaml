@@ -1,0 +1,170 @@
+# LightWorld/South.yaml — Inverted LightWorld South (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/LightWorld/South.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `PegasusBoots` → registry-canonical `Boots`.
+#   - PHP `RescueZelda` → registry-canonical `RescuedZelda` (not used in this file).
+#   - PHP `canBunnyRevive`/`canOWYBA`/`canSuperBunny`/`canBootsClip`/
+#     `canOneFrameClipOW`/`canWaterWalk`/`canFakeFlipper`/`canSuperSpeed`/
+#     `canMirrorClip`/`canMirrorWrap` are Phase B trick/glitch axes — DROPPED
+#     per scope (no Phase B ops yet).
+#   - PHP `mode.weapons == 'swordless'` branch DROPPED (Phase B mode axis).
+#   - PHP `world->config('canDungeonRevive', false)` DROPPED (Phase B axis).
+#
+# Inverted regional context:
+#   - In Inverted, Link starts in DarkWorld. LightWorld_South is reached by
+#     Magic Mirror from DarkWorld_South, OR via LightWorld_NorthEast which
+#     is itself mirror-gated. PHP's `can_enter` (php:240-242) delegates to
+#     NorthEast LW canEnter, so the only entry into LW-South is from LW-NE.
+#   - Most LW locations require MoonPearl when reached "naturally" (you arrive
+#     as a bunny without it). In Phase A-translated style, after stripping
+#     trick branches, the canonical predicate is HAS_ITEM(MoonPearl).
+#
+# DROPPED locations (not in location_registry.yaml):
+#   - Shops "20 Rupee Cave", "50 Rupee Cave", "Bonk Fairy (Light)",
+#     "Light Hype Fairy", "Capacity Upgrade" (php:40-80) — shop entities,
+#     not placement locations.
+#   - "Bomb Merchant" (php:27, 90-94) — registry assigns this to
+#     DarkWorld_South region (location_registry.yaml id 236), so it's owned
+#     by the DarkWorld translator agent (file-disjoint ownership).
+#
+# Status: translated 2026-05-27. Awaiting review + codegen integration.
+
+format_version: 1
+
+regions:
+  - id: LightWorld_South
+    name: "Light World - South (Inverted)"
+    source: "app/Region/Inverted/LightWorld/South.php:13-246"
+
+edges:
+  # `can_enter` (php:240-242):
+  #   delegates to `North East Light World`->canEnter.
+  # In Inverted, the LW-NE region edge itself encodes mirror access from the
+  # DarkWorld start. We mirror the standard pattern: LW-NE → LW-South is
+  # freely traversable on the overworld once you're in LW.
+  - from: LightWorld_NorthEast
+    to: LightWorld_South
+    predicate: "TRUE()"
+    source: "app/Region/Inverted/LightWorld/South.php:240-242 (can_enter delegates to NorthEast LW)"
+
+locations:
+  # `Floodgate Chest` (php:82-88): MoonPearl (glitch/bunny branches drop).
+  - id: "Floodgate Chest"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/South.php:82-88"
+
+  # `Aginah's Cave` (php:96-102): MoonPearl AND canBombThings.
+  - id: "Aginah's Cave"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND CanBombThings()"
+    source: "app/Region/Inverted/LightWorld/South.php:96-102"
+
+  # `Mini Moldorm Cave` chests + NPC (php:104-134, 179-185):
+  #   MoonPearl AND canBombThings AND canKillMostThings.
+  - id: "Mini Moldorm Cave - Far Left"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND CanBombThings() AND CanKillMostThings(world, 5)"
+    source: "app/Region/Inverted/LightWorld/South.php:104-110"
+
+  - id: "Mini Moldorm Cave - Left"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND CanBombThings() AND CanKillMostThings(world, 5)"
+    source: "app/Region/Inverted/LightWorld/South.php:112-118"
+
+  - id: "Mini Moldorm Cave - Right"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND CanBombThings() AND CanKillMostThings(world, 5)"
+    source: "app/Region/Inverted/LightWorld/South.php:120-126"
+
+  - id: "Mini Moldorm Cave - Far Right"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND CanBombThings() AND CanKillMostThings(world, 5)"
+    source: "app/Region/Inverted/LightWorld/South.php:128-134"
+
+  - id: "Mini Moldorm Cave - NPC"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND CanBombThings() AND CanKillMostThings(world, 5)"
+    source: "app/Region/Inverted/LightWorld/South.php:179-185"
+
+  # `Ice Rod Cave` (php:136-144): MoonPearl AND canBombThings. The
+  # alternative `BigRedBomb AND canSuperBunny AND MagicMirror` is a Phase B
+  # superbunny-trick branch — DROPPED.
+  - id: "Ice Rod Cave"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND CanBombThings()"
+    source: "app/Region/Inverted/LightWorld/South.php:136-144"
+
+  # `Hobo` (php:146-154): MoonPearl AND Flippers (water-walk/fake-flipper
+  # branches drop).
+  - id: "Hobo"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND HAS_ITEM(Flippers)"
+    source: "app/Region/Inverted/LightWorld/South.php:146-154"
+
+  # `Bombos Tablet` (php:156-161): BookOfMudora AND hasSword(2). Note: in
+  # Inverted this is the LightWorld tablet — Link must already be in LW.
+  # §4 swordless: read with Book+Hammer (inert under randomized).
+  - id: "Bombos Tablet"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(BookOfMudora) AND (HasSword2() OR (OP_MODEWEAPONS_EQ(swordless) AND HAS_ITEM(Hammer)))"
+    source: "app/Region/Inverted/LightWorld/South.php:156-161"
+
+  # `Cave 45` (php:163-169): MoonPearl (other branches drop).
+  - id: "Cave 45"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/South.php:163-169"
+
+  # `Checkerboard Cave` (php:171-177): MoonPearl AND canLiftRocks.
+  - id: "Checkerboard Cave"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND CanLiftRocks()"
+    source: "app/Region/Inverted/LightWorld/South.php:171-177"
+
+  # `Library` (php:187-194): MoonPearl AND Boots (superbunny+mirror branch
+  # drops).
+  - id: "Library"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND HAS_ITEM(Boots)"
+    source: "app/Region/Inverted/LightWorld/South.php:187-194"
+
+  # `Maze Race` (php:196-201): MoonPearl AND (Boots OR canBombThings).
+  # The `canOneFrameClipOW` alternative drops.
+  - id: "Maze Race"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND (HAS_ITEM(Boots) OR CanBombThings())"
+    source: "app/Region/Inverted/LightWorld/South.php:196-201"
+
+  # `Desert Ledge` (php:203-212): MoonPearl AND Desert Palace reachable.
+  # All glitch/clip and dungeonRevive branches drop.
+  - id: "Desert Ledge"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND OP_REGION_REACHABLE(DesertPalace_Lobby)"
+    source: "app/Region/Inverted/LightWorld/South.php:203-212"
+
+  # `Lake Hylia Island` (php:214-223): MoonPearl AND Flippers. All glitch
+  # branches (canBootsClip+Boots, canSuperSpeed+canSpinSpeed,
+  # canOneFrameClipOW) drop.
+  - id: "Lake Hylia Island"
+    region: LightWorld_South
+    can_reach: "CanReachLakeHyliaIsland()"
+    source: "app/Region/Inverted/LightWorld/South.php:214-223"
+
+  # `Sunken Treasure` (php:225-231): MoonPearl (other branches drop).
+  - id: "Sunken Treasure"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/South.php:225-231"
+
+  # `Flute Spot` (php:233-238): MoonPearl AND Shovel.
+  - id: "Flute Spot"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND HAS_ITEM(Shovel)"
+    source: "app/Region/Inverted/LightWorld/South.php:233-238"
+
+macros: []

@@ -1,0 +1,176 @@
+# 50_shops.yaml — region bindings + access predicates for the 27 regular
+# shop slots (add-rando-shopsanity).
+#
+# Until this change, Shop-type locations sat in REGION_OPTIONAL_TYPES and
+# encoded region_id=0xFFFF (always-reachable) — acceptable while they were
+# Retro-only identity pins, wrong once they are real fill locations. These
+# bindings are STATIC (active under plain Retro too): shop slots stop
+# reading as always-reachable in sphere/accessibility data, a scoped
+# correctness fix whose corpus movement is confined to Retro rows.
+#
+# Translation discipline (audit.md §0.10.2): predicates are mechanical
+# translations of the upstream shop declarations + the three per-shop
+# requirement callbacks; each entry cites its PHP source. House idioms:
+#   MoonPearl OR (canOWYBA && hasABottle)      -> HAS_ITEM(MoonPearl) OR CanPearlBypass()
+#   canBunnyRevive && canBunnyRevive($world)   -> CanBunnyRevival(world)
+#   canBombThings()                            -> CanBombThings()
+# Six of the nine shops carry NO per-shop callback upstream — their access
+# is purely the region's canEnter, which our region graph already encodes
+# (including each DW region's own MoonPearl arms). Bunny CAN buy where a
+# region is bunny-enterable (upstream precedent: the Dark World Death
+# Mountain shop is deliberately bunny-buyable, DeathMountain/East.php canEnter
+# via canLiftDarkRocks with no pearl and no callback; our engine's
+# ShopItem_CheckForAPress has no bunny branch, so the runtime agrees).
+#
+# World states: the six callback-less shops keep these entries everywhere.
+# The three CALLBACK shops (LW Death Mountain / Outcasts / DW Potion) get
+# Inverted overrides in logic_parts/inverted/Shops.yaml — upstream
+# re-authors all three callbacks for Inverted because the pearl context
+# flips (the audit-caught case: Inverted reaches LW Death Mountain East as
+# a BUNNY, and the base CanBombThings() entry had no pearl arm). (Checked
+# against the last-wins merge trap: no id below exists in logic.yaml or any
+# other part file; the inverted file feeds the world-state override table.)
+
+format_version: 1
+
+locations:
+  # --- Light World Lake Hylia Shop (LightWorld/South.php:54; no callback) ---
+  - id: "Light World Lake Hylia Shop - 0"
+    region: LightWorld_South
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/South.php:54"
+  - id: "Light World Lake Hylia Shop - 1"
+    region: LightWorld_South
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/South.php:54"
+  - id: "Light World Lake Hylia Shop - 2"
+    region: LightWorld_South
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/South.php:54"
+
+  # --- Light World Kakariko Shop (LightWorld/NorthWest.php:57; no callback) ---
+  - id: "Light World Kakariko Shop - 0"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:57"
+  - id: "Light World Kakariko Shop - 1"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:57"
+  - id: "Light World Kakariko Shop - 2"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:57"
+
+  # --- Light World Death Mountain Shop (DeathMountain/East.php:45) ---
+  # Callback (East.php:64): canBombThings() — the shop sits behind a
+  # bombable wall (config 0x43 = door-check disabled, room-only match; our
+  # kRandoShopSlots mirrors it as room_only=true).
+  - id: "Light World Death Mountain Shop - 0"
+    region: LightWorld_DeathMountain_East
+    can_reach: "CanBombThings()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:64-66"
+  - id: "Light World Death Mountain Shop - 1"
+    region: LightWorld_DeathMountain_East
+    can_reach: "CanBombThings()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:64-66"
+  - id: "Light World Death Mountain Shop - 2"
+    region: LightWorld_DeathMountain_East
+    can_reach: "CanBombThings()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:64-66"
+
+  # --- Dark World Lake Hylia Shop (DarkWorld/South.php:42; no callback) ---
+  - id: "Dark World Lake Hylia Shop - 0"
+    region: DarkWorld_South
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DarkWorld/South.php:42"
+  - id: "Dark World Lake Hylia Shop - 1"
+    region: DarkWorld_South
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DarkWorld/South.php:42"
+  - id: "Dark World Lake Hylia Shop - 2"
+    region: DarkWorld_South
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DarkWorld/South.php:42"
+
+  # --- Dark World Forest Shop (DarkWorld/NorthWest.php:42; no callback) ---
+  - id: "Dark World Forest Shop - 0"
+    region: DarkWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DarkWorld/NorthWest.php:42"
+  - id: "Dark World Forest Shop - 1"
+    region: DarkWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DarkWorld/NorthWest.php:42"
+  - id: "Dark World Forest Shop - 2"
+    region: DarkWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DarkWorld/NorthWest.php:42"
+
+  # --- Dark World Lumberjack Hut (DarkWorld/NorthWest.php:43; no callback) ---
+  - id: "Dark World Lumberjack Hut - 0"
+    region: DarkWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DarkWorld/NorthWest.php:43"
+  - id: "Dark World Lumberjack Hut - 1"
+    region: DarkWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DarkWorld/NorthWest.php:43"
+  - id: "Dark World Lumberjack Hut - 2"
+    region: DarkWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DarkWorld/NorthWest.php:43"
+
+  # --- Dark World Village of Outcasts (DarkWorld/NorthWest.php:44) ---
+  # Callback (NorthWest.php:72-76): Hammer AND (MoonPearl OR (canOWYBA AND
+  # hasABottle) OR (canBunnyRevive AND canBunnyRevive)) — same pearl-OR
+  # triple as Brewery (43_darkworld.yaml).
+  - id: "Dark World Village of Outcasts - 0"
+    region: DarkWorld_NorthWest
+    can_reach: "HAS_ITEM(Hammer) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world))"
+    source: "app/Region/Standard/DarkWorld/NorthWest.php:72-76"
+  - id: "Dark World Village of Outcasts - 1"
+    region: DarkWorld_NorthWest
+    can_reach: "HAS_ITEM(Hammer) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world))"
+    source: "app/Region/Standard/DarkWorld/NorthWest.php:72-76"
+  - id: "Dark World Village of Outcasts - 2"
+    region: DarkWorld_NorthWest
+    can_reach: "HAS_ITEM(Hammer) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world))"
+    source: "app/Region/Standard/DarkWorld/NorthWest.php:72-76"
+
+  # --- Dark World Potion Shop (DarkWorld/NorthEast.php:45) ---
+  # Callback (NorthEast.php:74-80): canBunnyRevive OR ((MoonPearl OR
+  # (canOWYBA AND hasABottle)) AND (canOneFrameClipOW OR (canBootsClip AND
+  # PegasusBoots) OR Hammer OR Flippers OR canLiftRocks)) — NE DW is
+  # bunny-enterable post-Agahnim, so the callback re-adds the pearl plus a
+  # traversal item to actually cross to the shop.
+  - id: "Dark World Potion Shop - 0"
+    region: DarkWorld_NorthEast
+    can_reach: "CanBunnyRevival(world) OR ((HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND (CanOneFrameClipOW() OR CanBootsClip() OR HAS_ITEM(Hammer) OR HAS_ITEM(Flippers) OR CanLiftRocks()))"
+    source: "app/Region/Standard/DarkWorld/NorthEast.php:74-80"
+  - id: "Dark World Potion Shop - 1"
+    region: DarkWorld_NorthEast
+    can_reach: "CanBunnyRevival(world) OR ((HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND (CanOneFrameClipOW() OR CanBootsClip() OR HAS_ITEM(Hammer) OR HAS_ITEM(Flippers) OR CanLiftRocks()))"
+    source: "app/Region/Standard/DarkWorld/NorthEast.php:74-80"
+  - id: "Dark World Potion Shop - 2"
+    region: DarkWorld_NorthEast
+    can_reach: "CanBunnyRevival(world) OR ((HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND (CanOneFrameClipOW() OR CanBootsClip() OR HAS_ITEM(Hammer) OR HAS_ITEM(Flippers) OR CanLiftRocks()))"
+    source: "app/Region/Standard/DarkWorld/NorthEast.php:74-80"
+
+  # --- Dark World Death Mountain Shop (DarkWorld/DeathMountain/East.php:41;
+  # no callback — deliberately bunny-buyable upstream) ---
+  - id: "Dark World Death Mountain Shop - 0"
+    region: DarkWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DarkWorld/DeathMountain/East.php:41"
+  - id: "Dark World Death Mountain Shop - 1"
+    region: DarkWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DarkWorld/DeathMountain/East.php:41"
+  - id: "Dark World Death Mountain Shop - 2"
+    region: DarkWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DarkWorld/DeathMountain/East.php:41"
+
+  # --- Dark World Potion Shop slot naming note: registry names are
+  # "Dark World Potion Shop - N"; see location_registry.yaml ids 237-239. ---

@@ -1,0 +1,107 @@
+# add-rando-ow-warp-shuffle — quotient cross-check allowlist (design D1).
+#
+# The codegen collapses the OW component adjacency by zone and reconciles it
+# against the hand-written zone edges BOTH ways. Every mismatch must either
+# be fixed in the data or explained here with a VALIDATED carrier:
+#   carrier: "predicate:<MacroOrOpToken>"  — token must appear in a zone-edge
+#            predicate touching the pair
+#   carrier: "location:<Location Id>"      — the location carries the link
+#   carrier: "mechanism:mirror|flute|whirlpool|portal" — engine mechanism
+#            outside the walk-edge model
+#   carrier: "conservative:<reviewed note>" — upstream witnesses adjacency
+#            the fork graph deliberately omits (item-gated links kept
+#            predicate-side, or redundant by hub construction). UNDER-grants
+#            only — placement-safe by direction.
+# Free-text reasons without a resolving carrier are a codegen error, so this
+# file cannot decay into a rubber stamp. Keep entries sorted; growth is a
+# review-visible diff.
+#
+# Reviewed 2026-07-19 during Phase 2 implementation. Two recurring facts:
+# (1) the hand graph is a HUB model — LightWorld_NorthEast reaches every
+# zone directly, so lateral zone-zone edges the player can really walk are
+# often omitted as redundant (under-grant, safe); (2) upstream marks several
+# lateral links item-gated only by source comments (#hammer/#hookshot/
+# #mitts), and the fork deliberately keeps those predicate-side rather than
+# as ungated zone edges.
+allow:
+  # --- derived adjacency the hand graph deliberately omits ------------------
+  - {from: DarkWorld_DeathMountain_East, to: DarkWorld_DeathMountain_West,
+     carrier: "conservative:hookshot-gated broken-bridge link kept out of the
+       zone graph; DDM East is modeled portal-only (under-grant)", }
+  - {from: DarkWorld_DeathMountain_West, to: DarkWorld_DeathMountain_East,
+     carrier: "conservative:same hookshot-gated link, reverse direction"}
+  - {from: DarkWorld_DeathMountain_West, to: DarkWorld_NorthWest,
+     carrier: "conservative:descent to Bumper ledge area; hand graph reaches
+       DW NW via portals, ledge walk kept component-level only"}
+  - {from: DarkWorld_NorthWest, to: DarkWorld_DeathMountain_West,
+     carrier: "conservative:reverse of the Bumper-area span; ascent is
+       entrance-carried in vanilla"}
+  - {from: DarkWorld_Mire, to: DarkWorld_South,
+     carrier: "conservative:upstream lateral link is gated; hand graph models
+       Mire as portal-only (vanilla logic)"}
+  - {from: DarkWorld_South, to: DarkWorld_Mire,
+     carrier: "conservative:reverse of the gated Mire lateral link"}
+  - {from: DarkWorld_NorthEast, to: DarkWorld_South,
+     carrier: "conservative:peg/bomb-gated lateral link kept predicate-side;
+       both zones portal-reachable in the hub model"}
+  - {from: DarkWorld_South, to: DarkWorld_NorthEast,
+     carrier: "conservative:reverse of the gated NE/South link"}
+  - {from: DarkWorld_NorthWest, to: DarkWorld_South,
+     carrier: "conservative:real walk link omitted as redundant — both zones
+       are LightWorld_NorthEast-portal-reachable (hub model, under-grant)"}
+  - {from: DarkWorld_South, to: DarkWorld_NorthWest,
+     carrier: "conservative:reverse of the redundant NW/South walk link"}
+  - {from: LightWorld_DeathMountain_West, to: LightWorld_NorthWest,
+     carrier: "conservative:DM descent drops are component-level; ascent is
+       the donkey-cave entrance, not overworld walking"}
+  - {from: LightWorld_NorthWest, to: LightWorld_DeathMountain_West,
+     carrier: "conservative:reverse of the DM/NW span (entrance-carried)"}
+  - {from: LightWorld_NorthWest, to: LightWorld_South,
+     carrier: "conservative:real walk link omitted as redundant — the NE hub
+       reaches both directly (under-grant)"}
+  - {from: LightWorld_South, to: LightWorld_NorthWest,
+     carrier: "conservative:reverse of the redundant NW/South walk link"}
+  - {from: LightWorld_DeathMountain_West, to: DarkWorld_DeathMountain_East,
+     carrier: "mechanism:portal"}
+     # East DM teleporter portal edge: the terrain screen map binds its host
+     # screen 0x05 to DM_West while the hand graph's teleporter edge runs
+     # from DM_East — a zone-partition disagreement, not a data error; the
+     # portal edge carries the hand edge's (CanFly-stripped) predicate.
+  - {from: LightWorld_South, to: DarkWorld_Mire,
+     carrier: "mechanism:portal"}
+     # Desert/Mire teleporter portal edge from the teleporter-ledge component
+     # (screen 0x30 -> zone LightWorld_South); the hand flute-launch edge
+     # runs from the NE hub instead (flute-from-anywhere semantics).
+  # --- hand edges no walk-adjacency can witness (mechanism edges) -----------
+  - {from: DarkWorld_DeathMountain_East, to: LightWorld_DeathMountain_East,
+     carrier: "mechanism:mirror"}
+  - {from: DarkWorld_DeathMountain_West, to: LightWorld_DeathMountain_West,
+     carrier: "mechanism:mirror"}
+  - {from: DarkWorld_Mire, to: LightWorld_NorthEast,
+     carrier: "mechanism:mirror"}
+  - {from: DarkWorld_NorthEast, to: LightWorld_NorthEast,
+     carrier: "mechanism:mirror"}
+  - {from: DarkWorld_NorthWest, to: LightWorld_NorthEast,
+     carrier: "mechanism:mirror"}
+  - {from: DarkWorld_South, to: LightWorld_NorthEast,
+     carrier: "mechanism:mirror"}
+  - {from: LightWorld_DeathMountain_East, to: DarkWorld_DeathMountain_East,
+     carrier: "mechanism:portal"}
+     # Hand edge from DM_East; witnessed portal pair is from DM_West (screen
+     # 0x05 partition, see above) — same physical teleporter.
+  - {from: LightWorld_DeathMountain_West, to: LightWorld_NorthEast,
+     carrier: "conservative:descent to the NE hub is drop/entrance-carried;
+       the hub model needs no explicit return edge"}
+  - {from: LightWorld_NorthEast, to: DarkWorld_Mire,
+     carrier: "mechanism:flute"}
+     # The flute-launch edge (CanLiftDarkRocks AND CanFly): fly to the mire
+     # teleporter ledge then portal. Under flute shuffle the CanFly conjunct
+     # compiles false and the portal-edge + hub route replaces it.
+  - {from: LightWorld_NorthEast, to: DarkWorld_NorthWest,
+     carrier: "mechanism:portal"}
+  - {from: LightWorld_NorthEast, to: DarkWorld_South,
+     carrier: "mechanism:portal"}
+  - {from: LightWorld_NorthEast, to: LightWorld_DeathMountain_West,
+     carrier: "mechanism:flute"}
+     # The DM entry edge (CanFly OR CanLiftRocks+Lamp OR clips): partly
+     # flute-carried, partly the entrance-carried ascent.

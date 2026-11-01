@@ -1,0 +1,51 @@
+# icon_atlas.yaml — 5-icon visual hash widget icon set (tasks.md §9.4b).
+#
+# The 5-icon visual hash widget displays 5 OAM tiles derived from
+# SHA-256(share_string_binary). Each tile is selected by
+# `index_i = SHA-256(share_string_binary)[i] mod N`, where N = the entry
+# count in this file. The atlas YAML is the registry pin per
+# `randomizer-ui / Atlas size is registry-pinned`.
+#
+# Bumping the atlas (adding/removing entries) changes the icon-hash output
+# for every existing share string and therefore advances `kGeneratorVersion`
+# per `randomizer-ui / 5-icon visual hash` requirement. Treat any edit as a
+# version bump.
+#
+# Source of tile indices: the menu-font tile region used by the file-select
+# screen (see `kBase32CharToTile` in src/select_file.c — base32 alphabet
+# chars map into the 0x00..0x29 range plus 0x76..0x7d digits, and 0xaf for
+# 'I'). These tiles are already loaded into VRAM during file-select rendering
+# and are guaranteed to be addressable for OAM at the same palette indices.
+#
+# Phase A pool: 16 distinct letter/digit tiles, chosen to be visually
+# discriminable at the 8x8 OAM tile scale. The set is deliberately compact
+# so the icon-strip remains stable under future atlas additions (every
+# new entry shifts the modulo-mapping and changes existing seeds' icons).
+#
+# Tile mapping (verified by inspection of in-game file-select VRAM):
+#   A=0x00, B=0x01, C=0x02, D=0x03, E=0x04, F=0x05, G=0x06, H=0x07
+#   J=0x09, K=0x0a, L=0x0b, M=0x0c, N=0x0d, O=0x0e, P=0x0f
+#   Q=0x20, R=0x21, S=0x22, T=0x23, U=0x24, V=0x25, W=0x26, X=0x27
+#   Y=0x28, Z=0x29
+#   '2'=0x78, '3'=0x79, '4'=0x7a, '5'=0x7b, '6'=0x7c, '7'=0x7d
+#
+# Pool curation: skip visually similar pairs (B/E, D/O, I/L/T, K/X, P/F,
+# 5/S, 6/G, 2/Z) and pick the more distinctive of each pair.
+
+icons:
+  - { name: A, tile: 0x00 }   # 0
+  - { name: C, tile: 0x02 }   # 1
+  - { name: G, tile: 0x06 }   # 2
+  - { name: H, tile: 0x07 }   # 3
+  - { name: J, tile: 0x09 }   # 4
+  - { name: M, tile: 0x0c }   # 5
+  - { name: N, tile: 0x0d }   # 6
+  - { name: P, tile: 0x0f }   # 7
+  - { name: Q, tile: 0x20 }   # 8
+  - { name: R, tile: 0x21 }   # 9
+  - { name: U, tile: 0x24 }   # 10
+  - { name: V, tile: 0x25 }   # 11
+  - { name: W, tile: 0x26 }   # 12
+  - { name: Y, tile: 0x28 }   # 13
+  - { name: Z, tile: 0x29 }   # 14
+  - { name: digit_4, tile: 0x7a }  # 15

@@ -1,0 +1,137 @@
+# 01_eastern_palace.yaml — full-dungeon worked example
+#
+# Exercises: Region with dungeon field, Edge with predicate, Location of
+# types Chest / BigChest / Drop / Prize_Pendant, dungeon_item_class,
+# can_reach + always_allow predicates, macro references, source citations.
+#
+# Translated mechanically from `app/Region/Standard/EasternPalace.php`
+# (verified to exist via grep; line numbers cited per audit.md §0.3.5).
+
+format_version: 1
+
+regions:
+  # External parent region referenced by the edge below. Worked examples are
+  # self-contained subgraphs — stub the overworld region here so the codegen
+  # well-formedness check passes.
+  - id: LightWorld_NorthEast
+    name: "Light World - North East (stub)"
+    source: "stub for self-contained worked example"
+
+  - id: EasternPalace_Lobby
+    name: "Eastern Palace - Lobby"
+    dungeon: EasternPalace
+    source: "app/Region/Standard/EasternPalace.php:21-50"
+
+  - id: EasternPalace_PastArmos
+    name: "Eastern Palace - Past Armos"
+    dungeon: EasternPalace
+    parent: EasternPalace_Lobby
+    source: "app/Region/Standard/EasternPalace.php:56-60"
+
+edges:
+  - from: LightWorld_NorthEast
+    to: EasternPalace_Lobby
+    # Trivial entrance — the actual dungeon-entry restrictions are handled
+    # by the entrance's overworld region predicate, not the in-dungeon edge.
+    predicate: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthEast.php (entrance wiring)"
+
+  - from: EasternPalace_Lobby
+    to: EasternPalace_PastArmos
+    # Boss-room access requires: arrows (Armos Knights), light (Lamp or
+    # Fire Rod for the dark room), and the Big Key.
+    predicate: "CanShootArrows() AND (HAS_ITEM(Lamp) OR HAS_ITEM(FireRod)) AND HAS_ITEM(BigKey_EasternPalace)"
+    source: "app/Region/Standard/EasternPalace.php:56 (boss can_complete closure)"
+
+locations:
+  - id: "Eastern Palace - Compass Chest"
+    name: "Eastern Palace - Compass Chest"
+    region: EasternPalace_Lobby
+    type: Chest
+    vanilla_item: Compass_EasternPalace
+    dungeon_item_class: compass
+    # Always reachable from lobby; no extra requirements.
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/EasternPalace.php:51"
+
+  - id: "Eastern Palace - Big Chest"
+    name: "Eastern Palace - Big Chest"
+    region: EasternPalace_Lobby
+    type: BigChest
+    vanilla_item: BigKey_EasternPalace
+    # Big Chest requires the dungeon's Big Key in inventory.
+    can_reach: "HAS_ITEM(BigKey_EasternPalace)"
+    # In dungeon-mode, the Big Chest accepts any dungeon item from its
+    # own dungeon; always_allow overrides any general fill restriction.
+    always_allow: "OP_ITEM_IS(Compass_EasternPalace) OR OP_ITEM_IS(Map_EasternPalace)"
+    source: "app/Region/Standard/EasternPalace.php:52, 102-105"
+
+  - id: "Eastern Palace - Cannonball Chest"
+    name: "Eastern Palace - Cannonball Chest"
+    region: EasternPalace_Lobby
+    type: Chest
+    vanilla_item: Rupee100
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/EasternPalace.php:53"
+
+  - id: "Eastern Palace - Big Key Chest"
+    name: "Eastern Palace - Big Key Chest"
+    region: EasternPalace_Lobby
+    type: Chest
+    vanilla_item: BigKey_EasternPalace
+    dungeon_item_class: big_key
+    # Big Key Chest is in the dark room — needs light.
+    can_reach: "HAS_ITEM(Lamp) OR HAS_ITEM(FireRod)"
+    source: "app/Region/Standard/EasternPalace.php:54"
+
+  - id: "Eastern Palace - Map Chest"
+    name: "Eastern Palace - Map Chest"
+    region: EasternPalace_Lobby
+    type: Chest
+    vanilla_item: Map_EasternPalace
+    dungeon_item_class: map
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/EasternPalace.php:55"
+
+  - id: "Eastern Palace - Boss"
+    name: "Eastern Palace - Boss"
+    region: EasternPalace_PastArmos
+    type: Drop
+    vanilla_item: BossHeartContainer
+    # Boss-heart slot. This is shuffled like an ordinary drop location; the
+    # can_reach is the boss kill itself.
+    can_reach: "CanKillArmosKnights() AND HAS_ITEM(BigKey_EasternPalace)"
+    source: "app/Region/Standard/EasternPalace.php:56"
+
+  - id: "Eastern Palace - Prize"
+    name: "Eastern Palace - Prize"
+    region: EasternPalace_PastArmos
+    type: Prize_Pendant
+    vanilla_item: Prize_GreenPendant
+    can_reach: "CanKillArmosKnights() AND HAS_ITEM(BigKey_EasternPalace)"
+    source: "app/Region/Standard/EasternPalace.php:58"
+
+macros:
+  - name: CanShootArrows
+    parameters: []
+    body: "HAS_ITEM(Bow) OR HAS_AMOUNT(ProgressiveBow, 1)"
+    source: "app/Support/ItemCollection.php (canShootArrows method)"
+    notes: |
+      The bow can be either absolute (Bow item with arrows assumed) or
+      progressive (any tier of ProgressiveBow). ALTTPR factors this so
+      every "arrow required" predicate stays terse.
+
+  - name: CanKillArmosKnights
+    parameters: []
+    body: "HasSword(1) OR HAS_ITEM(Hammer) OR CanShootArrows() OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod) OR HAS_ITEM(CaneOfSomaria) OR HAS_ITEM(CaneOfByrna)"
+    source: "app/Boss.php:canBeat for ArmosKnights (line range TBD by 3.4a audit)"
+
+  - name: HasSword
+    parameters: [min_level]
+    body: "HAS_AMOUNT(ProgressiveSword, min_level) OR HAS_ITEM(L1Sword) OR HAS_ITEM(L2Sword) OR HAS_ITEM(L3Sword) OR HAS_ITEM(L4Sword)"
+    source: "app/Support/ItemCollection.php (hasSword method)"
+    notes: |
+      Caller passes min_level (1..4). The body checks progressive count
+      OR any absolute sword. In Phase A min_level only meaningfully gates
+      progressive count; absolute swords always count as "have any sword".
+      Phase B's swordless mode would override this differently.

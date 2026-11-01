@@ -1,5 +1,6 @@
 #include "sprite.h"
 #include "dungeon.h"
+#include "mods.h"
 #include "hud.h"
 #include "load_gfx.h"
 #include "overworld.h"
@@ -13,6 +14,20 @@
 #include "tile_detect.h"
 #include "sprite_main.h"
 #include "assets.h"
+#include "rando/custom_item_gfx.h"
+#include "config.h"
+#include "rando/shuffle_boss.h"
+#include "rando/shuffle_drops.h"
+#include "rando/shuffle_enemies.h"  // add-rando-enemy-shuffle (sprite-type substitution)
+#include "rando/rando.h"  // Rando_IsSwordlessActive (swordless Ganon damage)
+#include "rando/goal_npc.h"
+#include "rando/goal_runtime.h"
+#include "rando/enemy_drop_lookup.h"  // forced enemy key-drop lookup
+#include "rando/enemy_check_lookup.h"  // ordinary enemy check lookup
+#include "rando/souls.h"  // add-enemy-souls (spawn suppression + kill-gate hold)
+#include "rando/location_ids.h"  // LOC_Tower_of_Hera_Basement_Cage (cage-key dispatch)
+#include "rando/item_ids.h"      // ITEM_SmallKey_TowerOfHera (cage-key dispatch)
+#include "zelda_rtl.h"
 static const uint16 kOamGetBufferPos_Tab0[6] = {0x171, 0x201, 0x31, 0xc1, 0x141, 0x1d1};
 static const uint16 kOamGetBufferPos_Tab1[48] = {
    0x30,  0x50,  0x80,  0xb0,  0xe0, 0x110, 0x140, 0x170, 0x1d0, 0x1d4, 0x1dc, 0x1e0, 0x1e4, 0x1ec, 0x1f0, 0x1f8,
@@ -98,11 +113,28 @@ static const int8 kSprite_Func5_Tab3[256] = {
   1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
   1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 };
-static const int8 kSlopedTile[32] = {
+// The game indexes this table in 8 bits with the tile type a sprite last
+// touched, and an ancilla on a slope uses whatever value is left there: past
+// the 32 bytes it reads the code that follows in the cartridge, kept here.
+static const uint8 kSlopedTile[256] = {
   7, 6, 5, 4, 3, 2, 1, 0,
   0, 1, 2, 3, 4, 5, 6, 7,
   0, 1, 2, 3, 4, 5, 6, 7,
   7, 6, 5, 4, 3, 2, 1, 0,
+  0x8b, 0x4b, 0xab, 0x20, 0xfe, 0xe8, 0xab, 0x6b, 0xa5, 0x00, 0x29, 0x07, 0x85, 0x04, 0xa5, 0x02,
+  0x29, 0x07, 0x85, 0x05, 0xad, 0xa5, 0x0f, 0x38, 0xe9, 0x10, 0x85, 0x06, 0x0a, 0x0a, 0x0a, 0x18,
+  0x65, 0x05, 0xa8, 0xa5, 0x06, 0xc9, 0x02, 0x90, 0x07, 0xa5, 0x04, 0xd9, 0xd6, 0xe8, 0x80, 0x05,
+  0xb9, 0xd6, 0xe8, 0xc5, 0x04, 0x60, 0x20, 0x32, 0xe9, 0x4c, 0x3e, 0xe9, 0x8a, 0x18, 0x69, 0x10,
+  0xaa, 0x20, 0x3e, 0xe9, 0xae, 0xa0, 0x0f, 0x60, 0xbd, 0x40, 0x0d, 0xf0, 0x28, 0x0a, 0x0a, 0x0a,
+  0x0a, 0x18, 0x7d, 0x60, 0x0d, 0x9d, 0x60, 0x0d, 0xbd, 0x40, 0x0d, 0x08, 0x4a, 0x4a, 0x4a, 0x4a,
+  0xa0, 0x00, 0x28, 0x10, 0x03, 0x09, 0xf0, 0x88, 0x7d, 0x00, 0x0d, 0x9d, 0x00, 0x0d, 0x98, 0x7d,
+  0x20, 0x0d, 0x9d, 0x20, 0x0d, 0x60, 0xbd, 0x80, 0x0f, 0x0a, 0x0a, 0x0a, 0x0a, 0x18, 0x7d, 0x90,
+  0x0f, 0x9d, 0x90, 0x0f, 0xbd, 0x80, 0x0f, 0x08, 0x4a, 0x4a, 0x4a, 0x4a, 0x28, 0x10, 0x02, 0x09,
+  0xf0, 0x7d, 0x70, 0x0f, 0x9d, 0x70, 0x0f, 0x60, 0x64, 0x00, 0x60, 0x85, 0x01, 0xc9, 0x00, 0xf0,
+  0xf7, 0xda, 0x5a, 0x20, 0xe8, 0xea, 0x84, 0x02, 0xa5, 0x0e, 0x10, 0x03, 0x49, 0xff, 0x1a, 0x85,
+  0x0c, 0x20, 0xd1, 0xea, 0x84, 0x03, 0xa5, 0x0f, 0x10, 0x03, 0x49, 0xff, 0x1a, 0x85, 0x0d, 0xa0,
+  0x00, 0xa5, 0x0d, 0xc5, 0x0c, 0xb0, 0x09, 0xc8, 0x48, 0xa5, 0x0c, 0x85, 0x0d, 0x68, 0x85, 0x0c,
+  0x64, 0x0b, 0x64, 0x00, 0xa6, 0x01, 0xa5, 0x0b, 0x18, 0x65, 0x0c, 0xc5, 0x0d, 0x90, 0x04, 0xe5,
 };
 static const uint8 kSprite_Func1_Tab[8] = {15, 15, 24, 15, 15, 19, 15, 15};
 static const uint8 kSprite_Func1_Tab2[8] = {6, 6, 6, 12, 6, 6, 6, 15};
@@ -300,7 +332,11 @@ static const int8 kPlayer_SetupActionHitBox_H[65] = {
 static const int8 kPlayer_SetupActionHitBox_Tab4[13] = {
   1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1
 };
-static const uint8 kSprite_PrepAndDrawSingleLarge_Tab1[236] = {
+// Sprite 0xEC, the thrown bush or pot, reads one entry past the end of the
+// ROM table: the first byte of the code after it at $06:DBF0 (PHB, 0x8B).
+// The thrown item then replaces the tile it gives, but the read has to stay
+// inside the array.
+static const uint8 kSprite_PrepAndDrawSingleLarge_Tab1[237] = {
   200, 0, 107, 0, 0, 0, 0, 0, 0, 203, 0, 8, 10, 11, 0, 0,
   13, 0, 0, 86, 0, 0, 15, 17, 0, 19, 0, 0, 0, 0, 20, 0,
   21, 27, 0, 42, 42, 248, 0, 182, 0, 0, 0, 170, 0, 0, 28, 0,
@@ -315,7 +351,7 @@ static const uint8 kSprite_PrepAndDrawSingleLarge_Tab1[236] = {
   0, 0, 92, 0, 214, 230, 0, 0, 0, 219, 218, 233, 0, 0, 190, 192,
   106, 0, 249, 215, 0, 0, 0, 216, 0, 0, 222, 227, 0, 0, 0, 235,
   0, 0, 0, 0, 0, 0, 244, 244, 29, 31, 31, 31, 32, 32, 32, 33,
-  34, 35, 35, 37, 40, 106, 246, 41, 0, 0, 205, 206,
+  34, 35, 35, 37, 40, 106, 246, 41, 0, 0, 205, 206, 139,
 };
 static const uint8 kSprite_PrepAndDrawSingleLarge_Tab2[251] = {
   0xa0, 0xa2, 0xa0, 0xa2, 0x80, 0x82, 0x80, 0x82, 0xea, 0xec, 0x84, 0x4e, 0x61, 0xbd, 0x8c, 0x20,
@@ -507,6 +543,568 @@ static const uint8 kRupeesAbsorption[3] = {1, 5, 20};
 const uint8 kAbsorptionSfx[15] = {0xb, 0xa, 0xa, 0xa, 0xb, 0xb, 0xb, 0xb, 0xb, 0xb, 0xb, 0xb, 0x2f, 0x2f, 0xb};
 static const uint8 kBombsAbsorption[3] = {1, 4, 8};
 const uint8 kAbsorbBigKey[2] = {0x40, 0x20};
+
+static bool Rando_EnemyDropKeysActiveRuntime(void) {
+  if (!(enhanced_features1 & kFeatures1_RandomizerActive))
+    return false;
+  const RandoSettings *s = Rando_GetActiveSettings();
+  return Settings_EnemyDropKeysActive(s);
+}
+
+static bool Rando_EnemyChecksDungeonActiveRuntime(void) {
+  if (!(enhanced_features1 & kFeatures1_RandomizerActive))
+    return false;
+  const RandoSettings *s = Rando_GetActiveSettings();
+  return Settings_EnemyChecksDungeonActive(s);
+}
+
+static bool Rando_EnemyChecksAllActiveRuntime(void) {
+  if (!(enhanced_features1 & kFeatures1_RandomizerActive))
+    return false;
+  const RandoSettings *s = Rando_GetActiveSettings();
+  return Settings_EnemyChecksAllActive(s);
+}
+
+static const RandoEnemyDropLookupEntry *Rando_FindEnemyDrop(uint16 room,
+                                                            uint8 source_slot,
+                                                            uint8 drop_kind) {
+  uint32 want = ((uint32)room << 16) | ((uint32)source_slot << 8) | drop_kind;
+  int lo = 0, hi = (int)kRandoEnemyDropLookup_COUNT;
+  while (lo < hi) {
+    int mid = lo + (hi - lo) / 2;
+    const RandoEnemyDropLookupEntry *e = &kRandoEnemyDropLookup[mid];
+    uint32 got = ((uint32)e->room << 16) | ((uint32)e->source_slot << 8) | e->drop_kind;
+    if (got == want) return e;
+    if (got < want) lo = mid + 1; else hi = mid;
+  }
+  return NULL;
+}
+
+// add-enemy-souls — forced key-drop sources are EXEMPT from soul suppression
+// while enemy drops are NOT itemized (enemy_drop_checks off): the vanilla
+// key-count model then treats those drops as free in-dungeon keys (the
+// gen_pot_key_depth "nonpot drops stay free" contract + the placer's
+// free-grant), so the holder must spawn souls-or-not or an assumed-fill-
+// certified seed could strand behind an uncollectable key. When the drop IS a
+// check (edc >= keys) the location's logic predicate carries the holder's
+// soul (gen_enemy_drop_tables source_soul term) and normal suppression
+// applies. Identified by (room, live slot) against the forced-drop lookup —
+// the source species is enemy-shuffle-pinned (Souls_RoomPinnedVanilla), so
+// the vanilla slot binding stays authoritative.
+static bool Rando_SoulDropSourceExempt(uint16 room, uint8 slot) {
+  if (Rando_EnemyDropKeysActiveRuntime())
+    return false;  // itemized: the check's own predicate carries the soul
+  return Rando_FindEnemyDrop(room, slot, kRandoEnemyDropKind_SmallKey) != NULL ||
+         Rando_FindEnemyDrop(room, slot, kRandoEnemyDropKind_BigKey) != NULL;
+}
+
+static const RandoEnemyCheckLookupEntry *Rando_FindEnemyCheck(uint16 room,
+                                                              uint8 source_slot) {
+  uint32 want = ((uint32)room << 8) | source_slot;
+  int lo = 0, hi = (int)kRandoEnemyCheckLookup_COUNT;
+  while (lo < hi) {
+    int mid = lo + (hi - lo) / 2;
+    const RandoEnemyCheckLookupEntry *e = &kRandoEnemyCheckLookup[mid];
+    uint32 got = ((uint32)e->room << 8) | e->source_slot;
+    if (got == want) return e;
+    if (got < want) lo = mid + 1; else hi = mid;
+  }
+  return NULL;
+}
+
+static bool Rando_EnemyCheckEntryActive(const RandoEnemyCheckLookupEntry *check) {
+  return check != NULL &&
+         (!check->all_tier_only || Rando_EnemyChecksAllActiveRuntime());
+}
+
+// Forward-declared to avoid pulling rando_placement.h into this hot file
+// (same seam as misc.c). See rando_placement.c.
+uint16 Placement_Lookup(uint16 location_id, uint16 vanilla_item_id);
+
+// Placement-presence guard, mirroring rando_pot_is_active /
+// rando_terrain_is_active (rando.c): an enemy-check location absent from the
+// installed placement must be a clean no-op. Dispatching it would mark the
+// location checked and hand the caller the fallback receive code for a
+// placement that doesn't exist — with the old fallback of 0 that was a
+// phantom GiveSwordAndShield.
+static bool Rando_EnemyCheckLocPlaced(uint16 loc_id) {
+  return Placement_Lookup(loc_id, 0xFFFFu) != 0xFFFFu;
+}
+
+static const RandoOverworldEnemyCheckLookupEntry *Rando_FindOverworldEnemyCheck(
+    uint8 area, uint8 stage, uint8 source_slot) {
+  uint32 want = ((uint32)area << 16) | ((uint32)stage << 8) | source_slot;
+  int lo = 0, hi = (int)kRandoOverworldEnemyCheckLookup_COUNT;
+  while (lo < hi) {
+    int mid = lo + (hi - lo) / 2;
+    const RandoOverworldEnemyCheckLookupEntry *e =
+        &kRandoOverworldEnemyCheckLookup[mid];
+    uint32 got = ((uint32)e->area << 16) | ((uint32)e->stage << 8) | e->source_slot;
+    if (got == want) return e;
+    if (got < want) lo = mid + 1; else hi = mid;
+  }
+  return NULL;
+}
+
+static const RandoOverworldEnemyCheckLookupEntry *Rando_FindOverworldEnemyCheckByBlock(
+    uint8 area, uint8 stage, uint16 block) {
+  uint32 want = ((uint32)area << 8) | stage;
+  for (uint32 i = 0; i < kRandoOverworldEnemyCheckLookup_COUNT; i++) {
+    const RandoOverworldEnemyCheckLookupEntry *e =
+        &kRandoOverworldEnemyCheckLookup[i];
+    uint32 got = ((uint32)e->area << 8) | e->stage;
+    if (got < want)
+      continue;
+    if (got > want)
+      break;
+    if (e->block == block)
+      return e;
+  }
+  return NULL;
+}
+
+static const RandoBossEnemyCheckLookupEntry *Rando_FindBossEnemyCheck(
+    uint8 game_dungeon, uint16 room, uint8 kind) {
+  uint32 want = ((uint32)game_dungeon << 24) | ((uint32)room << 8) | kind;
+  int lo = 0, hi = (int)kRandoBossEnemyCheckLookup_COUNT;
+  while (lo < hi) {
+    int mid = lo + (hi - lo) / 2;
+    const RandoBossEnemyCheckLookupEntry *e = &kRandoBossEnemyCheckLookup[mid];
+    uint32 got = ((uint32)e->game_dungeon << 24) | ((uint32)e->room << 8) | e->kind;
+    if (got == want) return e;
+    if (got < want) lo = mid + 1; else hi = mid;
+  }
+  return NULL;
+}
+
+static const RandoScriptedEnemyCheckLookupEntry *Rando_FindScriptedEnemyCheck(
+    uint16 room, uint8 parent_source_slot, uint8 overlord_type_id,
+    uint8 child_index, uint8 child_type) {
+  uint64 want = ((uint64)room << 32) | ((uint32)parent_source_slot << 24) |
+                ((uint32)overlord_type_id << 16) | ((uint32)child_index << 8) |
+                child_type;
+  int lo = 0, hi = (int)kRandoScriptedEnemyCheckLookup_COUNT;
+  while (lo < hi) {
+    int mid = lo + (hi - lo) / 2;
+    const RandoScriptedEnemyCheckLookupEntry *e =
+        &kRandoScriptedEnemyCheckLookup[mid];
+    uint64 got = ((uint64)e->room << 32) |
+                 ((uint32)e->parent_source_slot << 24) |
+                 ((uint32)e->parent_type << 16) |
+                 ((uint32)e->child_index << 8) | e->child_type;
+    if (got == want) return e;
+    if (got < want) lo = mid + 1; else hi = mid;
+  }
+  return NULL;
+}
+
+enum { kRandoOverworldEnemyBlockCount = 0x1000 };
+static uint16 s_rando_overworld_enemy_loc_by_block[kRandoOverworldEnemyBlockCount];
+static uint8 s_rando_overworld_enemy_area_by_block[kRandoOverworldEnemyBlockCount];
+static uint8 s_rando_overworld_enemy_stage_by_block[kRandoOverworldEnemyBlockCount];
+static uint16 s_rando_dynamic_enemy_check_loc[16];
+static uint8 s_rando_overlord_source_slot[8];
+static uint8 s_rando_overlord_type_id[8];
+
+enum {
+  kRandoBossEnemyCheckKind_DungeonBoss = 1,
+  kRandoBossEnemyCheckKind_GtMiniboss = 2,
+  kRandoNoOverlordSourceSlot = 0xff,
+};
+
+static uint8 Rando_CurrentOverworldEnemyStage(void) {
+  return (sram_progress_indicator == 3) ? 2 :
+         (sram_progress_indicator == 2) ? 1 : 0;
+}
+
+static void Rando_ClearOverworldEnemyCheckMap(void) {
+  for (uint16 i = 0; i < kRandoOverworldEnemyBlockCount; i++) {
+    s_rando_overworld_enemy_loc_by_block[i] = 0;
+    s_rando_overworld_enemy_area_by_block[i] = 0xFF;
+    s_rando_overworld_enemy_stage_by_block[i] = 0xFF;
+  }
+}
+
+static void Rando_ClearDynamicEnemyCheckMaps(void) {
+  memset(s_rando_dynamic_enemy_check_loc, 0,
+         sizeof(s_rando_dynamic_enemy_check_loc));
+  memset(s_rando_overlord_source_slot, kRandoNoOverlordSourceSlot,
+         sizeof(s_rando_overlord_source_slot));
+  memset(s_rando_overlord_type_id, 0, sizeof(s_rando_overlord_type_id));
+}
+
+static uint16 Rando_OverworldEnemyCheckLocForBlock(uint16 block) {
+  if (!Rando_EnemyChecksAllActiveRuntime() || player_is_indoors ||
+      block >= kRandoOverworldEnemyBlockCount)
+    return 0;
+  uint8 area = (uint8)overworld_area_index;
+  uint8 stage = Rando_CurrentOverworldEnemyStage();
+  uint16 loc = s_rando_overworld_enemy_loc_by_block[block];
+  if (loc != 0 &&
+      s_rando_overworld_enemy_area_by_block[block] == area &&
+      s_rando_overworld_enemy_stage_by_block[block] == stage)
+    return loc;
+  s_rando_overworld_enemy_loc_by_block[block] = 0;
+  s_rando_overworld_enemy_area_by_block[block] = 0xFF;
+  s_rando_overworld_enemy_stage_by_block[block] = 0xFF;
+  const RandoOverworldEnemyCheckLookupEntry *check =
+      Rando_FindOverworldEnemyCheckByBlock(area, stage, block);
+  if (check == NULL)
+    return 0;
+  s_rando_overworld_enemy_loc_by_block[block] = check->loc_id;
+  s_rando_overworld_enemy_area_by_block[block] = area;
+  s_rando_overworld_enemy_stage_by_block[block] = stage;
+  return check->loc_id;
+}
+
+static bool Rando_GrantResultIsTerminal(RandoGrantResult result) {
+  return result == kRandoGrantResult_Accepted ||
+         result == kRandoGrantResult_AlreadyChecked;
+}
+
+static bool Rando_GrantResultIsBlocked(RandoGrantResult result) {
+  return result == kRandoGrantResult_Retryable ||
+         result == kRandoGrantResult_Invalid;
+}
+
+static RandoGrantResult Rando_NormalizeOrdinaryEnemyGrantResult(
+    RandoGrantResult result) {
+  return result == kRandoGrantResult_AlreadyChecked
+      ? kRandoGrantResult_NotActive : result;
+}
+
+static bool Rando_GrantResultAllowsEventAdvance(RandoGrantResult result) {
+  return !Rando_GrantResultIsBlocked(result);
+}
+
+// Returns true when the bonk source was handled by the randomized path. A
+// blocked source stays live; a terminal source is consumed; NotActive falls
+// through to the authored bees/apple wake.
+static bool Rando_ApplyBonkGrantOutcome(int k, RandoGrantResult result) {
+  if (Rando_GrantResultIsTerminal(result)) {
+    sprite_state[k] = 0;
+    return true;
+  }
+  return Rando_GrantResultIsBlocked(result);
+}
+
+static void Rando_ApplyBurnGrantOutcome(int k, bool completed) {
+  if (!completed)
+    sprite_delay_main[k] = 2;
+}
+
+static void Rando_ApplyFallGrantOutcome(int k, bool completed) {
+  if (completed)
+    sprite_state[k] = 0;
+  else
+    sprite_delay_main[k] = 1;
+}
+
+// Drowning has two terminal animation boundaries. The airborne splash reaches
+// delay 1, while the ordinary ripple reaches delay 0. A blocked randomized
+// grant must leave state 3 live and re-arm the corresponding boundary so the
+// transaction retries promptly instead of consuming the enemy or replaying the
+// whole animation.
+static void Rando_ApplyDrownGrantOutcome(int k, bool completed) {
+  if (completed)
+    sprite_state[k] = 0;
+  else
+    sprite_delay_main[k] = sprite_ai_state[k] ? 2 : 1;
+}
+
+// Returns true when the caller must stop this frame after restoring the exact
+// boss-explosion retry boundary and cutscene lock.
+static bool Rando_ApplyExplosionGrantOutcome(int k, RandoGrantResult result) {
+  if (!Rando_GrantResultIsBlocked(result))
+    return false;
+  sprite_state[k] = 4;
+  sprite_delay_main[k] = 33;
+  // Re-arm WITHOUT immobilizing. A blocked grant is retried on a timer, and the
+  // only refusal that can still reach here is a transient one the PLAYER must
+  // clear -- a potion with no empty bottle, cleared by drinking, which needs the
+  // menu. Holding flag_is_link_immobilized across those frames locked out the
+  // menu and made the retry unbreakable: the loop and its own cure were mutually
+  // exclusive. Releasing Link does not stop the retry; the sprite re-enters on
+  // its own delay. (openspec fix-grant-refusal-contract: "a pending retry never
+  // blocks its own recovery".)
+  flag_is_link_immobilized = 0;
+  return true;
+}
+
+int Sprite_GrantRetrySelfCheck(void) {
+  enum { k = 15 };
+  uint8 saved_state = sprite_state[k];
+  uint8 saved_ai_state = sprite_ai_state[k];
+  uint8 saved_delay = sprite_delay_main[k];
+  uint8 saved_immobilized = flag_is_link_immobilized;
+  int result = 0;
+
+  if (Rando_NormalizeOrdinaryEnemyGrantResult(
+          kRandoGrantResult_AlreadyChecked) != kRandoGrantResult_NotActive ||
+      Rando_GrantResultIsTerminal(Rando_NormalizeOrdinaryEnemyGrantResult(
+          kRandoGrantResult_AlreadyChecked))) {
+    result = 1;
+    goto done;
+  }
+  if (Rando_NormalizeOrdinaryEnemyGrantResult(
+          kRandoGrantResult_Accepted) != kRandoGrantResult_Accepted ||
+      !Rando_GrantResultIsTerminal(Rando_NormalizeOrdinaryEnemyGrantResult(
+          kRandoGrantResult_Accepted))) {
+    result = 2;
+    goto done;
+  }
+
+  sprite_state[k] = 9;
+  if (!Rando_ApplyBonkGrantOutcome(k, kRandoGrantResult_Accepted) ||
+      sprite_state[k] != 0) {
+    result = 3;
+    goto done;
+  }
+  sprite_state[k] = 9;
+  if (!Rando_ApplyBonkGrantOutcome(k, kRandoGrantResult_Retryable) ||
+      sprite_state[k] != 9) {
+    result = 4;
+    goto done;
+  }
+  if (Rando_ApplyBonkGrantOutcome(k, kRandoGrantResult_NotActive) ||
+      sprite_state[k] != 9) {
+    result = 5;
+    goto done;
+  }
+
+  sprite_delay_main[k] = 0x55;
+  Rando_ApplyBurnGrantOutcome(k, false);
+  if (sprite_delay_main[k] != 2) {
+    result = 6;
+    goto done;
+  }
+  sprite_delay_main[k] = 0x55;
+  Rando_ApplyBurnGrantOutcome(k, true);
+  if (sprite_delay_main[k] != 0x55) {
+    result = 7;
+    goto done;
+  }
+
+  sprite_state[k] = 1;
+  sprite_delay_main[k] = 0;
+  Rando_ApplyFallGrantOutcome(k, false);
+  if (sprite_state[k] != 1 || sprite_delay_main[k] != 1) {
+    result = 8;
+    goto done;
+  }
+  sprite_state[k] = 5;
+  sprite_delay_main[k] = 0;
+  Rando_ApplyFallGrantOutcome(k, false);
+  if (sprite_state[k] != 5 || sprite_delay_main[k] != 1) {
+    result = 9;
+    goto done;
+  }
+  sprite_state[k] = 5;
+  sprite_delay_main[k] = 0x55;
+  Rando_ApplyFallGrantOutcome(k, true);
+  if (sprite_state[k] != 0 || sprite_delay_main[k] != 0x55) {
+    result = 10;
+    goto done;
+  }
+
+  sprite_state[k] = 3;
+  sprite_ai_state[k] = 1;
+  sprite_delay_main[k] = 1;
+  Rando_ApplyDrownGrantOutcome(k, false);
+  if (sprite_state[k] != 3 || sprite_delay_main[k] != 2) {
+    result = 14;
+    goto done;
+  }
+  Rando_ApplyDrownGrantOutcome(k, true);
+  if (sprite_state[k] != 0) {
+    result = 15;
+    goto done;
+  }
+  sprite_state[k] = 3;
+  sprite_ai_state[k] = 0;
+  sprite_delay_main[k] = 0;
+  Rando_ApplyDrownGrantOutcome(k, false);
+  if (sprite_state[k] != 3 || sprite_delay_main[k] != 1) {
+    result = 16;
+    goto done;
+  }
+  Rando_ApplyDrownGrantOutcome(k, true);
+  if (sprite_state[k] != 0) {
+    result = 17;
+    goto done;
+  }
+
+  sprite_state[k] = 9;
+  sprite_delay_main[k] = 0x55;
+  flag_is_link_immobilized = 0;
+  flag_is_link_immobilized = 1;  // a blocked retry must RELEASE, not hold
+  if (!Rando_ApplyExplosionGrantOutcome(k, kRandoGrantResult_Retryable) ||
+      sprite_state[k] != 4 || sprite_delay_main[k] != 33 ||
+      flag_is_link_immobilized != 0) {
+    result = 11;
+    goto done;
+  }
+  sprite_state[k] = 9;
+  sprite_delay_main[k] = 0x55;
+  flag_is_link_immobilized = 0;
+  if (Rando_ApplyExplosionGrantOutcome(k, kRandoGrantResult_Accepted) ||
+      sprite_state[k] != 9 || sprite_delay_main[k] != 0x55 ||
+      flag_is_link_immobilized != 0) {
+    result = 12;
+    goto done;
+  }
+  if (!Rando_GrantResultAllowsEventAdvance(kRandoGrantResult_NotActive) ||
+      !Rando_GrantResultAllowsEventAdvance(kRandoGrantResult_Accepted) ||
+      !Rando_GrantResultAllowsEventAdvance(kRandoGrantResult_AlreadyChecked) ||
+      Rando_GrantResultAllowsEventAdvance(kRandoGrantResult_Retryable) ||
+      Rando_GrantResultAllowsEventAdvance(kRandoGrantResult_Invalid)) {
+    result = 13;
+  }
+
+done:
+  sprite_state[k] = saved_state;
+  sprite_ai_state[k] = saved_ai_state;
+  sprite_delay_main[k] = saved_delay;
+  flag_is_link_immobilized = saved_immobilized;
+  return result;
+}
+
+static RandoGrantResult Rando_TryGrantOverworldEnemyCheck(int k) {
+  if (!Rando_EnemyChecksAllActiveRuntime() || player_is_indoors ||
+      k < 0 || k >= 16)
+    return kRandoGrantResult_NotActive;
+  uint16 block = sprite_N_word[k];
+  uint16 loc_id = Rando_OverworldEnemyCheckLocForBlock(block);
+  if (loc_id == 0 || !Rando_EnemyCheckLocPlaced(loc_id))
+    return kRandoGrantResult_NotActive;
+  RandoGrantResult result = Rando_GrantLocation(
+      loc_id, 0xFFFFu, kRandoLttpSkip, kRandoGrantPresentation_Quiet, 0, 0);
+  // Ordinary enemy checks replace only the first randomized reward. Once the
+  // check is collected, later respawns/kills retain their authored prize flow.
+  result = Rando_NormalizeOrdinaryEnemyGrantResult(result);
+  if (!Rando_GrantResultIsTerminal(result))
+    return result;
+  if (block < kRandoOverworldEnemyBlockCount) {
+    s_rando_overworld_enemy_loc_by_block[block] = 0;
+    s_rando_overworld_enemy_area_by_block[block] = 0xFF;
+    s_rando_overworld_enemy_stage_by_block[block] = 0xFF;
+    sprite_where_in_overworld[block] = 0;
+  }
+  return result;
+}
+
+static RandoGrantResult Rando_TryGrantDynamicEnemyCheck(int k) {
+  if (!Rando_EnemyChecksAllActiveRuntime() || !player_is_indoors ||
+      k < 0 || k >= 16)
+    return kRandoGrantResult_NotActive;
+  uint16 loc_id = s_rando_dynamic_enemy_check_loc[k];
+  if (loc_id == 0 || !Rando_EnemyCheckLocPlaced(loc_id)) {
+    if (loc_id != 0)
+      s_rando_dynamic_enemy_check_loc[k] = 0;
+    return kRandoGrantResult_NotActive;
+  }
+  RandoGrantResult result = Rando_GrantLocation(
+      loc_id, 0xFFFFu, kRandoLttpSkip, kRandoGrantPresentation_Quiet, 0, 0);
+  if (Rando_GrantResultIsTerminal(result))
+    s_rando_dynamic_enemy_check_loc[k] = 0;
+  return result;
+}
+
+static RandoGrantResult Rando_TryGrantEnemyCheck(int k) {
+  if (!player_is_indoors)
+    return Rando_TryGrantOverworldEnemyCheck(k);
+  RandoGrantResult dynamic_result = Rando_TryGrantDynamicEnemyCheck(k);
+  if (dynamic_result != kRandoGrantResult_NotActive)
+    return dynamic_result;
+  if (!Rando_EnemyChecksDungeonActiveRuntime() || k < 0 || k >= 16 ||
+      sign8(sprite_N[k]))
+    return kRandoGrantResult_NotActive;
+  const RandoEnemyCheckLookupEntry *check =
+      Rando_FindEnemyCheck(dungeon_room_index2, sprite_N[k]);
+  if (!Rando_EnemyCheckEntryActive(check) ||
+      !Rando_EnemyCheckLocPlaced(check->loc_id))
+    return kRandoGrantResult_NotActive;
+  RandoGrantResult result = Rando_GrantLocation(
+      check->loc_id, 0xFFFFu, kRandoLttpSkip,
+      kRandoGrantPresentation_Quiet, 0, 0);
+  // Unlike dynamic/scripted checks, an authored ordinary enemy may respawn.
+  // Its already-checked state suppresses only the randomized reward, not the
+  // repeat vanilla/drop-shuffled prize.
+  return Rando_NormalizeOrdinaryEnemyGrantResult(result);
+}
+
+static RandoGrantResult Rando_TryGrantBossEnemyCheckForCurrentEventResult(void) {
+  if (!Rando_EnemyChecksAllActiveRuntime() || !player_is_indoors)
+    return kRandoGrantResult_NotActive;
+  uint8 game_dungeon = (uint8)(cur_palace_index_x2 >> 1);
+  uint16 room_a = dungeon_room_index2;
+  uint16 room_b = dungeon_room_index;
+  const RandoBossEnemyCheckLookupEntry *check = NULL;
+  if (game_dungeon < 16) {
+    check = Rando_FindBossEnemyCheck(
+        game_dungeon, room_a, kRandoBossEnemyCheckKind_DungeonBoss);
+    if (check == NULL && room_b != room_a) {
+      check = Rando_FindBossEnemyCheck(
+          game_dungeon, room_b, kRandoBossEnemyCheckKind_DungeonBoss);
+    }
+    if (check == NULL) {
+      check = Rando_FindBossEnemyCheck(
+          game_dungeon, room_a, kRandoBossEnemyCheckKind_GtMiniboss);
+    }
+    if (check == NULL && room_b != room_a) {
+      check = Rando_FindBossEnemyCheck(
+          game_dungeon, room_b, kRandoBossEnemyCheckKind_GtMiniboss);
+    }
+  }
+  if (check == NULL || !Rando_EnemyCheckLocPlaced(check->loc_id))
+    return kRandoGrantResult_NotActive;
+  return Rando_GrantLocation(
+      check->loc_id, 0xFFFFu, kRandoLttpSkip,
+      kRandoGrantPresentation_Quiet, 0, 0);
+}
+
+bool Rando_TryGrantBossEnemyCheckForCurrentEvent(void) {
+  return Rando_GrantResultAllowsEventAdvance(
+      Rando_TryGrantBossEnemyCheckForCurrentEventResult());
+}
+
+bool Rando_AssignScriptedEnemyCheck(int child_slot, int parent_slot,
+                                    uint8 child_index, uint8 child_type) {
+  if (child_slot < 0 || child_slot >= 16)
+    return false;
+  s_rando_dynamic_enemy_check_loc[child_slot] = 0;
+  if (!Rando_EnemyChecksAllActiveRuntime() || !player_is_indoors)
+    return true;
+  if (parent_slot < 0 || parent_slot >= 8)
+    return true;
+  uint8 parent_source_slot = s_rando_overlord_source_slot[parent_slot];
+  if (parent_source_slot == kRandoNoOverlordSourceSlot)
+    return true;
+  uint8 parent_type = s_rando_overlord_type_id[parent_slot];
+  const RandoScriptedEnemyCheckLookupEntry *check = Rando_FindScriptedEnemyCheck(
+      dungeon_room_index2, parent_source_slot, parent_type, child_index, child_type);
+  if (check == NULL)
+    return true;
+  // Checked state belongs to the one-time randomized reward, not the actor.
+  // Repeatable scripted children respawn normally after collection; leaving the
+  // dynamic location clear makes their marker/grant path inactive, so later
+  // deaths fall through to vanilla prize behavior. One-shot scripted parents
+  // whose children cannot be retriggered are excluded at codegen time.
+  if (Rando_IsLocationChecked(check->loc_id))
+    return true;
+  s_rando_dynamic_enemy_check_loc[child_slot] = check->loc_id;
+  return true;
+}
+
+static void Rando_GrantCurrentDungeonBigKeySilently(void) {
+  uint8 game_dungeon = (uint8)cur_palace_index_x2 >> 1;
+  if (game_dungeon < 16)
+    // rando-exempt: one-shot enemy-drop check preserves the vanilla current
+    // dungeon big-key side effect; the placed item dispatch happens separately.
+    link_bigkey |= (uint16)(0x8000u >> game_dungeon);
+}
+
+bool Rando_TryDrawEnemyDropCarrierField(int k);
 static int AllocOverlord();
 static int Overworld_AllocSprite(uint8 type);
 uint16 Sprite_GetX(int k) {
@@ -752,7 +1350,9 @@ void SpriteModule_Burn(int k) {
   sprite_hit_timer[k] = 0;
   int j = sprite_delay_main[k] - 1;
   if (j == 0) {
-    Sprite_DoTheDeath(k);
+    // Timers decrement before this handler. A blocked outcome re-arms at 2 so
+    // the next frame reaches delay 1 instead of indexing kFlame_Gfx with -1.
+    Rando_ApplyBurnGrantOutcome(k, Sprite_DoTheDeath(k));
     return;
   }
   uint8 bak = sprite_graphics[k];
@@ -812,7 +1412,7 @@ void SpriteStunned_MainEx(int k, bool second_entry) {
   }
   Sprite_CheckTileProperty(k, 0x68);
 
-  if (kSpriteInit_Flags3[sprite_type[k]] & 0x10) {
+  if (MODS_U8(kSpriteInit_Flags3, 0x8db359)[sprite_type[k]] & 0x10) {
     sprite_flags3[k] |= 0x10;
     if (sprite_tiletype == 32)
       sprite_flags3[k] &= ~0x10;
@@ -1226,8 +1826,9 @@ void Sprite_inactiveSprite(int k) {  // 868510
 
 void SpriteModule_Fall1(int k) {  // 86852e
   if (!sprite_delay_main[k]) {
-    sprite_state[k] = 0;
-    Sprite_ManuallySetDeathFlagUW(k);
+    // A blocked result preserves the live state as a room-clear blocker and
+    // re-arms this terminal frame; success performs the deferred cleanup.
+    Rando_ApplyFallGrantOutcome(k, Sprite_ManuallySetDeathFlagUW(k));
   } else {
     PrepOamCoordsRet info;
     if (Sprite_PrepOamCoordOrDoubleRet(k, &info))
@@ -1257,8 +1858,15 @@ void SpriteModule_Drown(int k) {  // 86859c
     SpriteDraw_SingleLarge(k);
     OamEnt *oam = GetOamCurPtr();
     int j = sprite_delay_main[k];
-    if (j == 1)
-      sprite_state[k] = 0;
+    if (j == 1) {
+      // Vanilla drowning despawns WITHOUT the persistent kill bit (drowned
+      // enemies respawn on re-entry, unlike falls); only the randomized
+      // enemy-check transaction takes the terminal-death helper.
+      if (enhanced_features1 & kFeatures1_RandomizerActive)
+        Rando_ApplyDrownGrantOutcome(k, Sprite_ManuallySetDeathFlagUW(k));
+      else
+        sprite_state[k] = 0;
+    }
     if (j != 0) {
       assert((j >> 1) < 11);
       oam->charnum = kSpriteDrown_Oam_Char[j >> 1];
@@ -1286,8 +1894,12 @@ void SpriteModule_Drown(int k) {  // 86859c
       sprite_delay_main[k]++;
     sprite_oam_flags[k] = 0;
     sprite_hit_timer[k] = 0;
-    if (!sprite_delay_main[k])
-      sprite_state[k] = 0;
+    if (!sprite_delay_main[k]) {
+      if (enhanced_features1 & kFeatures1_RandomizerActive)
+        Rando_ApplyDrownGrantOutcome(k, Sprite_ManuallySetDeathFlagUW(k));
+      else
+        sprite_state[k] = 0;
+    }
     Sprite_DrawMultiple(k, &kSpriteDrown_Dmd[(sprite_delay_main[k] << 1 & 0xf8) >> 2], 2, NULL);
   }
 }
@@ -1316,6 +1928,29 @@ void Entity_ApplyRumbleToSprites(SpriteHitBox *hb) {  // 86ad03
       Sprite_SetupHitBox(j, hb);
       if (!CheckIfHitBoxesOverlap(hb))
         continue;
+    }
+    // add-rando-bonk-sanity — an unchecked bonk check consumes a RUMBLE wake:
+    // grant the placed item quietly, mark checked, despawn (the 12-bee /
+    // apple burst never runs). Both rumble origins collect — the Boots dash
+    // (player.c RepelDash) and the Quake medallion (ancilla.c), the latter
+    // per owner playtest decision 2026-07-18 (Quake is the other vanilla way
+    // to wake these sprites; one cast may collect several on-screen checks,
+    // each safe through the quiet path — no receipt ancilla involved).
+    // Placement logic matches: CanBonk() = Boots OR (sword AND Quake), so
+    // the placer may rely on either wake method (kGen 149).
+    // Never indoors (overworld_area_index is stale there). Checked /
+    // axis-off / unresolved sprites take the vanilla wake below.
+    if (!player_is_indoors &&
+        (sprite_type[j] == 0x79 || sprite_type[j] == 0xac)) {
+      uint16 bonk_loc = Rando_BonkCheckLocForWake(
+          (uint8)overworld_area_index, sprite_N_word[j], sprite_type[j]);
+      if (bonk_loc != 0xFFFFu) {
+        RandoGrantResult result = Rando_GrantLocation(
+            bonk_loc, 0xFFFFu, kRandoLttpSkip,
+            kRandoGrantPresentation_Quiet, 0, 0);
+        if (Rando_ApplyBonkGrantOutcome(j, result))
+          continue;
+      }
     }
     sprite_E[j] = 0;
     sound_effect_2 = 0x30;
@@ -1368,9 +2003,59 @@ void Sprite_CheckAbsorptionByPlayer(int k) {  // 86d116
     Sprite_HandleAbsorptionByPlayer(k);
 }
 
+// Resolve absorbable key checks before consuming the pickup sprite. Quiet
+// presentation is intentional: these sources are already in Link's collision
+// path, and the transaction owns both identity and non-identity grants.
+static RandoGrantResult Rando_TryGrantAbsorbableKeyCheck(int k, int type_index) {
+  if (type_index == 12) {
+    if (Rando_EnemyDropKeysActiveRuntime()) {
+      const RandoEnemyDropLookupEntry *drop = Rando_FindEnemyDrop(
+          dungeon_room_index, sprite_subtype[k], kRandoEnemyDropKind_SmallKey);
+      if (drop != NULL) {
+        RandoGrantResult result = Rando_GrantLocation(
+            drop->loc_id, 0xFFFFu, 0x24,
+            kRandoGrantPresentation_Quiet, 0, 0);
+        if (result != kRandoGrantResult_NotActive)
+          return result;
+      }
+    }
+    // The !IsLocationChecked term is load-bearing and was lost in the
+    // transaction rework: without it a SECOND key absorbed in room 0x87
+    // resolves to AlreadyChecked, which the caller treats as terminal and
+    // skips its vanilla `link_num_keys += 1` -- silently swallowing every
+    // later non-enemy-drop key in that room. Returning NotActive instead
+    // lets the vanilla key grant run, which is what the original guard did.
+    if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+        dungeon_room_index == 0x87 &&
+        !Rando_IsLocationChecked(LOC_Tower_of_Hera_Basement_Cage)) {
+      return Rando_GrantLocation(
+          LOC_Tower_of_Hera_Basement_Cage, ITEM_SmallKey_TowerOfHera, 0x24,
+          kRandoGrantPresentation_Quiet, 0, 0);
+    }
+  } else if (type_index == 13 && Rando_EnemyDropKeysActiveRuntime()) {
+    const RandoEnemyDropLookupEntry *drop = Rando_FindEnemyDrop(
+        dungeon_room_index, sprite_subtype[k], kRandoEnemyDropKind_BigKey);
+    if (drop != NULL) {
+      return Rando_GrantLocation(
+          drop->loc_id, 0xFFFFu, 0x32,
+          kRandoGrantPresentation_Quiet, 0, 0);
+    }
+  }
+  return kRandoGrantResult_NotActive;
+}
+
 void Sprite_HandleAbsorptionByPlayer(int k) {  // 86d13c
-  sprite_state[k] = 0;
   int t = sprite_type[k] - 0xd8;
+  RandoGrantResult key_result = kRandoGrantResult_NotActive;
+  if (t == 12 || t == 13) {
+    key_result = Rando_TryGrantAbsorbableKeyCheck(k, t);
+    if (Rando_GrantResultIsBlocked(key_result))
+      return;
+  }
+
+  // Delivery accepted (or no randomized check owns this pickup): only now is
+  // it safe to consume the sprite and perform vanilla sound/state cleanup.
+  sprite_state[k] = 0;
   SpriteSfx_QueueSfx3WithPan(k, kAbsorptionSfx[t]);
   switch(t) {
   case 0:
@@ -1396,26 +2081,97 @@ void Sprite_HandleAbsorptionByPlayer(int k) {  // 86d13c
     break;
   case 11:
     SpriteSfx_QueueSfx2WithPan(k, 0x31);
-    link_hearts_filler += 56;
+    link_hearts_filler += (enhanced_features1 & kFeatures1_QolFairyHearts) ? 64 : 56;
     break;
   case 12:
+    if (Rando_GrantResultIsTerminal(key_result))
+      goto after_getkey;
+    // rando-exempt: drop-pool (Phase B) — small key from killed-sprite drop.
+    // The drop-pool shuffle is Phase B work per task 7.2; in Phase A1 small
+    // keys from enemy drops grant the vanilla SmallKey of the current dungeon
+    // (link_num_keys is a per-dungeon counter that interprets correctly).
     link_num_keys += 1;
+    // rando: persist the key count NOW so the auto-tracker (which reads the
+    // saved link_keys_earned_per_dungeon slot, not the live link_num_keys)
+    // reflects this in-dungeon key immediately instead of lagging until the
+    // next SaveDungeonKeys at a room transition / save. SaveDungeonKeys no-ops
+    // outside a dungeon and handles BOTH the Retro genericKeys shared slot and
+    // the per-dungeon slot (with the Hyrule-Castle-escape fold).
+    if (enhanced_features1 & kFeatures1_RandomizerActive) SaveDungeonKeys();
     goto after_getkey;
   case 13:
+    if (Rando_GrantResultIsTerminal(key_result)) {
+      // HCE forced-big-key drops carry two rewards by design: the randomized
+      // check plus the vanilla current-dungeon Big Key. The latter is a bit,
+      // so an identity placement remains idempotent rather than double-counted.
+      Rando_GrantCurrentDungeonBigKeySilently();
+      goto after_getkey;
+    }
     item_receipt_method = 0;
+    // rando-exempt: drop-pool (Phase B) — big key from killed-sprite drop.
+    // Same rationale as the SmallKey drop case above; ALTTPR's drop pool
+    // shuffle is Phase B work. Vanilla LttP grants the current-dungeon
+    // BigKey via Link_ReceiveItem(0x32, 0).
     Link_ReceiveItem(0x32, 0);
   after_getkey:
     sprite_N[k] = sprite_subtype[k];
     dung_savegame_state_bits |= kAbsorbBigKey[sprite_die_action[k]] << 8;
+    // Return deliberately ignored: the vanilla state bits above are already
+    // committed and are what the RAM compare depends on, so the sprite cannot
+    // linger. A refused grant here therefore drops its enemy check. Only a
+    // TRANSIENT refusal can reach this since 57e72dc1 (a potion with no empty
+    // bottle on a big-key absorb), and re-ordering vanilla state around a rando
+    // grant is a worse trade than the narrow loss. Recorded, not silently kept.
     Sprite_ManuallySetDeathFlagUW(k);
     break;
   case 14:
+    // rando-exempt: vanilla Pikit shield return — restores the shield the sprite
+    // stole, not a randomized grant. It was previously passing check_audit_guard
+    // only by PROXIMITY to an unrelated Link_ReceiveItem 12 lines up (the
+    // heuristic its own docstring warns is a false-negative source); a comment
+    // added above shifted that out of the window and exposed it. Explicit now.
     link_shield_type = sprite_subtype[k];
     // Shield needs to have the right palette after pikit
     if (enhanced_features0 & kFeatures0_MiscBugFixes)
       Palette_Load_Shield();
     break;
   }
+}
+
+// add-rando-field-item-sprites: the Tower of Hera Basement Cage is a shuffled
+// "Standing" location whose reward is a freestanding small key (type 0xE4 in
+// room 0x87). Draw the PLACED item there instead of a vanilla key, gated to
+// MIRROR the grant (Sprite_HandleAbsorptionByPlayer case 12): room 0x87 while the
+// cage is unchecked. Returns false — caller draws the vanilla gem/key — for
+// everything else: the rupees (0xd9-0xdb) that also reach the draw_key label, any
+// 0xE4 once the cage is checked, a vanilla-key placement, or rando/feature off.
+static bool Rando_TryDrawEnemyDropPickupField(int k);
+
+static bool Rando_TryDrawAbsorbableKeyField(int k) {
+  if (sprite_type[k] == 0xE4 && Rando_EnemyDropKeysActiveRuntime()) {
+    const RandoEnemyDropLookupEntry *drop = Rando_FindEnemyDrop(
+      dungeon_room_index, sprite_subtype[k], kRandoEnemyDropKind_SmallKey);
+    if (drop != NULL && !Rando_IsLocationChecked(drop->loc_id)) {
+      Rando_TryDrawEnemyDropPickupField(k);
+      return true;
+    }
+  }
+  if (sprite_type[k] != 0xE4 || dungeon_room_index != 0x87 ||
+      Rando_IsLocationChecked(LOC_Tower_of_Hera_Basement_Cage))
+    return false;
+  return Rando_TryDrawFieldItemSprite(k, LOC_Tower_of_Hera_Basement_Cage,
+                                      ITEM_SmallKey_TowerOfHera);
+}
+
+static bool Rando_TryDrawAbsorbableBigKeyField(int k) {
+  if (sprite_type[k] != 0xE5 || !Rando_EnemyDropKeysActiveRuntime())
+    return false;
+  const RandoEnemyDropLookupEntry *drop = Rando_FindEnemyDrop(
+      dungeon_room_index, sprite_subtype[k], kRandoEnemyDropKind_BigKey);
+  if (drop == NULL || Rando_IsLocationChecked(drop->loc_id))
+    return false;
+  Rando_TryDrawEnemyDropPickupField(k);
+  return true;
 }
 
 bool SpriteDraw_AbsorbableTransient(int k, bool transient) {  // 86d22f
@@ -1457,6 +2213,8 @@ bool SpriteDraw_AbsorbableTransient(int k, bool transient) {  // 86d22f
     return false;
   }
 draw_key:
+  if (Rando_TryDrawAbsorbableKeyField(k))
+    return false;
   Sprite_DrawThinAndTall(k);
   return false;
 }
@@ -1502,20 +2260,1650 @@ void SpriteDraw_SingleLarge(int k) {  // 86dc10
   PrepOamCoordsRet info;
   if (Sprite_PrepOamCoordOrDoubleRet(k, &info))
     return;
+  if (Rando_TryDrawAbsorbableBigKeyField(k))
+    return;
   Sprite_PrepAndDrawSingleLargeNoPrep(k, &info);
 }
 
 void Sprite_PrepAndDrawSingleLargeNoPrep(int k, PrepOamCoordsRet *info) {  // 86dc13
   OamEnt *oam = GetOamCurPtr();
   oam->x = info->x;
-  if ((uint16)(info->y + 0x10) < 0x100) {
-    oam->y = info->y;
+  if (Sprite_KeepsOamY(info->y)) {
+    oam->y = Sprite_OamY(info->y);
     oam->charnum = kSprite_PrepAndDrawSingleLarge_Tab2[kSprite_PrepAndDrawSingleLarge_Tab1[sprite_type[k]] + sprite_graphics[k]];
     oam->flags = info->flags;
   }
   bytewise_extended_oam[oam - oam_buf] = 2 | ((info->x >= 256) ? 1: 0);
   if (sprite_flags3[k] & 0x10)
     SpriteDraw_Shadow(k, info);
+}
+
+// add-rando-field-item-sprites (draw half) — draw the placed item's gfx for a
+// free-standing item sprite, loading it into the shared receive-item VRAM slot
+// on demand. See rando.h for the contract.
+//
+// Generic for any standing-item sprite: a single call resolves the placement,
+// (re)loads the gfx only when the slot isn't already showing it, and draws. The
+// slot (chars 0x24/0x34) is shared with the item-receipt + direct-grant-icon
+// ancillae; g_recv_item_slot_owner (invalidated by every gfx load) lets us skip
+// the decompress when we already own it, yet repaint after a receipt clobbers
+// it. Single slot => one field item per screen renders its real gfx; a second
+// standing item on the same screen shows this one's (documented limitation; a
+// dedicated slot is the phase-2 fix).
+// Load `gfx` into the shared receive-item VRAM slot (chars 0x24/0x34) unless
+// the slot already holds it. Shared by the standing-sprite draw below and the
+// Flute Spot dig ancilla (Ancilla36_Flute), which renders the placed item the
+// same way.
+// Custom-art item palettes are loaded into sprite palette 3's upper half.
+// Both palette buffers are written so transition fades target the same colours.
+// The aux-buffer compare avoids fighting active fades, and per-draw reapply
+// covers room/area palette reloads while an item remains visible.
+void Rando_ApplyCustomItemGfxPalette(uint8 gfx) {
+  // The translucency swap exchanges SP3/SP5 upper colours. Wait until the next
+  // draw after the swap so the custom palette returns to the intended slot.
+  if (palette_swap_flag)
+    return;
+  // add-rando-trap-catalog — the REAL cucco draws with common sprite palette 4
+  // (CGRAM 0xC0..0xCF; verified from an in-game OAM dump), which Palette_Load_
+  // SpriteMain loads in every overworld area and keys by light/dark world. Mirror
+  // its colours 1..7 into palette-3 colours 9..15 so the +8-shifted cucco tile
+  // shows the cucco's true colours — no committed ROM data, no per-area index, and
+  // automatically world-correct because we read the live palette.
+  if (gfx == kRandoCustomGfx_Cucco) {
+    if (aux_palette_buffer[0xB9] != main_palette_buffer[0xC1] ||
+        aux_palette_buffer[0xB8] != 0) {
+      aux_palette_buffer[0xB8] = main_palette_buffer[0xB8] = 0;
+      for (int i = 0; i < 7; i++)
+        aux_palette_buffer[0xB9 + i] = main_palette_buffer[0xB9 + i] =
+            main_palette_buffer[0xC1 + i];
+      flag_update_cgram_in_nmi++;
+    }
+    return;
+  }
+  // Attributed z3randomizer custom palette for Rupoor.
+  static const uint16 kRandoOffBlackPalette[8] = {
+    0x0000, 0x14A5, 0x14A5, 0x14A5, 0x14A5, 0x14A5, 0x14A5, 0x14A5,
+  };
+  // Other custom icons use the existing stable receive-item palette row.
+  const uint16 *src = (gfx == kRandoCustomGfx_Rupoor) ? kRandoOffBlackPalette
+                                                      : kPalette_MainSpr + 52;
+  if (memcmp(&aux_palette_buffer[0xB8], src, 16) != 0) {
+    memcpy(&aux_palette_buffer[0xB8], src, 16);
+    memcpy(&main_palette_buffer[0xB8], src, 16);
+    flag_update_cgram_in_nmi++;
+  }
+}
+
+void Rando_EnsureRecvItemSlotGfx(uint8 gfx) {
+  // Assetless guard. Every branch below reads the asset blob — the custom-art
+  // palette (asset 80), the custom item tiles (165), and every
+  // Decomp_spr/DecodeAnimatedSpriteTile_variable bundle (64) — so with no
+  // zelda3_assets.dat they all dereference NULL inside Decompress. That is
+  // reachable headlessly: --rando-selftest / --rando-grant-check run on a
+  // ROM-less CI checkout, and the grant transaction's at-cap class shows a
+  // confirmation icon, which spawns Ancilla44_RandoIconReceipt and lands here.
+  // Nothing renders in those runs; skip the load and leave the slot unowned so
+  // the next owner (in a real, asset-bearing session) still repaints it.
+  if (g_asset_ptrs[64] == NULL)
+    return;
+  // Custom item art (add-rando-field-item-custom-art): tile + dedicated
+  // palette for the ALTTPR items with no vanilla receive bundle. The palette
+  // is re-applied per call even when the slot already holds the tiles (see
+  // Rando_ApplyCustomItemGfxPalette); the tile load runs only on owner change.
+  if (gfx & 0x80) {
+    Rando_ApplyCustomItemGfxPalette(gfx);
+    if (g_recv_item_slot_owner == gfx)
+      return;
+    if (gfx == kRandoCustomGfx_Rupoor) {
+      // ALTTPR's Rupoor IS the vanilla rupee tile — only the palette differs.
+      DecodeAnimatedSpriteTile_variable(0x24);
+    } else if (gfx == kRandoCustomGfx_Cucco) {
+      // Real vanilla cucco tile (NOT custom art): decompress sheet 80 — the cucco
+      // sheet, sprite subset 3 in every LW/DW gfx set that shows cuccos — and expand
+      // its frame-0 tiles 0x2A/0x2B (top row -> chars 0x24/0x25) + 0x3A/0x3B (bottom
+      // -> 0x34/0x35) into the slot exactly as WriteTo4BPPBuffer_at_7F4000 does.
+      // Expand3To4High's 4th-plane OR lifts the 3bpp values into palette-3 colours
+      // 9..15 (+8), matching the live palette-4 mirror in Rando_ApplyCustomItemGfx-
+      // Palette. Sheet-80 tile N byte offset = (N>>4)*0x180 + (N&15)*24; 0x2A=0x3F0.
+      Decomp_spr(&g_ram[0x14000], 80);
+      const uint8 *csrc = &g_ram[0x14000] + 0x3F0;        // sheet-80 tile 0x2A
+      Expand3To4High(&g_ram[0x9000 + 0x2d40],        csrc,         g_ram, 2);
+      Expand3To4High(&g_ram[0x9000 + 0x2d40 + 0x40], csrc + 0x180, g_ram, 2);
+    } else {
+      // kRandoCustomItemGfx entries are pre-shaped to the receive-item slot
+      // layout (0x40 bytes chars 0x24/0x25 row, 0x40 bytes chars 0x34/0x35
+      // row) — copy straight into the buffer WriteTo4BPPBuffer_at_7F4000
+      // normally fills.
+      uint32 idx = gfx & 0x7f;
+      if ((idx + 1) * 0x80 <= kRandoCustomItemGfx_SIZE) {
+        memcpy(&g_ram[0x9000 + 0x2d40], kRandoCustomItemGfx + idx * 0x80, 0x40);
+        memcpy(&g_ram[0x9000 + 0x2d40 + 0x40],
+               kRandoCustomItemGfx + idx * 0x80 + 0x40, 0x40);
+      } else {
+        // Stale zelda3_assets.dat: growing this asset does NOT change
+        // kAssets_Sig (it hashes asset NAMES), so an old blob can pass
+        // validation while missing newer entries. Draw blank tiles rather
+        // than reading out of bounds — the item is invisible but the grant
+        // still works. Re-extract assets to fix.
+        assert(!"kRandoCustomItemGfx too small — re-extract zelda3_assets.dat");
+        memset(&g_ram[0x9000 + 0x2d40], 0, 0x80);
+      }
+    }
+    g_recv_item_slot_owner = gfx;
+    return;
+  }
+  if (g_recv_item_slot_owner == gfx)
+    return;
+  // Mirror the receive-item gfx load (misc.c AncillaAdd_ItemReceipt): shield
+  // decompress BEFORE the tile expand, sword AFTER.
+  if (gfx == 0x20 || gfx == 0x2d || gfx == 0x2e) {
+    DecompressShieldGraphics();
+    Palette_Load_Shield();
+  }
+  DecodeAnimatedSpriteTile_variable(gfx);  // resets g_recv_item_slot_owner
+  if (gfx == 6 || gfx == 0x18) {
+    DecompressSwordGraphics();
+    Palette_Load_Sword();
+  }
+  g_recv_item_slot_owner = gfx;  // we own the slot now
+}
+
+// Shared draw for a resolved placed-item icon: load it into the recv-item slot and
+// emit its 1-or-2 OAM tiles at (info->x+dx, info->y+dy). Used by the free-standing
+// field-item sprites (dx=dy=0) and by NPCs that hold an item OUT (the Hobo, dx/dy
+// = the held-tile offset). Reserve our own OAM block before drawing: a standing
+// item sprite reserves only ((sprite_flags2&0x1f)+1)*4 BYTES = one 4-byte OAM entry
+// (e.g. the mushroom), enough for its vanilla single-tile draw. An 8x16 item
+// (big==0) needs TWO entries; without a fresh reservation the second tile (oam+1)
+// overflows into the next sprite's block and gets clobbered wherever the scene is
+// busy (proven by an F12 OAM dump: outdoors a rupee lost its bottom half to an
+// adjacent sprite; indoors, with no following sprite, it survived). Reserve from
+// the same region the sprite system uses for this sprite so layering is unchanged.
+// (4 bytes per entry: 8 = two entries, 4 = one.)
+static void Rando_DrawRecvItemSlotAt(int k, uint8 gfx, uint8 big, uint8 oam_flags,
+                                     const PrepOamCoordsRet *info, int dx, int dy) {
+  Rando_EnsureRecvItemSlotGfx(gfx);
+  uint8 nbytes = (big == 0) ? 8 : 4;
+  if (sort_sprites_setting) {
+    if (sprite_floor[k])
+      Oam_AllocateFromRegionF(nbytes);
+    else
+      Oam_AllocateFromRegionD(nbytes);
+  } else {
+    Oam_AllocateFromRegionA(nbytes);
+  }
+  // Draw from the slot exactly as Ancilla44_RandoIconReceipt does:
+  // char 0x24 (top), 0x34 (bottom) when 8x16.
+  OamEnt *oam = GetOamCurPtr();
+  SetOamHelper0(oam, info->x + dx, info->y + dy, 0x24, oam_flags, big);
+  if (big == 0)
+    SetOamHelper0(oam + 1, info->x + dx, info->y + dy + 8, 0x34, oam_flags, 0);
+}
+
+static bool Rando_CanDrawRecvItemSlot(void) {
+  // Mirror/whirlpool/transition NMI loads temporarily suppress the core sprite
+  // tile upload that carries the shared receive-item slot to VRAM. Defer the
+  // sprite for a frame instead of decoding new slot graphics mid-load.
+  if (nmi_disable_core_updates)
+    return false;
+  // Field markers share chars 0x24/0x34 with Link's receive-item icon and the
+  // rando direct-grant confirmation icon. Do not repaint that slot while either
+  // receipt is alive; otherwise a nearby enemy marker can make a chest pickup
+  // grant/text one item while showing another.
+  if (item_receipt_method != 0)
+    return false;
+  for (int i = 0; i < 5; i++) {
+    if (ancilla_type[i] == kAncillaType_ItemReceipt ||
+        ancilla_type[i] == kAncillaType_RandoIconReceipt)
+      return false;
+  }
+  return true;
+}
+
+bool Rando_TryDrawFieldItemSprite(int k, uint16 location_id, uint16 vanilla_item_id) {
+  uint8 gfx, big, oam_flags;
+  if (!Rando_GetFieldItemIcon(location_id, vanilla_item_id, &gfx, &big, &oam_flags))
+    return false;  // vanilla placement / no gfx — caller draws the vanilla sprite
+  if (!Rando_CanDrawRecvItemSlot())
+    return true;   // transition load in progress: suppress vanilla fallback too
+  PrepOamCoordsRet info;
+  if (Sprite_PrepOamCoordOrDoubleRet(k, &info))
+    return true;   // off-screen: handled (don't draw the vanilla sprite either)
+  Rando_DrawRecvItemSlotAt(k, gfx, big, oam_flags, &info, 0, 0);
+  return true;
+}
+
+// add-rando-shopsanity — draw an unchecked shop check slot's placed-item icon.
+// Same shared recv-slot discipline as the field-item draw (never the client
+// toggle). The shared slot holds ONE gfx at a time, so the FIRST check slot
+// that claims it each frame draws its exact icon; a sibling slot with a
+// DIFFERENT placed item the same frame falls back (return 2) instead of
+// thrashing the slot (the documented one-item-per-screen limitation).
+// Returns the Rando_GetShopCheckIcon contract: 0 = vanilla tiles truthful,
+// 1 = icon drawn (or intentionally suppressed off-screen/mid-transition),
+// 2 = caller draws the generic check cue.
+// add-rando-shopsanity — three CONCURRENT shop check-slot icon slots, each a
+// full 16x16 quad. VRAM ownership (external-review P2: the previous page-0
+// gap picks collided with the arrow/boomerang projectile tiles, and before
+// that with the heart/sparkle shop tiles — page 0 below 0x40 has NO
+// permanently free chars):
+//   pos 0 -> the travel-bird quad (page-0 chars 0x0E/0x0F + 0x1E/0x1F).
+//     Its consumers — the flute bird and a handful of overworld NPCs — can
+//     never spawn inside a shop room, and on expiry NMI_DoUpdates restores
+//     the bird's own staging bytes so nothing outdoors ever sees icon
+//     pixels.
+//   pos 1 -> the shop sheet set's zero quad (page-1 chars 0x0C/0x0D +
+//     0x1C/0x1D — all-zero tiles in the loaded shop sheets, VRAM-verified;
+//     zeroed again on expiry).
+//   pos 2 -> the SHARED recv-item slot (chars 0x24/0x25 + 0x34/0x35),
+//     gated by Rando_CanDrawRecvItemSlot so a live receipt animation wins
+//     the slot and the column shows the sparkle cue for those frames.
+// pos-0/1 tiles stage into this C-side buffer (recv-slot layout per entry)
+// — NOT the g_ram gfx atlas, whose tail past the recv slot (0xbdc0+) is
+// occupied by receive-anim sources. NMI_DoUpdates uploads both quads while
+// the countdown is armed; every staging call re-arms it, so uploads decay
+// (with the restore writes) two frames after the last shop draw.
+uint8 g_rando_shop_icon_tiles[2][0x80];
+uint8 g_rando_shop_icon_upload_frames;
+
+// Stage a shop column's icon tiles into `dst` (recv-slot layout: 0x40-byte
+// top char row + 0x40-byte bottom row). Shared by the pos-0/1 private-quad
+// buffers; pos 2 routes through the recv slot instead (see SlotStage).
+static bool rando_shop_icon_decode(uint8 gfx, uint8 *dst) {
+  if (gfx & 0x80) {
+    if (gfx == kRandoCustomGfx_Rupoor) {
+      // ALTTPR's Rupoor IS the vanilla rupee tile — only the palette differs.
+      return DecodeAnimatedSpriteTile_ToBuffer(0x24, dst);
+    }
+    if (gfx == kRandoCustomGfx_Cucco) {
+      // Mirror Rando_EnsureRecvItemSlotGfx's cucco path (sheet-80 frame 0).
+      Decomp_spr(&g_ram[0x14000], 80);
+      const uint8 *csrc = &g_ram[0x14000] + 0x3F0;
+      Expand3To4High(dst, csrc, g_ram, 2);
+      Expand3To4High(dst + 0x40, csrc + 0x180, g_ram, 2);
+      return true;
+    }
+    uint32 idx = gfx & 0x7f;
+    if ((idx + 1) * 0x80 > kRandoCustomItemGfx_SIZE)
+      return false;  // stale assets blob — draw the cue, not garbage
+    memcpy(dst, kRandoCustomItemGfx + idx * 0x80, 0x80);
+    return true;
+  }
+  return DecodeAnimatedSpriteTile_ToBuffer(gfx, dst);
+}
+
+// Custom-art palette guard (external-review P2, extended in round 2): all
+// non-Rupoor custom art shares ONE overlay palette row, and Rupoor needs a
+// DIFFERENT one — two visible custom icons of different classes cannot both
+// be truthful. The first custom class to stage each frame owns the row; a
+// conflicting later column falls back to the sparkle cue. A LIVE RECEIPT
+// animation outranks everything: Ancilla_Main draws (and repaints its own
+// custom palette) BEFORE the shop sprites run, so a shop custom icon
+// re-applying the row afterward would miscolor the purchase receipt the
+// player is literally watching — while any receipt ancilla is alive, custom
+// shop icons defer to the sparkle cue (vanilla-bundle icons keep their own
+// stable rows and are unaffected).
+// Per-frame arbitration state for rando_shop_icon_palette_ok below. File-scope
+// so Rando_ShopIconSlotsInvalidate can reset the claim after a snapshot load
+// (a restored frame_counter can equal the stale s_frame, letting a stale class
+// claim suppress one custom icon for a frame).
+static uint8 s_shop_pal_frame, s_shop_pal_class;
+
+static bool rando_shop_icon_palette_ok(uint8 gfx) {
+  if (!(gfx & 0x80))
+    return true;  // vanilla bundles use their own stable rows
+  for (int i = 0; i < 5; i++) {
+    if (ancilla_type[i] == kAncillaType_ItemReceipt ||
+        ancilla_type[i] == kAncillaType_RandoIconReceipt)
+      return false;  // the receipt owns the custom row this frame
+  }
+  uint8 cls = (gfx == kRandoCustomGfx_Rupoor) ? 1 : 2;
+  if (s_shop_pal_frame != frame_counter) {
+    s_shop_pal_frame = frame_counter;
+    s_shop_pal_class = 0;
+  }
+  if (s_shop_pal_class != 0 && s_shop_pal_class != cls)
+    return false;
+  s_shop_pal_class = cls;
+  Rando_ApplyCustomItemGfxPalette(gfx);
+  return true;
+}
+
+// External-review round 2 — snapshot-load invalidation for the quad owner
+// cache (the buffers may be restored/stale relative to VRAM after a load).
+static uint16 s_shop_icon_owner[2] = {0xFFFF, 0xFFFF};
+
+void Rando_ShopIconSlotsInvalidate(void) {
+  s_shop_icon_owner[0] = s_shop_icon_owner[1] = 0xFFFF;
+  g_rando_shop_icon_upload_frames = 0;
+  g_rando_glint_upload_frames = 0;
+  s_shop_pal_class = 0;  // drop the per-frame palette claim (round-4 review)
+}
+
+bool Rando_ShopIconSlotStage(uint8 pos, uint8 gfx) {
+  uint16 *s_owner = s_shop_icon_owner;
+  if (pos >= 3)
+    return false;
+  if (!rando_shop_icon_palette_ok(gfx))
+    return false;
+  if (pos == 2) {
+    // Third column rides the SHARED recv-item slot (chars 0x24/0x34) — the
+    // only remaining conflict is a live receipt animation repainting the
+    // same slot, so defer to the sparkle cue for those frames. Do NOT arm
+    // g_rando_shop_icon_upload_frames here: that countdown drives the NMI
+    // upload of the PRIVATE pos-0/1 quad buffers into the borrowed bird /
+    // page-1 chars, and pos 2 never stages those buffers — arming it with
+    // only column 3 active uploads whatever they last held (zeros at boot,
+    // the previous shop's icons). The recv slot has its own upload.
+    if (!Rando_CanDrawRecvItemSlot())
+      return false;
+    Rando_EnsureRecvItemSlotGfx(gfx);
+    return true;
+  }
+  if (s_owner[pos] != gfx) {
+    if (!rando_shop_icon_decode(gfx, g_rando_shop_icon_tiles[pos]))
+      return false;
+    s_owner[pos] = gfx;
+  }
+  g_rando_shop_icon_upload_frames = 2;
+  return true;
+}
+
+// NPC-held variant: same resolver/slot/OAM discipline as the free-standing draw,
+// but the icon is placed at a fixed screen offset (dx,dy) from the sprite — for an
+// NPC whose vanilla pose holds an item out (the Hobo's bottle). The caller still
+// draws the NPC's body; this only adds the held icon. Returns false when the
+// location holds its vanilla item (or field-item sprites are off) so the caller
+// draws the vanilla pose.
+bool Rando_TryDrawHeldItemSprite(int k, uint16 location_id, uint16 vanilla_item_id,
+                                 int dx, int dy) {
+  uint8 gfx, big, oam_flags;
+  if (!Rando_GetFieldItemIcon(location_id, vanilla_item_id, &gfx, &big, &oam_flags))
+    return false;
+  if (!Rando_CanDrawRecvItemSlot())
+    return true;
+  PrepOamCoordsRet info;
+  if (Sprite_PrepOamCoordOrDoubleRet(k, &info))
+    return true;   // off-screen
+  Rando_DrawRecvItemSlotAt(k, gfx, big, oam_flags, &info, dx, dy);
+  return true;
+}
+
+typedef struct RandoEnemyDropMarkerInfo {
+  uint16 loc_id;
+  uint16 source_id;
+  uint8 domain;
+} RandoEnemyDropMarkerInfo;
+
+typedef struct RandoEnemyMarkerSourceKey {
+  uint16 loc_id;
+  uint16 room;
+  uint16 area;
+  uint16 source_id;
+  uint8 domain;
+  uint8 kind;
+  uint8 sprite_index;
+} RandoEnemyMarkerSourceKey;
+
+typedef struct RandoEnemyMarkerIconKey {
+  uint8 gfx;
+  uint8 footprint;
+  uint8 oam_flags;
+  uint8 palette_policy;
+  uint8 palette_row;
+  uint8 palette_signature;
+} RandoEnemyMarkerIconKey;
+
+typedef struct RandoEnemyMarkerCandidate {
+  RandoEnemyMarkerSourceKey source;
+  uint8 slot;
+  uint8 palette_row;
+  uint8 oam_region;
+  bool has_icon;
+  RandoEnemyMarkerIconKey key;
+  int16 x;
+  int16 y;
+} RandoEnemyMarkerCandidate;
+
+enum {
+  kRandoEnemyMarkerDomain_ForcedDrop = 1,
+  kRandoEnemyMarkerDomain_DungeonEnemy = 2,
+  kRandoEnemyMarkerDomain_DynamicUnderworldEnemy = 3,
+  kRandoEnemyMarkerDomain_OverworldEnemy = 4,
+  kRandoEnemyMarkerKind_Pickup = 1,
+  kRandoEnemyMarkerKind_Carrier = 2,
+  kRandoEnemyMarkerFootprint_8x8 = 1,
+  kRandoEnemyMarkerFootprint_8x16 = 2,
+  kRandoEnemyMarkerFootprint_16x16 = 4,
+  kRandoEnemyMarkerPalette_Unsupported = 0,
+  kRandoEnemyMarkerPalette_FixedScene = 1,
+  kRandoEnemyMarkerPalette_Dynamic = 2,
+  kRandoEnemyMarkerNoSlot = 0xff,
+  kRandoEnemyMarkerIconSlots = 4,
+  kRandoEnemyMarkerMaxCandidates = 32,
+};
+
+static const uint8 kRandoEnemyMarkerSlotBase[kRandoEnemyMarkerIconSlots] = {
+  0xF0, 0xF4, 0xF8, 0xFC,
+};
+static uint8 s_rando_obj_scratch_dirty_slots;
+static void Rando_EnemyMarkerInvalidateFrameState(void);
+
+static uint8 Rando_EnemyMarkerScratchSlotsForOamEntry(uint8 charnum,
+                                                       uint8 flags,
+                                                       uint8 ext) {
+  uint8 used = 0;
+  uint16 tile = (uint16)charnum | ((uint16)(flags & 1) << 8);
+  uint16 tiles[4] = {tile, tile, tile, tile};
+  uint8 n = 1;
+  if (ext & 2) {
+    // Vanilla's large OBJ size is 16x16: the lower row advances by 0x10.
+    // The right column wraps inside its 16-tile page, matching the PPU.
+    // An Armos piece at 0x1E0 therefore also consumes 0x1F0/0x1F1.
+    tiles[1] = (tile & ~0xFu) | ((tile + 1) & 0xFu);
+    tiles[2] = tile + 0x10;
+    tiles[3] = (tiles[2] & ~0xFu) | ((tiles[2] + 1) & 0xFu);
+    n = 4;
+  }
+  for (uint8 i = 0; i < n; i++) {
+    if (tiles[i] >= 0x1F0 && tiles[i] <= 0x1FF)
+      used |= (uint8)(1u << ((tiles[i] - 0x1F0) >> 2));
+  }
+  return used;
+}
+
+uint8 Rando_ObjScratchVisibleSlotMask(void) {
+  uint8 used = 0;
+  for (int i = 0; i < 128; i++) {
+    // The PPU treats only 0xF0 as Zelda's hidden-sprite sentinel. Y values
+    // 0xF1..0xFF wrap onto the top scanlines and may still be visible.
+    if (oam_buf[i].y != 0xF0) {
+      used |= Rando_EnemyMarkerScratchSlotsForOamEntry(
+          oam_buf[i].charnum, oam_buf[i].flags, bytewise_extended_oam[i]);
+    }
+  }
+  return used;
+}
+
+static bool Rando_EnemyMarkerSheetUsesHighPlanes(uint8 sheet) {
+  return sheet == 0x52 || sheet == 0x53 || sheet == 0x5A ||
+         sheet == 0x5B || sheet == 0x5C || sheet == 0x5E || sheet == 0x5F;
+}
+
+static void Rando_EnemyMarkerConvertIconSlot(uint8 sheet, uint8 *dst,
+                                              const uint8 *src) {
+  if (Rando_EnemyMarkerSheetUsesHighPlanes(sheet))
+    Do3To4High16Bit(dst, src, 4);
+  else
+    Do3To4Low16Bit(dst, src, 4);
+}
+
+static void Rando_ObjScratchRestoreIconSlot(uint8 slot) {
+  if (slot >= kRandoEnemyMarkerIconSlots)
+    return;
+  const uint8 *src = &g_ram[0x8A00 + (0x30 + slot * 4) * 24];
+  uint8 *dst = (uint8 *)&g_zenv.vram[0x5F00 + slot * 0x40];
+  Rando_EnemyMarkerConvertIconSlot(sprite_gfx_subset_3, dst, src);
+  s_rando_obj_scratch_dirty_slots &= (uint8)~(1u << slot);
+}
+
+void Rando_ObjScratchMarkSlotsDirty(uint8 slots) {
+  s_rando_obj_scratch_dirty_slots |=
+      (uint8)(slots & ((1u << kRandoEnemyMarkerIconSlots) - 1));
+}
+
+void Rando_ObjScratchInvalidateAll(void) {
+  s_rando_obj_scratch_dirty_slots =
+      (uint8)((1u << kRandoEnemyMarkerIconSlots) - 1);
+  Rando_ObjScratchResetFrameReservation();
+  Rando_EnemyMarkerInvalidateFrameState();
+}
+
+void Rando_ObjScratchRestoreVisible(void) {
+  if (nmi_disable_core_updates != 0)
+    return;
+  uint8 restore = (uint8)(s_rando_obj_scratch_dirty_slots &
+                          Rando_ObjScratchVisibleSlotMask());
+  for (uint8 slot = 0; slot < kRandoEnemyMarkerIconSlots; slot++) {
+    if (restore & (uint8)(1u << slot))
+      Rando_ObjScratchRestoreIconSlot(slot);
+  }
+}
+
+static bool Rando_EnemyDropCarrierLiveState(uint8 state) {
+  return state == 9 || state == 11;
+}
+
+static int8 Rando_EnemyMarkerCarrierVisualTopOffset(int k) {
+  if (k < 0 || k >= 16)
+    return 0;
+  switch (sprite_type[k]) {
+  case 0x11:  // Hinox
+    return -16;
+  case 0x41: case 0x42: case 0x43: case 0x44: case 0x45:
+  case 0x46: case 0x47: case 0x48: case 0x49: case 0x4a:
+    return -8;
+  case 0x4b:  // Green knife guard / recruit body
+    return -11;
+  case 0x51:  // Armos statue
+  case 0x53:  // Armos Knight
+    return -16;
+  case 0x83:  // Green Eyegore
+  case 0x84:  // Red Eyegore
+    return -16;
+  case 0x56:  // Walking Zora
+    return -7;
+  case 0x6a:  // Ball-n-chain trooper
+    return -9;
+  case 0x8b:  // Gibdo
+  case 0xa5:  // Blue Zazak
+  case 0xa6:  // Red Zazak
+    return -9;
+  case 0x91:  // Stalfos Knight
+    return -12;
+  case 0xd0:  // Lynel
+    return -14;
+  default:
+    return 0;
+  }
+}
+
+static int Rando_EnemyMarkerCarrierGlintDy(int k) {
+  return -10 + Rando_EnemyMarkerCarrierVisualTopOffset(k);
+}
+
+static bool Rando_GetEnemyDropCarrierMarkerInfo(int k, RandoEnemyDropMarkerInfo *out) {
+  if (k < 0 || k >= 16 || !Rando_EnemyDropCarrierLiveState(sprite_state[k]))
+    return false;
+  uint8 drop_kind = (sprite_die_action[k] == 1) ? kRandoEnemyDropKind_SmallKey :
+                    (sprite_die_action[k] == 2) ? kRandoEnemyDropKind_BigKey : 0;
+  if (drop_kind != 0 && Rando_EnemyDropKeysActiveRuntime() &&
+      player_is_indoors && !sign8(sprite_N[k])) {
+    const RandoEnemyDropLookupEntry *drop = Rando_FindEnemyDrop(
+        dungeon_room_index, sprite_N[k], drop_kind);
+    if (drop != NULL && !Rando_IsLocationChecked(drop->loc_id)) {
+      if (out != NULL) {
+        out->loc_id = drop->loc_id;
+        out->source_id = sprite_N[k];
+        out->domain = kRandoEnemyMarkerDomain_ForcedDrop;
+      }
+      return true;
+    }
+  }
+  if (Rando_EnemyChecksDungeonActiveRuntime() && player_is_indoors &&
+      !sign8(sprite_N[k])) {
+    const RandoEnemyCheckLookupEntry *check =
+        Rando_FindEnemyCheck(dungeon_room_index, sprite_N[k]);
+    if (Rando_EnemyCheckEntryActive(check) &&
+        !Rando_IsLocationChecked(check->loc_id)) {
+      if (out != NULL) {
+        out->loc_id = check->loc_id;
+        out->source_id = sprite_N[k];
+        out->domain = kRandoEnemyMarkerDomain_DungeonEnemy;
+      }
+      return true;
+    }
+  }
+  if (Rando_EnemyChecksAllActiveRuntime() && player_is_indoors) {
+    uint16 loc_id = s_rando_dynamic_enemy_check_loc[k];
+    if (loc_id != 0 && !Rando_IsLocationChecked(loc_id)) {
+      if (out != NULL) {
+        out->loc_id = loc_id;
+        out->source_id = (uint16)k;
+        out->domain = kRandoEnemyMarkerDomain_DynamicUnderworldEnemy;
+      }
+      return true;
+    }
+  }
+  if (Rando_EnemyChecksAllActiveRuntime() && !player_is_indoors) {
+    uint16 block = sprite_N_word[k];
+    uint16 loc_id = Rando_OverworldEnemyCheckLocForBlock(block);
+    if (loc_id != 0 && !Rando_IsLocationChecked(loc_id)) {
+      if (out != NULL) {
+        out->loc_id = loc_id;
+        out->source_id = block;
+        out->domain = kRandoEnemyMarkerDomain_OverworldEnemy;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool Rando_GetEnemyDropPickupMarkerInfo(int k, RandoEnemyDropMarkerInfo *out) {
+  if (k < 0 || k >= 16 || sprite_state[k] == 0 ||
+      !Rando_EnemyDropKeysActiveRuntime() || !player_is_indoors)
+    return false;
+  uint8 drop_kind = sprite_type[k] == 0xE4 ? kRandoEnemyDropKind_SmallKey :
+                    sprite_type[k] == 0xE5 ? kRandoEnemyDropKind_BigKey : 0;
+  if (drop_kind == 0)
+    return false;
+  const RandoEnemyDropLookupEntry *drop = Rando_FindEnemyDrop(
+      dungeon_room_index, sprite_subtype[k], drop_kind);
+  if (drop == NULL || Rando_IsLocationChecked(drop->loc_id))
+    return false;
+  if (out != NULL) {
+    out->loc_id = drop->loc_id;
+    out->source_id = sprite_subtype[k];
+    out->domain = kRandoEnemyMarkerDomain_ForcedDrop;
+  }
+  return true;
+}
+
+static uint8 Rando_EnemyMarkerOamRegionForSprite(int k) {
+  if (sort_sprites_setting)
+    return sprite_floor[k] ? 5 : 3;
+  return 0;
+}
+
+static bool Rando_EnemyMarkerNormalGfxUnsupported(uint8 gfx) {
+  // These receive bundles depend on side-effect palette loaders. The marker path
+  // cannot mutate sword/shield palettes, so they remain glint-only until a
+  // caller-owned dynamic palette is authored for them.
+  return gfx == 0x20 || gfx == 0x2d || gfx == 0x2e ||
+         gfx == 6 || gfx == 0x18;
+}
+
+static bool Rando_EnemyMarkerCustomGfxSupported(uint8 gfx) {
+  if (gfx >= kRandoCustomGfx_TriforcePiece &&
+      gfx < kRandoCustomGfx_TriforcePiece + kRandoCustomGfx_BlobEntries) {
+    uint32 idx = gfx & 0x7f;
+    return (idx + 1) * 0x80 <= kRandoCustomItemGfx_SIZE;
+  }
+  return gfx == kRandoCustomGfx_Rupoor || gfx == kRandoCustomGfx_Cucco;
+}
+
+static bool Rando_EnemyMarkerPlanIcon(uint16 loc_id, RandoEnemyMarkerIconKey *key) {
+  uint8 gfx, big, oam_flags;
+  if (key == NULL || !Rando_GetFieldItemIcon(loc_id, 0xFFFFu, &gfx, &big, &oam_flags))
+    return false;
+  memset(key, 0, sizeof(*key));
+  key->gfx = gfx;
+  key->footprint = (big == 0) ? kRandoEnemyMarkerFootprint_8x16 :
+                   kRandoEnemyMarkerFootprint_16x16;
+  key->palette_row = (uint8)((oam_flags >> 1) & 7);
+
+  if (gfx & 0x80) {
+    if (!Rando_EnemyMarkerCustomGfxSupported(gfx)) {
+      key->palette_policy = kRandoEnemyMarkerPalette_Unsupported;
+      return true;
+    }
+    key->oam_flags = (uint8)(oam_flags & ~0x0fu);
+    key->palette_policy = kRandoEnemyMarkerPalette_Dynamic;
+    key->palette_signature = gfx;
+    return true;
+  }
+
+  if (Rando_EnemyMarkerNormalGfxUnsupported(gfx) || key->palette_row >= 7) {
+    key->palette_policy = kRandoEnemyMarkerPalette_Unsupported;
+    key->oam_flags = (uint8)(oam_flags & ~1u);
+    return true;
+  }
+  key->oam_flags = (uint8)(oam_flags & ~1u);
+  key->palette_policy = kRandoEnemyMarkerPalette_FixedScene;
+  return true;
+}
+
+static bool Rando_EnemyMarkerDecodeCucco(uint8 *dst) {
+  if (dst == NULL)
+    return false;
+  Decomp_spr(&g_ram[0x14000], 80);
+  const uint8 *csrc = &g_ram[0x14000] + 0x3F0;
+  Expand3To4High(dst,        csrc,         g_ram, 2);
+  Expand3To4High(dst + 0x40, csrc + 0x180, g_ram, 2);
+  return true;
+}
+
+static bool Rando_EnemyMarkerBuildIconTiles(const RandoEnemyMarkerIconKey *key,
+                                            uint8 *dst) {
+  if (key == NULL || dst == NULL ||
+      key->palette_policy == kRandoEnemyMarkerPalette_Unsupported)
+    return false;
+  if (!(key->gfx & 0x80))
+    return DecodeAnimatedSpriteTile_ToBuffer(key->gfx, dst);
+  if (key->gfx == kRandoCustomGfx_Rupoor)
+    return DecodeAnimatedSpriteTile_ToBuffer(0x24, dst);
+  if (key->gfx == kRandoCustomGfx_Cucco)
+    return Rando_EnemyMarkerDecodeCucco(dst);
+  if (key->gfx >= kRandoCustomGfx_TriforcePiece &&
+      key->gfx < kRandoCustomGfx_TriforcePiece + kRandoCustomGfx_BlobEntries) {
+    uint32 idx = key->gfx & 0x7f;
+    if ((idx + 1) * 0x80 > kRandoCustomItemGfx_SIZE)
+      return false;
+    memcpy(dst, kRandoCustomItemGfx + idx * 0x80, 0x80);
+    return true;
+  }
+  return false;
+}
+
+static void Rando_EnemyMarkerUploadIconSlot(uint8 slot, const uint8 *tiles) {
+  if (slot >= kRandoEnemyMarkerIconSlots || tiles == NULL)
+    return;
+  uint8 base = kRandoEnemyMarkerSlotBase[slot];
+  for (int i = 0; i < 4; i++)
+    memcpy(&g_zenv.vram[0x5000 + (base + i) * 16], tiles + i * 0x20, 0x20);
+  Rando_ObjScratchMarkSlotsDirty((uint8)(1u << slot));
+}
+
+static bool Rando_EnemyMarkerIconKeyEq(const RandoEnemyMarkerIconKey *a,
+                                       const RandoEnemyMarkerIconKey *b) {
+  return a->gfx == b->gfx && a->footprint == b->footprint &&
+         a->oam_flags == b->oam_flags &&
+         a->palette_policy == b->palette_policy &&
+         a->palette_row == b->palette_row &&
+         a->palette_signature == b->palette_signature;
+}
+
+static bool Rando_EnemyMarkerIconSupported(const RandoEnemyMarkerIconKey *key) {
+  return key != NULL && key->palette_policy != kRandoEnemyMarkerPalette_Unsupported;
+}
+
+static bool Rando_EnemyMarkerLess(const RandoEnemyMarkerCandidate *a,
+                                  const RandoEnemyMarkerCandidate *b) {
+  uint8 ap = (a->source.kind == kRandoEnemyMarkerKind_Pickup) ? 0 : 1;
+  uint8 bp = (b->source.kind == kRandoEnemyMarkerKind_Pickup) ? 0 : 1;
+  if (ap != bp) return ap < bp;
+  if (a->source.loc_id != b->source.loc_id) return a->source.loc_id < b->source.loc_id;
+  if (a->source.domain != b->source.domain) return a->source.domain < b->source.domain;
+  if (a->source.room != b->source.room) return a->source.room < b->source.room;
+  if (a->source.area != b->source.area) return a->source.area < b->source.area;
+  if (a->source.source_id != b->source.source_id)
+    return a->source.source_id < b->source.source_id;
+  if (a->source.sprite_index != b->source.sprite_index)
+    return a->source.sprite_index < b->source.sprite_index;
+  return a->source.kind < b->source.kind;
+}
+
+static void Rando_EnemyMarkerSortCandidates(RandoEnemyMarkerCandidate *c, uint8 n) {
+  for (uint8 i = 1; i < n; i++) {
+    RandoEnemyMarkerCandidate v = c[i];
+    uint8 j = i;
+    while (j > 0 && Rando_EnemyMarkerLess(&v, &c[j - 1])) {
+      c[j] = c[j - 1];
+      j--;
+    }
+    c[j] = v;
+  }
+}
+
+static bool Rando_LoadEnemyMarkerIconSlot(uint8 slot,
+                                          const RandoEnemyMarkerIconKey *key) {
+  if (slot >= kRandoEnemyMarkerIconSlots || key == NULL)
+    return false;
+  uint8 tiles[0x80];
+  if (!Rando_EnemyMarkerBuildIconTiles(key, tiles))
+    return false;
+  Rando_EnemyMarkerUploadIconSlot(slot, tiles);
+  return true;
+}
+
+static uint8 Rando_EnemyMarkerVisiblePaletteMask(void) {
+  // Seed with Link's equipment rows 3/5/7: Link draws AFTER this scan runs, so
+  // the OAM walk below cannot see his rows — an earlier fixed row 7 painted
+  // Link gold, and sword/shield can land on rows 3/5 (same fix as the dungeon
+  // glint picker, dungeon.c RandoPot_DrawGoldOverlay). This mask also feeds the
+  // dynamic custom-item icon palette rows in both dungeon and overworld.
+  uint8 used = (1u << 3) | (1u << 5) | (1u << 7);
+  for (int i = 0; i < 128; i++) {
+    if (oam_buf[i].y != 0xf0)
+      used |= 1u << ((oam_buf[i].flags >> 1) & 7);
+  }
+  return used;
+}
+
+static void Rando_EnemyMarkerAllocateCandidates(RandoEnemyMarkerCandidate *c,
+                                                 uint8 n,
+                                                 bool resources_available,
+                                                 bool load_tiles,
+                                                 uint8 unavailable_slots) {
+  RandoEnemyMarkerIconKey slot_keys[kRandoEnemyMarkerIconSlots];
+  bool slot_valid[kRandoEnemyMarkerIconSlots] = {false};
+  for (uint8 i = 0; i < n; i++) {
+    c[i].slot = kRandoEnemyMarkerNoSlot;
+    c[i].palette_row = 0xFF;
+  }
+  if (!resources_available)
+    return;
+
+  for (uint8 i = 0; i < n; i++) {
+    if (!c[i].has_icon || !Rando_EnemyMarkerIconSupported(&c[i].key))
+      continue;
+    for (uint8 s = 0; s < kRandoEnemyMarkerIconSlots; s++) {
+      if (slot_valid[s] && Rando_EnemyMarkerIconKeyEq(&c[i].key, &slot_keys[s])) {
+        c[i].slot = s;
+        goto assigned;
+      }
+    }
+    for (uint8 s = 0; s < kRandoEnemyMarkerIconSlots; s++) {
+      if ((unavailable_slots & (uint8)(1u << s)) || slot_valid[s])
+        continue;
+      if (load_tiles && !Rando_LoadEnemyMarkerIconSlot(s, &c[i].key))
+        continue;
+      slot_keys[s] = c[i].key;
+      slot_valid[s] = true;
+      c[i].slot = s;
+      break;
+    }
+assigned:
+    ;
+  }
+
+  uint8 used_rows = Rando_EnemyMarkerVisiblePaletteMask();
+  for (uint8 i = 0; i < n; i++) {
+    if (c[i].slot == kRandoEnemyMarkerNoSlot)
+      continue;
+    if (c[i].key.palette_policy == kRandoEnemyMarkerPalette_FixedScene)
+      used_rows |= (uint8)(1u << c[i].key.palette_row);
+  }
+
+  for (uint8 i = 0; i < n; i++) {
+    if (c[i].slot == kRandoEnemyMarkerNoSlot)
+      continue;
+    if (c[i].key.palette_policy == kRandoEnemyMarkerPalette_FixedScene) {
+      c[i].palette_row = c[i].key.palette_row;
+      continue;
+    }
+    if (c[i].key.palette_policy != kRandoEnemyMarkerPalette_Dynamic)
+      continue;
+    for (uint8 j = 0; j < i; j++) {
+      if (c[j].slot == c[i].slot && c[j].palette_row != 0xFF) {
+        c[i].palette_row = c[j].palette_row;
+        goto dynamic_assigned;
+      }
+    }
+    for (uint8 r = 0; r < 7; r++) {
+      if (!(used_rows & (1u << r))) {
+        c[i].palette_row = r;
+        used_rows |= (uint8)(1u << r);
+        break;
+      }
+    }
+dynamic_assigned:
+    ;
+  }
+}
+
+// Side-effect-free equivalent of the Sprite_Get16BitCoords +
+// Sprite_PrepOamCoordOrDoubleRet pair for overlay CANDIDATE collection: the
+// engine helper resets sprite_pause[k], can Sprite_KillSelf an off-screen
+// sprite, and clobbers the cur_sprite_x/y + dungmap_var7 scratch — mutations
+// overlay code must never perform (benign post-Sprite_Main today, but the
+// historical marker-bug pattern). Same coordinate math and on-screen window
+// (incl. the ExtendScreen64 widening and the tall-sprite flags4 exemption);
+// returns false where the engine helper double-returns.
+static bool Rando_EnemyMarkerScreenCoords(int k, uint16 *out_x, uint16 *out_y) {
+  uint16 x = (uint16)(Sprite_GetX(k) - BG2HOFS_copy2);
+  uint16 y = (uint16)(Sprite_GetY(k) - BG2VOFS_copy2);
+  int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
+  if ((uint16)(x + 0x40 + xt) >= (uint16)(0x170 + xt * 2) ||
+      ((uint16)(y + 0x40) >= 0x170 && !(sprite_flags4[k] & 0x20)))
+    return false;
+  *out_x = x;
+  *out_y = (uint16)(y - sprite_z[k]);
+  return true;
+}
+
+static void Rando_EnemyMarkerAddCandidate(RandoEnemyMarkerCandidate *c,
+                                          uint8 *n,
+                                          uint8 sprite_index,
+                                          uint8 kind,
+                                          const RandoEnemyDropMarkerInfo *info) {
+  if (*n >= kRandoEnemyMarkerMaxCandidates || info == NULL)
+    return;
+  uint16 mx, my;
+  if (!Rando_EnemyMarkerScreenCoords(sprite_index, &mx, &my))
+    return;
+  RandoEnemyMarkerCandidate *dst = &c[(*n)++];
+  memset(dst, 0, sizeof(*dst));
+  dst->source.loc_id = info->loc_id;
+  dst->source.room = player_is_indoors ? dungeon_room_index : 0xFFFFu;
+  dst->source.area = player_is_indoors ? 0xFFFFu : overworld_screen_index;
+  dst->source.source_id = info->source_id;
+  dst->source.domain = info->domain;
+  dst->source.kind = kind;
+  dst->source.sprite_index = sprite_index;
+  dst->slot = kRandoEnemyMarkerNoSlot;
+  dst->palette_row = 0xFF;
+  dst->oam_region = Rando_EnemyMarkerOamRegionForSprite(sprite_index);
+  dst->x = (int16)mx;
+  dst->y = (int16)(my + (kind == kRandoEnemyMarkerKind_Pickup
+      ? 0 : Rando_EnemyMarkerCarrierVisualTopOffset(sprite_index) - 16));
+  if (Rando_EnemyMarkerPlanIcon(info->loc_id, &dst->key)) {
+    dst->has_icon = true;
+  }
+}
+
+static uint8 Rando_EnemyMarkerCollectCandidates(RandoEnemyMarkerCandidate *c) {
+  uint8 n = 0;
+  for (int k = 0; k < 16; k++) {
+    RandoEnemyDropMarkerInfo info;
+    if (Rando_GetEnemyDropPickupMarkerInfo(k, &info))
+      Rando_EnemyMarkerAddCandidate(c, &n, (uint8)k, kRandoEnemyMarkerKind_Pickup, &info);
+  }
+  if (g_config.enemy_drop_marker != kEnemyDropMarker_Generic) {
+    for (int k = 0; k < 16; k++) {
+      RandoEnemyDropMarkerInfo info;
+      if (Rando_GetEnemyDropCarrierMarkerInfo(k, &info))
+        Rando_EnemyMarkerAddCandidate(c, &n, (uint8)k, kRandoEnemyMarkerKind_Carrier, &info);
+    }
+  }
+  Rando_EnemyMarkerSortCandidates(c, n);
+  return n;
+}
+
+static bool Rando_EnemyMarkerHasSupportedExactCandidate(
+    const RandoEnemyMarkerCandidate *c, uint8 n) {
+  for (uint8 i = 0; i < n; i++) {
+    if (c[i].has_icon && Rando_EnemyMarkerIconSupported(&c[i].key))
+      return true;
+  }
+  return false;
+}
+
+static bool Rando_EnemyMarkerIconScratchAvailable(void) {
+  // Exact marker art uses DecodeAnimatedSpriteTile_ToBuffer, whose vanilla
+  // decompression scratch is WRAM $7F4000 ($14000 in g_ram). Overworld and
+  // dungeon map recovery use that same buffer to stage the tilemap consumed by
+  // the pending NMI. Re-decoding a marker while core updates are suppressed
+  // replaces the staged tilemap with item graphics and corrupts the restored
+  // screen. Match the existing receive-item-slot guard: fall back to glints
+  // until the transition NMI has consumed its staging buffer.
+  return nmi_disable_core_updates == 0;
+}
+
+static RandoEnemyMarkerCandidate s_enemy_marker_candidates[kRandoEnemyMarkerMaxCandidates];
+static uint8 s_enemy_marker_candidate_count;
+static uint8 s_enemy_marker_frame;
+static bool s_enemy_marker_cache_valid;
+static uint8 s_enemy_marker_draw_failed_frame;
+static uint16 s_enemy_marker_draw_failed_mask;
+enum { kRandoEnemyMarkerOverlayOamSlots = 44 };
+static bool s_enemy_marker_overlay_plan_active;
+static uint8 s_enemy_marker_reserved_oam[kRandoEnemyMarkerOverlayOamSlots];
+static uint8 s_enemy_marker_extra_oam[kRandoEnemyMarkerOverlayOamSlots];
+static uint8 s_enemy_marker_reserved_count, s_enemy_marker_reserved_next;
+static uint8 s_enemy_marker_extra_count, s_enemy_marker_extra_next;
+
+void Rando_EnemyMarkerBeginOverlay(uint8 fallback_count) {
+  s_enemy_marker_overlay_plan_active = sort_sprites_setting != 0;
+  s_enemy_marker_reserved_count = s_enemy_marker_reserved_next = 0;
+  s_enemy_marker_extra_count = s_enemy_marker_extra_next = 0;
+  if (!s_enemy_marker_overlay_plan_active)
+    return;
+
+  uint8 free_slots[kRandoEnemyMarkerOverlayOamSlots];
+  uint8 free_count = 0;
+  // Region D ($30..$bf) is the sorted floor-0 sprite region. Region E
+  // ($120..$13f) is ancilla-owned, but the overlay runs after Ancilla_Main and
+  // may claim entries that are physically hidden this frame. Scan real OAM:
+  // vanilla overflow does not advance oam_region_base, so its counter can lie.
+  for (uint8 i = 0x30 / 4; i < 0xC0 / 4; i++) {
+    if (oam_buf[i].y == 0xF0)
+      free_slots[free_count++] = i;
+  }
+  for (uint8 i = 0x120 / 4; i < 0x140 / 4; i++) {
+    if (oam_buf[i].y == 0xF0)
+      free_slots[free_count++] = i;
+  }
+  uint8 reserve = fallback_count < free_count ? fallback_count : free_count;
+  for (uint8 i = 0; i < reserve; i++)
+    s_enemy_marker_reserved_oam[s_enemy_marker_reserved_count++] = free_slots[i];
+  for (uint8 i = reserve; i < free_count; i++)
+    s_enemy_marker_extra_oam[s_enemy_marker_extra_count++] = free_slots[i];
+}
+
+bool Rando_EnemyMarkerClaimFallbackOam(void) {
+  if (!s_enemy_marker_overlay_plan_active ||
+      s_enemy_marker_reserved_next >= s_enemy_marker_reserved_count)
+    return false;
+  uint8 slot = s_enemy_marker_reserved_oam[s_enemy_marker_reserved_next++];
+  oam_cur_ptr = (uint16)(0x800 + slot * 4);
+  oam_ext_cur_ptr = (uint16)(0xA20 + slot);
+  return true;
+}
+
+static bool Rando_EnemyMarkerClaimExactOam(uint8 pieces, uint8 *out_slots) {
+  if (!s_enemy_marker_overlay_plan_active || out_slots == NULL || pieces == 0 ||
+      s_enemy_marker_reserved_next >= s_enemy_marker_reserved_count ||
+      s_enemy_marker_extra_count - s_enemy_marker_extra_next < pieces - 1)
+    return false;
+  out_slots[0] = s_enemy_marker_reserved_oam[s_enemy_marker_reserved_next++];
+  for (uint8 i = 1; i < pieces; i++)
+    out_slots[i] = s_enemy_marker_extra_oam[s_enemy_marker_extra_next++];
+  return true;
+}
+
+static void Rando_EnemyMarkerInvalidateFrameState(void) {
+  s_enemy_marker_cache_valid = false;
+  s_enemy_marker_candidate_count = 0;
+  s_enemy_marker_draw_failed_frame = (uint8)(frame_counter - 1);
+  s_enemy_marker_draw_failed_mask = 0;
+}
+
+static void Rando_EnemyMarkerMarkDrawFailed(int k) {
+  if (k < 0 || k >= 16)
+    return;
+  if (s_enemy_marker_draw_failed_frame != frame_counter) {
+    s_enemy_marker_draw_failed_frame = frame_counter;
+    s_enemy_marker_draw_failed_mask = 0;
+  }
+  s_enemy_marker_draw_failed_mask |= (uint16)(1u << k);
+}
+
+static bool Rando_EnemyMarkerDrawFailedThisFrame(int k) {
+  if (k < 0 || k >= 16 || s_enemy_marker_draw_failed_frame != frame_counter)
+    return false;
+  return (s_enemy_marker_draw_failed_mask & (uint16)(1u << k)) != 0;
+}
+
+static void Rando_EnemyMarkerEnsureCache(void) {
+  if (s_enemy_marker_cache_valid && s_enemy_marker_frame == frame_counter)
+    return;
+  RandoEnemyMarkerCandidate c[kRandoEnemyMarkerMaxCandidates];
+  uint8 n = Rando_EnemyMarkerCollectCandidates(c);
+  bool resources_available = Rando_EnemyMarkerHasSupportedExactCandidate(c, n) &&
+      Rando_EnemyMarkerIconScratchAvailable() &&
+      !Hud_RandoOamTrackerWillDrawThisFrame() &&
+      Rando_ObjScratchReserveForFrame(kRandoObjScratchOwner_EnemyMarkers);
+  memcpy(s_enemy_marker_candidates, c, sizeof(c));
+  s_enemy_marker_candidate_count = n;
+  s_enemy_marker_frame = frame_counter;
+  s_enemy_marker_cache_valid = true;
+  Rando_EnemyMarkerAllocateCandidates(s_enemy_marker_candidates,
+                                      s_enemy_marker_candidate_count,
+                                      resources_available,
+                                      true,
+                                      Rando_ObjScratchVisibleSlotMask());
+}
+
+static bool Rando_EnemyMarkerCandidateDrawable(const RandoEnemyMarkerCandidate *c) {
+  return c != NULL && c->slot != kRandoEnemyMarkerNoSlot &&
+         c->palette_row != 0xFF;
+}
+
+static const RandoEnemyMarkerCandidate *Rando_EnemyMarkerFindAllocated(int k,
+                                                                       uint8 kind) {
+  Rando_EnemyMarkerEnsureCache();
+  for (uint8 i = 0; i < s_enemy_marker_candidate_count; i++) {
+    const RandoEnemyMarkerCandidate *c = &s_enemy_marker_candidates[i];
+    if (c->source.sprite_index == (uint8)k && c->source.kind == kind &&
+        Rando_EnemyMarkerCandidateDrawable(c))
+      return c;
+  }
+  return NULL;
+}
+
+static const RandoEnemyMarkerCandidate *Rando_EnemyMarkerFindCandidate(int k,
+                                                                       uint8 kind) {
+  Rando_EnemyMarkerEnsureCache();
+  for (uint8 i = 0; i < s_enemy_marker_candidate_count; i++) {
+    const RandoEnemyMarkerCandidate *c = &s_enemy_marker_candidates[i];
+    if (c->source.sprite_index == (uint8)k && c->source.kind == kind)
+      return c;
+  }
+  return NULL;
+}
+
+static bool Rando_EnemyMarkerCanAllocateOam(uint8 region, uint8 nbytes) {
+  return oam_region_base[region] + nbytes < kOamGetBufferPos_Tab0[region];
+}
+
+static void Rando_EnemyMarkerAllocateOam(uint8 region, uint8 nbytes) {
+  if (region == 5)
+    Oam_AllocateFromRegionF(nbytes);
+  else if (region == 3)
+    Oam_AllocateFromRegionD(nbytes);
+  else
+    Oam_AllocateFromRegionA(nbytes);
+}
+
+static uint8 Rando_EnemyMarkerPieceCount(uint8 footprint) {
+  if (footprint == kRandoEnemyMarkerFootprint_8x8)
+    return 1;
+  if (footprint == kRandoEnemyMarkerFootprint_8x16)
+    return 2;
+  return 4;
+}
+
+static bool Rando_EnemyMarkerPieceVisible(int x, int y) {
+  return x >= 0 && x <= 248 && y >= 0 && y <= 216 &&
+         (uint16)(y + 0x10) < 0x100;
+}
+
+static bool Rando_EnemyMarkerFootprintVisible(const RandoEnemyMarkerCandidate *c) {
+  if (c == NULL)
+    return false;
+  if (!Rando_EnemyMarkerPieceVisible(c->x, c->y))
+    return false;
+  if (c->key.footprint == kRandoEnemyMarkerFootprint_8x16)
+    return Rando_EnemyMarkerPieceVisible(c->x, c->y + 8);
+  if (c->key.footprint == kRandoEnemyMarkerFootprint_16x16)
+    return Rando_EnemyMarkerPieceVisible(c->x + 8, c->y) &&
+           Rando_EnemyMarkerPieceVisible(c->x, c->y + 8) &&
+           Rando_EnemyMarkerPieceVisible(c->x + 8, c->y + 8);
+  return true;
+}
+
+static bool Rando_DrawEnemyMarkerIconAt(int k,
+                                        const RandoEnemyMarkerCandidate *c) {
+  (void)k;
+  if (!Rando_EnemyMarkerCandidateDrawable(c) ||
+      c->slot >= kRandoEnemyMarkerIconSlots ||
+      !Rando_EnemyMarkerFootprintVisible(c))
+    return false;
+  uint8 pieces = Rando_EnemyMarkerPieceCount(c->key.footprint);
+  uint8 nbytes = (uint8)(pieces * 4);
+  uint8 planned_slots[4];
+  OamEnt *piece_oam[4];
+  if (s_enemy_marker_overlay_plan_active) {
+    if (!Rando_EnemyMarkerClaimExactOam(pieces, planned_slots))
+      return false;
+    for (uint8 i = 0; i < pieces; i++)
+      piece_oam[i] = &oam_buf[planned_slots[i]];
+  } else {
+    if (!Rando_EnemyMarkerCanAllocateOam(c->oam_region, nbytes))
+      return false;
+    Rando_EnemyMarkerAllocateOam(c->oam_region, nbytes);
+    OamEnt *oam = GetOamCurPtr();
+    for (uint8 i = 0; i < pieces; i++)
+      piece_oam[i] = oam + i;
+  }
+  uint8 base = kRandoEnemyMarkerSlotBase[c->slot];
+  uint8 flags = c->key.oam_flags;
+  if (c->key.palette_policy == kRandoEnemyMarkerPalette_Dynamic)
+    flags = (uint8)((flags & ~0x0Fu) | (c->palette_row << 1));
+  flags = (uint8)((flags & ~1u) | 1u);
+  SetOamHelper0(piece_oam[0], c->x, c->y, base, flags, 0);
+  if (c->key.footprint == kRandoEnemyMarkerFootprint_8x16) {
+    SetOamHelper0(piece_oam[1], c->x, c->y + 8, (uint8)(base + 2), flags, 0);
+  } else if (c->key.footprint == kRandoEnemyMarkerFootprint_16x16) {
+    SetOamHelper0(piece_oam[1], c->x + 8, c->y, (uint8)(base + 1), flags, 0);
+    SetOamHelper0(piece_oam[2], c->x, c->y + 8, (uint8)(base + 2), flags, 0);
+    SetOamHelper0(piece_oam[3], c->x + 8, c->y + 8, (uint8)(base + 3), flags, 0);
+  }
+  if (c->key.palette_policy == kRandoEnemyMarkerPalette_Dynamic)
+    Rando_OverlayPaletteRequestCustomItem(c->palette_row, c->key.gfx);
+  return true;
+}
+
+bool Rando_EnemyDropMarkerWantsGlint(int k, int *out_dy) {
+  if (Rando_GetEnemyDropPickupMarkerInfo(k, NULL)) {
+    if (Rando_EnemyMarkerFindAllocated(k, kRandoEnemyMarkerKind_Pickup) != NULL &&
+        !Rando_EnemyMarkerDrawFailedThisFrame(k))
+      return false;
+    if (out_dy != NULL) *out_dy = 2;
+    return true;
+  }
+
+  if (!Rando_GetEnemyDropCarrierMarkerInfo(k, NULL))
+    return false;
+  if (g_config.enemy_drop_marker == kEnemyDropMarker_Generic) {
+    if (out_dy != NULL) *out_dy = Rando_EnemyMarkerCarrierGlintDy(k);
+    return true;
+  }
+  if (Rando_EnemyMarkerFindAllocated(k, kRandoEnemyMarkerKind_Carrier) != NULL &&
+      !Rando_EnemyMarkerDrawFailedThisFrame(k))
+    return false;
+  if (out_dy != NULL) *out_dy = Rando_EnemyMarkerCarrierGlintDy(k);
+  return true;
+}
+
+static bool Rando_TryDrawEnemyDropPickupField(int k) {
+  return Rando_GetEnemyDropPickupMarkerInfo(k, NULL);
+}
+
+bool Rando_TryDrawEnemyDropCarrierField(int k) {
+  (void)k;
+  return false;
+}
+
+static bool Rando_EnemyMarkerAllocateGlintOam(void) {
+  if (sort_sprites_setting) {
+    return Rando_EnemyMarkerClaimFallbackOam();
+  } else {
+    if (oam_region_base[0] + 4 >= kOamGetBufferPos_Tab0[0])
+      return false;
+    Oam_AllocateFromRegionA(4);
+  }
+  return true;
+}
+
+// Shared OW check-glint tile. The glint originally borrowed 4 chars from each
+// area's loaded sprite sheets (kGlint_Char 0x80/0x83/0xB7/0xC7) — but WHAT
+// those chars hold is per-area sheet content: on Death Mountain they are 1-17
+// nonzero-byte specks, an invisible cue even after the gold ramp was
+// brightened (two playtest rounds). The glint now owns a private hand-authored
+// 4-frame sparkle uploaded into char 0x0F — a travel-bird char, which
+// NMI_DoUpdates uploads ONLY during flute flight; the bird upload is placed
+// after ours so a mid-flight frame shows bird wings, never a stale sparkle.
+// Frames use color index 15 only (all planes set) = the bright end of the
+// golded overlay row. embedded-data-guard: allow (hand-authored 8x8 sparkle
+// art, 4 frames x 32 bytes; original art, not ROM-derived data)
+uint8 g_rando_glint_upload_frames;
+const uint8 kRandoGlintTile4bpp[4][0x20] = {
+  { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x18, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x18, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },  // dot
+  { 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x3C, 0x3C, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x3C, 0x3C, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x00, 0x00, 0x00 },  // small
+  { 0x00, 0x00, 0x18, 0x18, 0x3C, 0x3C, 0x7E, 0x7E, 0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x00,
+    0x00, 0x00, 0x18, 0x18, 0x3C, 0x3C, 0x7E, 0x7E, 0x7E, 0x7E, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x00 },  // big
+  { 0x18, 0x18, 0x18, 0x18, 0x5A, 0x5A, 0x3C, 0x3C, 0x3C, 0x3C, 0x5A, 0x5A, 0x18, 0x18, 0x18, 0x18,
+    0x18, 0x18, 0x18, 0x18, 0x5A, 0x5A, 0x3C, 0x3C, 0x3C, 0x3C, 0x5A, 0x5A, 0x18, 0x18, 0x18, 0x18 },  // star
+};
+
+void Rando_DrawOverworldEnemyMarkerGlints(void) {
+  if (player_is_indoors || !(enhanced_features1 & kFeatures1_RandomizerActive))
+    return;
+  Rando_ObjScratchRestoreVisible();
+  Rando_DrawGoalNpcOverlay();
+
+  uint8 fallback_count = 0;
+  for (int k = 0; k < 16; k++) {
+    if (Rando_GetEnemyDropCarrierMarkerInfo(k, NULL))
+      fallback_count++;
+  }
+  Rando_EnemyMarkerBeginOverlay(fallback_count);
+
+  uint16 enemy_glint_mask = 0;
+  for (int k = 0; k < 16; k++) {
+    if (!Rando_GetEnemyDropCarrierMarkerInfo(k, NULL))
+      continue;
+    if (g_config.enemy_drop_marker != kEnemyDropMarker_Generic) {
+      const RandoEnemyMarkerCandidate *c =
+          Rando_EnemyMarkerFindAllocated(k, kRandoEnemyMarkerKind_Carrier);
+      if (Rando_DrawEnemyMarkerIconAt(k, c))
+        continue;
+      if (Rando_EnemyMarkerFindCandidate(k, kRandoEnemyMarkerKind_Carrier) != NULL)
+        Rando_EnemyMarkerMarkDrawFailed(k);
+    }
+    if (g_config.enemy_drop_marker != kEnemyDropMarker_Generic &&
+        Rando_EnemyMarkerFindAllocated(k, kRandoEnemyMarkerKind_Carrier) != NULL &&
+        !Rando_EnemyMarkerDrawFailedThisFrame(k))
+      continue;
+    enemy_glint_mask |= (uint16)(1u << k);
+  }
+
+  // add-rando-bonk-sanity — live DORMANT bonk sprites whose check is still
+  // uncollected join the same glint mask (drawn at the sprite's position by
+  // the shared pass below). Rando_BonkCheckLocForWake is the same
+  // axis+placed+unchecked resolver the wake hook uses, so the cue and the
+  // grant can't drift; it returns 0xFFFF for axis-off / checked / unknown
+  // sprites, keeping this fully inert otherwise. (As-built refinement of
+  // design D7: sourcing coords from the spawned sprites needs no
+  // block->coordinate math and only marks what is actually on screen.)
+  for (int k = 0; k < 16; k++) {
+    if (sprite_state[k] == 0 || sprite_E[k] == 0) continue;  // live + dormant
+    if (sprite_type[k] != 0x79 && sprite_type[k] != 0xac) continue;
+    if (Rando_BonkCheckLocForWake((uint8)overworld_area_index,
+                                  sprite_N_word[k], sprite_type[k]) == 0xFFFFu)
+      continue;
+    enemy_glint_mask |= (uint16)(1u << k);
+  }
+  if (enemy_glint_mask == 0)
+    return;
+
+  // Reserve a sprite sub-palette row no on-screen sprite uses (NMI golds it);
+  // seed with Link's equipment rows 3/5/7 — Link draws after us, so the scan
+  // can't see his rows (same fix as the dungeon glint picker, dungeon.c
+  // RandoPot_DrawGoldOverlay).
+  uint8 used = (1u << 3) | (1u << 5) | (1u << 7);
+  for (int i = 0; i < 128; i++) {
+    if (oam_buf[i].y != 0xf0)
+      used |= 1u << ((oam_buf[i].flags >> 1) & 7);
+  }
+  int prow = -1;
+  for (int r = 0; r < 8; r++) {
+    if (!(used & (1u << r))) { prow = r; break; }
+  }
+  if (prow < 0)
+    return;
+
+  int bob = (frame_counter >> 3) & 3;
+  // OBJ priority 3: tree canopies (and similar walk-behind scenery) are
+  // high-priority BG tiles that composite ABOVE priority-2 sprites (that is
+  // why Link vanishes under a canopy). The glint drew correctly for two
+  // playtest rounds and was occluded by the canopy every time; a check cue
+  // must never hide behind the very object it marks.
+  uint8 flags = (uint8)((prow << 1) | 0x30);
+  for (int k = 0; k < 16; k++) {
+    if (!(enemy_glint_mask & (uint16)(1u << k)))
+      continue;
+    int sx = (uint16)(Sprite_GetX(k) - BG2HOFS_copy2);
+    int sy = (uint16)(Sprite_GetY(k) - BG2VOFS_copy2) - sprite_z[k];
+    int gx = sx + 4;
+    int gy = sy + Rando_EnemyMarkerCarrierGlintDy(k) - bob;
+    if (gx < 0 || gx > 248 || gy < 0 || gy > 216)
+      continue;
+    if (!Rando_EnemyMarkerAllocateGlintOam())
+      continue;
+    SetOamHelper0(GetOamCurPtr(), (uint16)gx, (uint16)gy, 0x0F, flags, 0);
+    Rando_OverlayPaletteRequestGold((uint8)prow);
+    g_rando_glint_upload_frames = 2;  // private sparkle tile -> char 0x0F
+  }
+}
+
+// add-rando-grass-rock-shuffle — capped nearest-N in-world "check" glint over
+// unchecked+active terrain objects. Mirrors Rando_DrawOverworldEnemyMarkerGlints
+// (runs after Sprite_Main, in the BG-scroll-copy window). The collector caps at
+// the nearest kRandoTerrainGlintCap so a 159-object screen never overruns OAM.
+void Rando_DrawTerrainGlints(void) {
+  if (player_is_indoors || !(enhanced_features1 & kFeatures1_RandomizerActive))
+    return;
+  uint16 pos_list[kRandoTerrainGlintCap];
+  int n = Rando_CollectTerrainGlints(pos_list, kRandoTerrainGlintCap);
+  if (n == 0)
+    return;
+  // Reserve a sprite sub-palette row no on-screen sprite uses (NMI golds it);
+  // seed with Link's equipment rows 3/5/7 — Link draws after us, so the scan
+  // can't see his rows (sword/shield land on 3/5). Same scan as the enemy glint.
+  uint8 used = (1u << 3) | (1u << 5) | (1u << 7);
+  for (int i = 0; i < 128; i++) {
+    if (oam_buf[i].y != 0xf0)
+      used |= 1u << ((oam_buf[i].flags >> 1) & 7);
+  }
+  int prow = -1;
+  for (int r = 0; r < 8; r++) {
+    if (!(used & (1u << r))) { prow = r; break; }
+  }
+  if (prow < 0)
+    return;
+  int bob = (frame_counter >> 3) & 3;
+  // OBJ priority 3: tree canopies (and similar walk-behind scenery) are
+  // high-priority BG tiles that composite ABOVE priority-2 sprites (that is
+  // why Link vanishes under a canopy). The glint drew correctly for two
+  // playtest rounds and was occluded by the canopy every time; a check cue
+  // must never hide behind the very object it marks.
+  uint8 flags = (uint8)((prow << 1) | 0x30);
+  int32 basex = (int32)overworld_offset_base_x << 3;
+  int32 basey = (int32)overworld_offset_base_y;
+  bool drew = false;
+  for (int i = 0; i < n; i++) {
+    uint16 pos = pos_list[i];
+    int col = (pos & 0x7e) >> 1, row = pos >> 7;
+    // Object world coords -> screen (world minus camera, the Sprite_PrepOamCoord
+    // convention). Center the 8x8 glint on the 16x16 object, less the bob.
+    int sx = (uint16)((basex + col * 16) - BG2HOFS_copy2);
+    int sy = (uint16)((basey + row * 16) - BG2VOFS_copy2);
+    int gx = sx + 4;
+    int gy = sy + 2 - bob;
+    if (gx < 0 || gx > 248 || gy < 0 || gy > 216)
+      continue;
+    if (!Rando_EnemyMarkerAllocateGlintOam())
+      continue;
+    SetOamHelper0(GetOamCurPtr(), (uint16)gx, (uint16)gy, 0x0F, flags, 0);
+    drew = true;
+  }
+  if (drew) {
+    Rando_OverlayPaletteRequestGold((uint8)prow);
+    g_rando_glint_upload_frames = 2;  // private sparkle tile -> char 0x0F
+  }
+}
+
+bool Rando_EnemyDropMarkerNeedsOverlay(int k) {
+  return Rando_GetEnemyDropPickupMarkerInfo(k, NULL) ||
+         Rando_GetEnemyDropCarrierMarkerInfo(k, NULL);
+}
+
+bool Rando_TryDrawEnemyDropMarkerOverlay(int k) {
+  if (Rando_GetEnemyDropPickupMarkerInfo(k, NULL)) {
+    const RandoEnemyMarkerCandidate *c =
+        Rando_EnemyMarkerFindAllocated(k, kRandoEnemyMarkerKind_Pickup);
+    if (Rando_DrawEnemyMarkerIconAt(k, c))
+      return true;
+    if (Rando_EnemyMarkerFindCandidate(k, kRandoEnemyMarkerKind_Pickup) != NULL)
+      Rando_EnemyMarkerMarkDrawFailed(k);
+    return false;
+  }
+
+  if (!Rando_GetEnemyDropCarrierMarkerInfo(k, NULL) ||
+      g_config.enemy_drop_marker == kEnemyDropMarker_Generic)
+    return false;
+  const RandoEnemyMarkerCandidate *c =
+      Rando_EnemyMarkerFindAllocated(k, kRandoEnemyMarkerKind_Carrier);
+  if (Rando_DrawEnemyMarkerIconAt(k, c))
+    return true;
+  if (Rando_EnemyMarkerFindCandidate(k, kRandoEnemyMarkerKind_Carrier) != NULL)
+    Rando_EnemyMarkerMarkDrawFailed(k);
+  return false;
+}
+
+int Rando_EnemyMarkerAllocatorSelfCheck(void) {
+  if (!Rando_EnemyDropCarrierLiveState(9) ||
+      !Rando_EnemyDropCarrierLiveState(11) ||
+      Rando_EnemyDropCarrierLiveState(0) ||
+      Rando_EnemyDropCarrierLiveState(10) ||
+      Rando_EnemyDropCarrierLiveState(6))
+    return 12;
+  {
+    uint8 saved_nmi_disable_core_updates = nmi_disable_core_updates;
+    nmi_disable_core_updates = 4;
+    bool blocked_during_transition = !Rando_EnemyMarkerIconScratchAvailable();
+    nmi_disable_core_updates = 0;
+    bool available_during_gameplay = Rando_EnemyMarkerIconScratchAvailable();
+    nmi_disable_core_updates = saved_nmi_disable_core_updates;
+    if (!blocked_during_transition) return 16;
+    if (!available_during_gameplay) return 17;
+  }
+  {
+    uint8 saved_type = sprite_type[0];
+    sprite_type[0] = 0x08;
+    if (Rando_EnemyMarkerCarrierVisualTopOffset(0) != 0 ||
+        Rando_EnemyMarkerCarrierGlintDy(0) != -10)
+      return 13;
+    sprite_type[0] = 0x51;
+    if (Rando_EnemyMarkerCarrierVisualTopOffset(0) != -16 ||
+        Rando_EnemyMarkerCarrierGlintDy(0) != -26)
+      return 14;
+    sprite_type[0] = 0x11;
+    if (Rando_EnemyMarkerCarrierVisualTopOffset(0) != -16)
+      return 15;
+    sprite_type[0] = saved_type;
+  }
+
+  RandoEnemyMarkerCandidate c[6];
+  memset(c, 0, sizeof(c));
+  c[0].source.kind = kRandoEnemyMarkerKind_Carrier; c[0].source.loc_id = 20; c[0].source.source_id = 1;
+  c[1].source.kind = kRandoEnemyMarkerKind_Pickup;  c[1].source.loc_id = 30; c[1].source.source_id = 2;
+  c[0].has_icon = c[1].has_icon = true;
+  c[0].key = (RandoEnemyMarkerIconKey){0x24, kRandoEnemyMarkerFootprint_8x16, 0x30, kRandoEnemyMarkerPalette_FixedScene, 0, 0};
+  c[1].key = (RandoEnemyMarkerIconKey){0x25, kRandoEnemyMarkerFootprint_8x16, 0x30, kRandoEnemyMarkerPalette_FixedScene, 0, 0};
+  Rando_EnemyMarkerSortCandidates(c, 2);
+  if (c[0].source.kind != kRandoEnemyMarkerKind_Pickup)
+    return 1;
+  Rando_EnemyMarkerAllocateCandidates(c, 2, true, false, 0);
+  if (c[0].slot != 0 || c[1].slot != 1)
+    return 2;
+
+  memset(c, 0, sizeof(c));
+  for (int i = 0; i < 5; i++) {
+    c[i].source.kind = kRandoEnemyMarkerKind_Carrier;
+    c[i].source.loc_id = (uint16)(10 + i);
+    c[i].has_icon = true;
+    c[i].key = (RandoEnemyMarkerIconKey){(uint8)(0x20 + i), kRandoEnemyMarkerFootprint_8x16, 0x30, kRandoEnemyMarkerPalette_FixedScene, 0, 0};
+  }
+  Rando_EnemyMarkerAllocateCandidates(c, 5, true, false, 0);
+  if (c[0].slot != 0 || c[1].slot != 1 || c[2].slot != 2 ||
+      c[3].slot != 3 || c[4].slot != kRandoEnemyMarkerNoSlot)
+    return 3;
+
+  c[1].key = c[0].key;
+  Rando_EnemyMarkerAllocateCandidates(c, 2, true, false, 0);
+  if (c[0].slot != 0 || c[1].slot != 0)
+    return 4;
+
+  c[0].key.palette_policy = kRandoEnemyMarkerPalette_Unsupported;
+  c[1].key.palette_policy = kRandoEnemyMarkerPalette_FixedScene;
+  Rando_EnemyMarkerAllocateCandidates(c, 2, true, false, 0);
+  if (c[0].slot != kRandoEnemyMarkerNoSlot || c[1].slot != 0)
+    return 5;
+
+  Rando_EnemyMarkerAllocateCandidates(c, 2, false, false, 0);
+  if (c[0].slot != kRandoEnemyMarkerNoSlot || c[1].slot != kRandoEnemyMarkerNoSlot)
+    return 6;
+  {
+    uint8 saved_fail_frame = s_enemy_marker_draw_failed_frame;
+    uint16 saved_fail_mask = s_enemy_marker_draw_failed_mask;
+    Rando_EnemyMarkerMarkDrawFailed(3);
+    if (!Rando_EnemyMarkerDrawFailedThisFrame(3) ||
+        Rando_EnemyMarkerDrawFailedThisFrame(4))
+      return 7;
+    s_enemy_marker_draw_failed_frame = (uint8)(frame_counter - 1);
+    if (Rando_EnemyMarkerDrawFailedThisFrame(3))
+      return 8;
+    s_enemy_marker_draw_failed_frame = saved_fail_frame;
+    s_enemy_marker_draw_failed_mask = saved_fail_mask;
+  }
+  memset(c, 0, sizeof(c));
+  for (int i = 0; i < 2; i++) {
+    c[i].source.kind = kRandoEnemyMarkerKind_Carrier;
+    c[i].source.loc_id = (uint16)(40 + i);
+    c[i].has_icon = true;
+    c[i].key = (RandoEnemyMarkerIconKey){kRandoCustomGfx_HalfMagic, kRandoEnemyMarkerFootprint_16x16, 0x30, kRandoEnemyMarkerPalette_Dynamic, 0, kRandoCustomGfx_HalfMagic};
+  }
+  Rando_EnemyMarkerAllocateCandidates(c, 2, true, false, 0);
+  if (c[0].slot != 0 || c[1].slot != 0 ||
+      c[0].palette_row == 0xFF || c[1].palette_row != c[0].palette_row)
+    return 9;
+  if (g_asset_ptrs[64] != NULL) {
+    uint16 saved_owner = g_recv_item_slot_owner;
+    uint8 saved_recv[0x80];
+    uint8 tiles[0x80];
+    memcpy(saved_recv, &g_ram[0xbd40], sizeof(saved_recv));
+    RandoEnemyMarkerIconKey key = {
+      0x0f, kRandoEnemyMarkerFootprint_8x16, 0x34,
+      kRandoEnemyMarkerPalette_FixedScene, 2, 0
+    };
+    if (!Rando_EnemyMarkerBuildIconTiles(&key, tiles))
+      return 10;
+    if (g_recv_item_slot_owner != saved_owner ||
+        memcmp(saved_recv, &g_ram[0xbd40], sizeof(saved_recv)) != 0)
+      return 11;
+  }
+  if (Rando_EnemyMarkerScratchSlotsForOamEntry(0xE0, 1, 2) != 1 ||
+      Rando_EnemyMarkerScratchSlotsForOamEntry(0xF4, 1, 0) != 2 ||
+      Rando_EnemyMarkerScratchSlotsForOamEntry(0xE0, 0, 2) != 0 ||
+      Rando_EnemyMarkerScratchSlotsForOamEntry(0xFF, 1, 2) != 9)
+    return 18;
+  memset(c, 0, sizeof(c));
+  for (int i = 0; i < 2; i++) {
+    c[i].has_icon = true;
+    c[i].key = (RandoEnemyMarkerIconKey){(uint8)(0x20 + i),
+        kRandoEnemyMarkerFootprint_8x16, 0x30,
+        kRandoEnemyMarkerPalette_FixedScene, 0, 0};
+  }
+  Rando_EnemyMarkerAllocateCandidates(c, 2, true, false, 1);
+  if (c[0].slot != 1 || c[1].slot != 2)
+    return 19;
+  {
+    uint8 raw[4 * 24] = {0};
+    uint8 vram[4 * 32];
+    memset(vram, 0xA5, sizeof(vram));
+    raw[0] = raw[16] = 0x80;
+    Rando_EnemyMarkerConvertIconSlot(0x10, vram, raw);
+    bool ok = vram[0] == 0x80 && vram[1] == 0 &&
+              vram[16] == 0x80 && vram[17] == 0;
+    if (!ok)
+      return 20;
+  }
+  {
+    uint8 saved_sort = sort_sprites_setting;
+    bool saved_plan_active = s_enemy_marker_overlay_plan_active;
+    uint8 saved_reserved[kRandoEnemyMarkerOverlayOamSlots];
+    uint8 saved_extra[kRandoEnemyMarkerOverlayOamSlots];
+    memcpy(saved_reserved, s_enemy_marker_reserved_oam, sizeof(saved_reserved));
+    memcpy(saved_extra, s_enemy_marker_extra_oam, sizeof(saved_extra));
+    uint8 saved_reserved_count = s_enemy_marker_reserved_count;
+    uint8 saved_reserved_next = s_enemy_marker_reserved_next;
+    uint8 saved_extra_count = s_enemy_marker_extra_count;
+    uint8 saved_extra_next = s_enemy_marker_extra_next;
+    uint16 saved_oam_cur = oam_cur_ptr;
+    uint16 saved_oam_ext = oam_ext_cur_ptr;
+    OamEnt saved_oam[128];
+    uint8 saved_ext[128];
+    memcpy(saved_oam, oam_buf, sizeof(saved_oam));
+    memcpy(saved_ext, bytewise_extended_oam, sizeof(saved_ext));
+    uint16 saved_regions[6];
+    memcpy(saved_regions, oam_region_base, sizeof(saved_regions));
+    sort_sprites_setting = 1;
+    Oam_ResetRegionBases();
+    // F12 regression: eight room-0x0A8 Stalfos leave four entries in region D,
+    // while unused region E has eight. Reserve eight physical one-entry markers;
+    // four 8x16 icons may each upgrade with one extra E entry, leaving four
+    // reserved glints. Never trust Region E's allocator base: scan actual OAM.
+    for (int i = 0; i < 128; i++)
+      oam_buf[i].y = 0;
+    for (uint8 i = 0xB0 / 4; i < 0xC0 / 4; i++)
+      oam_buf[i].y = 0xF0;
+    for (uint8 i = 0x120 / 4; i < 0x140 / 4; i++)
+      oam_buf[i].y = 0xF0;
+    oam_region_base[4] = 0x120;  // deliberately uninformative
+    Rando_EnemyMarkerBeginOverlay(8);
+    bool exact_ok = true;
+    for (uint8 i = 0; i < 4; i++) {
+      uint8 slots[4];
+      if (!Rando_EnemyMarkerClaimExactOam(2, slots) ||
+          slots[0] != (uint8)(0xB0 / 4 + i) ||
+          slots[1] != (uint8)(0x130 / 4 + i))
+        exact_ok = false;
+    }
+    uint8 slots[4];
+    bool fifth_exact = Rando_EnemyMarkerClaimExactOam(2, slots);
+    bool fallback_ok = true;
+    for (uint8 i = 0; i < 4; i++) {
+      if (!Rando_EnemyMarkerClaimFallbackOam() ||
+          oam_cur_ptr != (uint16)(0x920 + i * 4))
+        fallback_ok = false;
+    }
+    bool ninth_marker = Rando_EnemyMarkerClaimFallbackOam();
+    sort_sprites_setting = saved_sort;
+    s_enemy_marker_overlay_plan_active = saved_plan_active;
+    memcpy(s_enemy_marker_reserved_oam, saved_reserved, sizeof(saved_reserved));
+    memcpy(s_enemy_marker_extra_oam, saved_extra, sizeof(saved_extra));
+    s_enemy_marker_reserved_count = saved_reserved_count;
+    s_enemy_marker_reserved_next = saved_reserved_next;
+    s_enemy_marker_extra_count = saved_extra_count;
+    s_enemy_marker_extra_next = saved_extra_next;
+    oam_cur_ptr = saved_oam_cur;
+    oam_ext_cur_ptr = saved_oam_ext;
+    memcpy(oam_buf, saved_oam, sizeof(saved_oam));
+    memcpy(bytewise_extended_oam, saved_ext, sizeof(saved_ext));
+    memcpy(oam_region_base, saved_regions, sizeof(saved_regions));
+    if (!exact_ok || fifth_exact || !fallback_ok || ninth_marker)
+      return 21;
+  }
+  return 0;
+}
+
+// add-rando-trap-catalog — draw a trap-cucco as a single 16x16 large OAM entry
+// from the shared recv-item slot (custom cucco tile + palette), so the Cucco
+// trap's flock renders in ANY area instead of only the two that load the cucco
+// sheet into sprite slot 3. Mirrors Sprite_PrepAndDrawSingleLargeNoPrep exactly
+// (one large entry + optional shadow, same per-sprite OAM budget) but with a
+// fixed charnum (0x24) and palette 3; the sprite's own priority + H-flip (from
+// info.flags, set by the x_vel facing code in Sprite_0B_Cucco) are preserved.
+void Rando_DrawTrapCucco(int k) {
+  if (!Rando_CanDrawRecvItemSlot())
+    return;
+  PrepOamCoordsRet info;
+  if (Sprite_PrepOamCoordOrDoubleRet(k, &info))
+    return;
+  Rando_EnsureRecvItemSlotGfx(kRandoCustomGfx_Cucco);  // load tile + palette 3 on demand
+  OamEnt *oam = GetOamCurPtr();
+  oam->x = info.x;
+  if (Sprite_KeepsOamY(info.y)) {
+    oam->y = Sprite_OamY(info.y);
+    oam->charnum = 0x24;
+    // Force palette 3 AND name-table 1: clear attr bits 0-3 then set palette 3.
+    // Bit 0 is the OAM tile high bit (ppu.c: oam1&0x100 -> objTileAdr2); the cucco's
+    // own flags have it SET (its slot-3 sheet lives in table 2), but the recv-item
+    // slot is DMA'd to objTileAdr1 (VRAM 0x4240 = char 0x24), so it must be 0 — the
+    // field-item draw relies on exactly this (its oam_flags bit0==0). Priority/flip
+    // (bits 4-7) are preserved.
+    oam->flags = (uint8)((info.flags & ~0x0F) | 0x06);
+  }
+  bytewise_extended_oam[oam - oam_buf] = 2 | ((info.x >= 256) ? 1 : 0);  // 2 = large (16x16)
+  if (sprite_flags3[k] & 0x10)
+    SpriteDraw_Shadow(k, &info);
 }
 
 void SpriteDraw_Shadow_custom(int k, PrepOamCoordsRet *info, uint8 a) {  // 86dc5c
@@ -1525,13 +3913,13 @@ void SpriteDraw_Shadow_custom(int k, PrepOamCoordsRet *info, uint8 a) {  // 86dc
     return;
   y -= BG2VOFS_copy2;
   info->y = y;
-  if ((uint16)(y + 0x10) >= 0x100)
+  if (!Sprite_KeepsOamY(y))
     return;
   OamEnt *oam = GetOamCurPtr() + (sprite_flags2[k] & 0x1f);
   if (sprite_flags3[k] & 0x20) {
-    SetOamHelper1(oam, info->x, y + 1, 0x38, (info->flags & 0x30) | 8, 0);
+    SetOamHelper1(oam, info->x, Sprite_OamY(y + 1), 0x38, (info->flags & 0x30) | 8, 0);
   } else {
-    SetOamHelper1(oam, info->x, y, 0x6c, (info->flags & 0x30) | 8, 2);
+    SetOamHelper1(oam, info->x, Sprite_OamY(y), 0x6c, (info->flags & 0x30) | 8, 2);
   }
 }
 
@@ -1545,8 +3933,8 @@ void SpriteDraw_SingleSmall(int k) {  // 86dcef
     return;
   OamEnt *oam = GetOamCurPtr();
   oam->x = info.x;
-  if ((uint16)(info.y + 0x10) < 0x100) {
-    oam->y = info.y;
+  if (Sprite_KeepsOamY(info.y)) {
+    oam->y = Sprite_OamY(info.y);
     oam->charnum = kSprite_PrepAndDrawSingleLarge_Tab2[kSprite_PrepAndDrawSingleLarge_Tab1[sprite_type[k]] + sprite_graphics[k]];
     oam->flags = info.flags;
   }
@@ -1639,7 +4027,7 @@ void CarriedSprite_CheckForThrow(int k) {  // 86df6d
   sprite_state[k] = sprite_unk4[k];
   sprite_z_vel[k] = 0;
   sprite_unk3[k] = 0;
-  sprite_flags3[k] = sprite_flags3[k] & ~0x10 | kSpriteInit_Flags3[sprite_type[k]] & 0x10;
+  sprite_flags3[k] = (sprite_flags3[k] & ~0x10) | (MODS_U8(kSpriteInit_Flags3, 0x8db359)[sprite_type[k]] & 0x10);
   int j = link_direction_facing >> 1;
   sprite_x_vel[k] = kSpriteHeld_Throw_Xvel[j];
   sprite_y_vel[k] = kSpriteHeld_Throw_Yvel[j];
@@ -1792,6 +4180,22 @@ void SpriteStunned_Main_Func1(int k) {  // 86e2ba
   }
 }
 
+// Resolve a prize-pack event even when an ordinary enemy check replaces its
+// physical pickup. Advancing the pack cursor and applying drop shuffle keeps
+// later drops deterministic; only PrepareEnemyDrop is suppressed.
+static void ResolvePrizeDrop(int k, uint8 prize, uint8 slot,
+                             bool suppress_pickup) {
+  prize = prize * 8 | prizes_arr1[slot];
+  prizes_arr1[slot] = (prizes_arr1[slot] + 1) & 7;
+  uint8 shuffled = DropShuffle_Lookup(prize);
+  if (!suppress_pickup) {
+    PrepareEnemyDrop(k, kPrizeItems[shuffled]);
+    return;
+  }
+  sprite_state[k] = 0;
+  SpriteDeath_Func4(k);
+}
+
 void SpriteModule_Poof(int k) {  // 86e393
   static const int8 kSpritePoof_X[16] = {-6, 10, 1, 13, -6, 10, 1, 13, -7, 4, -5, 6, -1, 1, -2, 0};
   static const int8 kSpritePoof_Y[16] = {-6, -4, 10, 9, -6, -4, 10, 9, -8, -10, 4, 3, -1, -2, 0, 1};
@@ -1809,7 +4213,10 @@ void SpriteModule_Poof(int k) {  // 86e393
       sprite_ignore_projectile[k] = 0;
     } else {
       if (sprite_die_action[k] == 0) {
-        ForcePrizeDrop(k, 2, 2);
+        RandoGrantResult grant_result = Rando_TryGrantEnemyCheck(k);
+        if (Rando_GrantResultIsBlocked(grant_result))
+          return;
+        ResolvePrizeDrop(k, 2, 2, Rando_GrantResultIsTerminal(grant_result));
       } else {
         Sprite_DoTheDeath(k);
       }
@@ -1842,8 +4249,11 @@ bool Sprite_PrepOamCoordOrDoubleRet(int k, PrepOamCoordsRet *ret) {  // 86e41e
   ret->flags = sprite_oam_flags[k] ^ sprite_obj_prio[k];
   ret->r4 = 0;
   int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
+  // The widened range is around the WIDE picture, which the fixed camera can
+  // draw beside the game's camera.
+  uint16 xp = x + ZeldaWidePictureShift();
 
-  if ((uint16)(x + 0x40 + xt) >= (0x170 + xt * 2) ||
+  if ((uint16)(xp + 0x40 + xt) >= (0x170 + xt * 2) ||
       (uint16)(y + 0x40) >= 0x170 && !(sprite_flags4[k] & 0x20)) {
     sprite_pause[k]++;
     if (!(sprite_defl_bits[k] & 0x80))
@@ -2052,7 +4462,7 @@ uint8 Sprite_GetTileAttribute(int k, uint16 *x, uint16 y) {  // 86e883
 bool Entity_CheckSlopedTileCollision(uint16 x, uint16 y) {  // 86e8fe
   uint8 a = y & 7;
   uint8 r6 = sprite_tiletype - 0x10;
-  uint8 b = kSlopedTile[r6 * 8 + (x & 7)];
+  uint8 b = kSlopedTile[(uint8)(r6 * 8 + (x & 7))];
   return (r6 < 2) ? (b >= a) : (a >= b);
 }
 
@@ -2293,11 +4703,18 @@ void Sprite_CalculateSwordDamage(int k) {  // 86ed3f
 void Sprite_ApplyCalculatedDamage(int k, int a) {  // 86ed89
   if ((sprite_flags3[k] & 0x40) || sprite_type[k] >= 0xD8)
     return;
-  uint8 dmg = kEnemyDamages[damage_type_determiner * 8 | enemy_damage_data[sprite_type[k] * 16 | damage_type_determiner]];
+  uint8 dmg = MODS_U8(kEnemyDamages, 0x8db8f1)[damage_type_determiner * 8 | enemy_damage_data[sprite_type[k] * 16 | damage_type_determiner]];
   Sprite_GiveDamage(k, dmg, a);
 }
 
 void Sprite_GiveDamage(int k, uint8 dmg, uint8 r0_hit_timer) {  // 86edc5
+  // Randomizer crystal requirements make the real Ganon (and his D7 dispatch
+  // variant) invulnerable until the configured threshold is met. Keeping the
+  // gate here covers every sword, swordless-hammer, and projectile damage path
+  // before any pending damage or hit-flash state is installed.
+  if ((sprite_type[k] == 0xd6 || sprite_type[k] == 0xd7) &&
+      !Rando_GoalAllowsGanonDamage())
+    dmg = 0;
   if (dmg == 249) {
     Sprite_Func18(k, 0xe3);
     return;
@@ -2651,7 +5068,13 @@ uint8 Sprite_CheckDamageFromLink(int k) {  // 86f2b4
     return kCheckDamageFromPlayer_Carry | kCheckDamageFromPlayer_Ne;
 
   if (link_item_in_hand & 10) {
-    if (sprite_type[k] >= 0xd6)
+    // Swordless (ALTTPR setSwordlessMode / HammerableGanon, asm $86F2EA): with
+    // the hammer in hand, sprites >= 0xd6 (Ganon 0xd6/0xd7) are normally immune
+    // to melee — Ganon takes damage only via the sword's special path. Under
+    // swordless the threshold rises to 0xd8 so the hammer can knock Ganon through
+    // his phase thresholds (silver arrows still finish him). Gated, so non-
+    // swordless behavior is byte-identical.
+    if (sprite_type[k] >= (Rando_IsSwordlessActive() ? 0xd8 : 0xd6))
       return 0;
     if (sprite_state[k] == 11 && sprite_unk5[k] != 0) {
       sprite_state[k] = 2;
@@ -2937,8 +5360,12 @@ void SpriteModule_Die(int k) {  // 86f8a2
   SpriteDeath_MainEx(k, false);
 }
 
-void Sprite_DoTheDeath(int k) {  // 86f923
+bool Sprite_DoTheDeath(int k) {  // 86f923
   uint8 type = sprite_type[k];
+  RandoGrantResult grant_result = Rando_TryGrantEnemyCheck(k);
+  if (Rando_GrantResultIsBlocked(grant_result))
+    return false;
+  bool granted_enemy_check = Rando_GrantResultIsTerminal(grant_result);
   // This is how Vitreous knows whether to come out of his slime pool
   if (type == 0xBE)
     sprite_G[0]--;
@@ -2952,7 +5379,7 @@ void Sprite_DoTheDeath(int k) {  // 86f923
       sprite_flags3[k] = 0xf0;
     }
     sprite_head_dir[k]++;
-    return;
+    return true;
   }
 
   // Resets the music in the village when the crazy green guards are killed.
@@ -2966,7 +5393,7 @@ void Sprite_DoTheDeath(int k) {  // 86f923
     uint8 arg = (drop_item == 1) ? 0xe4 : // small key, big key or rupee
                 (drop_item == 3) ? 0xd9 : 0xe5;
     PrepareEnemyDrop(k, arg);
-    return;
+    return true;
   }
 
   uint8 prize = sprite_flags5[k] & 0xf;
@@ -2976,24 +5403,35 @@ void Sprite_DoTheDeath(int k) {  // 86f923
       if (++luck_kill_counter >= 10)
         item_drop_luck = 0;
       if (luck == 1) {
-        ForcePrizeDrop(k, prize, 1);
-        return;
+        ResolvePrizeDrop(k, prize, 1, granted_enemy_check);
+        return true;
       }
     } else {
       if (!(GetRandomNumber() & kPrizeMasks[prize])) {
-        ForcePrizeDrop(k, prize, prize);
-        return;
+        ResolvePrizeDrop(k, prize, prize, granted_enemy_check);
+        return true;
       }
     }
   }
   sprite_state[k] = 0;
   SpriteDeath_Func4(k);
+  return true;
+}
+
+// Accessor over the vanilla prize-drop table (kPrizeItems[56], the 7-pack ×
+// 8-slot enemy-drop roster). Single source of truth for the drop-pool shuffle:
+// the rando layer (shuffle_drops.c heart-floor guarantee + spoiler drop_tables)
+// must NOT embed a copy of this ROM-derived table (the no-embedded-data guard
+// scans src/rando/), so it reads each entry through here instead. Out-of-range
+// returns 0.
+uint8 Sprite_VanillaPrizeItem(uint8 source_index) {
+  if (source_index >= 56) return 0;
+  return kPrizeItems[source_index];
 }
 
 void ForcePrizeDrop(int k, uint8 prize, uint8 slot) {  // 86f9bc
-  prize = prize * 8 | prizes_arr1[slot];
-  prizes_arr1[slot] = (prizes_arr1[slot] + 1) & 7;
-  PrepareEnemyDrop(k, kPrizeItems[prize]);
+  // Public legacy path used by non-check rewards such as Toppo's prize.
+  ResolvePrizeDrop(k, prize, slot, false);
 }
 
 void PrepareEnemyDrop(int k, uint8 item) {  // 86f9d1
@@ -3018,8 +5456,30 @@ void PrepareEnemyDrop(int k, uint8 item) {  // 86f9d1
 }
 
 void SpriteDeath_Func4(int k) {  // 86fa25
-  if (sprite_type[k] == 0xa2 && Sprite_CheckIfScreenIsClear())
+  if (sprite_type[k] == 0xa2 && Sprite_CheckIfScreenIsClear()) {
+    RandoGrantResult result = Rando_TryGrantBossEnemyCheckForCurrentEventResult();
+    if (Rando_GrantResultIsBlocked(result)) {
+      // Keep the completed enemy in the death handler so the event and falling
+      // prize are retried after capacity becomes available.
+      //
+      // KNOWN LIMITATION (audited 2026-07-26, deliberately not restructured):
+      // this re-enters Sprite_DoTheDeath from the top via SpriteActive_Main's
+      // `sprite_delay_main == 0` arm, so the generic prize roll runs AGAIN. If
+      // that roll takes its ResolvePrizeDrop/PrepareEnemyDrop branch it rewrites
+      // sprite_type[k], and this `0xa2` arm -- the only thing that spawns
+      // Kholdstare's boss prize -- is never reached again, losing the prize even
+      // after the block clears. Making the retry resume at this branch instead
+      // of the top needs per-sprite pending state in a boss death path that
+      // cannot be exercised by any automated check, so it is recorded rather
+      // than patched blind. Reachability is narrow: it needs a transient
+      // refusal (a potion with no empty bottle) on Kholdstare's enemy check --
+      // the PERMANENT refusal that made this likely is gone as of 57e72dc1.
+      sprite_state[k] = 6;
+      sprite_delay_main[k] = 0;
+      return;
+    }
     Ancilla_SpawnFallingPrize(4);
+  }
   Sprite_ManuallySetDeathFlagUW(k);
   num_sprites_killed++;
   if (sprite_type[k] == 0x40) {
@@ -3053,8 +5513,7 @@ void SpriteDeath_DrawPoof(int k) {  // 86fb2a
 void SpriteModule_Fall2(int k) {  // 86fbea
   uint8 delay = sprite_delay_main[k];
   if (!delay) {
-    sprite_state[k] = 0;
-    Sprite_ManuallySetDeathFlagUW(k);
+    Rando_ApplyFallGrantOutcome(k, Sprite_ManuallySetDeathFlagUW(k));
     return;
   }
 
@@ -3123,7 +5582,10 @@ void SpriteDraw_FallingHumanoid(int k) {  // 86fe5b
   Sprite_CorrectOamEntries(k, nn, 0xff);
 }
 
-void Sprite_CorrectOamEntries(int k, int n, uint8 islarge) {  // 86febc
+// The tiles a sprite placed itself get the x bit of their screen position,
+// and those off the screen are hidden as SetOamHelper0 hides them: with the
+// WIDE picture moved up by `rows`, the tiles of these rows are kept.
+static void Sprite_CorrectOamEntriesWithRows(int k, int n, uint8 islarge, int rows) {
   OamEnt *oam = GetOamCurPtr();
   uint8 *extp = &g_ram[oam_ext_cur_ptr];
   uint16 spr_x = Sprite_GetX(k);
@@ -3135,9 +5597,21 @@ void Sprite_CorrectOamEntries(int k, int n, uint8 islarge) {  // 86febc
     uint16 y = spr_y + (int8)(oam->y - scrolly);
     uint8 ext = sign8(islarge) ? (*extp & 2) : islarge;
     *extp = ext + ((uint16)(x - BG2HOFS_copy2) >= 0x100);
-    if ((uint16)(y + 0x10 - BG2VOFS_copy2) >= 0x100)
+    if ((uint16)(y + 0x10 + rows - BG2VOFS_copy2) >= 0x100)
       oam->y = 0xf0;
+    else if (oam->y == 0xf0 && rows)
+      oam->y = 0xf1;
   } while (oam++, extp++, --n >= 0);
+}
+
+void Sprite_CorrectOamEntries(int k, int n, uint8 islarge) {  // 86febc
+  Sprite_CorrectOamEntriesWithRows(k, n, islarge, g_wide_picture_rows);
+}
+
+// For a sprite whose logic reads its tiles back: they stay those of the
+// game's screen whatever the picture shows.
+void Sprite_CorrectOamEntriesOnScreen(int k, int n, uint8 islarge) {
+  Sprite_CorrectOamEntriesWithRows(k, n, islarge, 0);
 }
 
 bool Sprite_ReturnIfRecoiling(int k) {  // 86ff78
@@ -3190,6 +5664,12 @@ void Sprite_SetSpawnedCoordinates(int k, SpriteSpawnInfo *info) {  // 89ae64
 }
 
 bool Sprite_CheckIfScreenIsClear() {  // 89af32
+  // add-enemy-souls — kill-gate hold: sprites this room's load suppressed count
+  // as NOT killed (the loop below only sees live slots, so an empty room would
+  // otherwise open kill-gated doors/chests for free). The gate releases when
+  // the player returns with the soul(s) and clears the room for real.
+  if (Souls_RoomSuppressedCount())
+    return false;
   for (int i = 15; i >= 0; i--) {
     if (sprite_state[i] && !(sprite_flags4[i] & 0x40)) {
       uint16 x = Sprite_GetX(i) - BG2HOFS_copy2;
@@ -3202,6 +5682,9 @@ bool Sprite_CheckIfScreenIsClear() {  // 89af32
 }
 
 bool Sprite_CheckIfRoomIsClear() {  // 89af61
+  // add-enemy-souls — same kill-gate hold as Sprite_CheckIfScreenIsClear.
+  if (Souls_RoomSuppressedCount())
+    return false;
   for (int i = 15; i >= 0; i--) {
     if (sprite_state[i] && !(sprite_flags4[i] & 0x40))
       return false;
@@ -3620,34 +6103,160 @@ void Sprite_DisableAll() {  // 89c22f
     garnish_type[k] = 0;
 }
 
+// Boss-shuffle render: find the first room-data entry of `boss_type` in `room`'s
+// sprite list (skipping the sort byte; only real sprites, x < 0xe0). Returns its
+// {y,x} room-tile coords — the boss's spawn ANCHOR for that room. False if absent
+// (e.g. Blind, which TT spawns via a maiden trigger, not a sprite entry).
+static bool BossRoom_FindAnchor(uint16 room, uint8 boss_type, uint8 *out_y, uint8 *out_x) {
+  const uint8 *s = kDungeonSprites + kDungeonSpriteOffs[room];
+  s++;  // skip sort_sprites_setting
+  for (; *s != 0xff; s += 3) {
+    if (s[2] == boss_type && s[1] < 0xe0) { *out_y = s[0]; *out_x = s[1]; return true; }
+  }
+  return false;
+}
+
+// Asset-blob room sprite-data pointer for `room` (a dungeon_room_index value).
+// Exposed for the enemy-shuffle SHEET reshuffle, which walks the room's sprite
+// TYPE list at GFX-sheet-load time (before Dungeon_LoadSprites parses it into
+// sprite_type[]). Mirrors the pointer math used below + in BossRoom_FindAnchor.
+const uint8 *Dungeon_GetRoomSpritePtr(uint16 room) {
+  return kDungeonSprites + kDungeonSpriteOffs[room];
+}
+
 void Dungeon_LoadSprites() {  // 89c290
-  const uint8 *src = kDungeonSprites + kDungeonSpriteOffs[dungeon_room_index2];
+  // Boss-shuffle RENDER (Enemizer pointer-redirect model): if this is a shuffled
+  // boss room, load the ASSIGNED boss's HOME boss-room sprite list (its full
+  // formation + trigger overlords) instead of this room's vanilla-boss entries,
+  // and SHIFT the formation so the boss lands where THIS dungeon's vanilla boss
+  // spawned. Without the shift the boss spawns at the home room's coords, which in
+  // a differently-walled room can land one screen over / behind a wall (the room
+  // looks empty + the boss is unreachable). The shift delta = (this room's vanilla
+  // boss anchor) - (the assigned boss's home-room anchor). Off / not-a-boss-room
+  // (redirect false, delta 0) → byte-identical to vanilla.
+  uint16 src_room = dungeon_room_index2;
+  uint16 home_room;
+  uint8 dest_bt, home_bt;
+  int dy = 0, dx = 0;
+  if (BossShuffle_GetRenderRedirect(dungeon_room_index2, &home_room, &dest_bt, &home_bt)) {
+    src_room = home_room;
+    uint8 ay, ax, by, bx;
+    if (BossRoom_FindAnchor(dungeon_room_index2, dest_bt, &ay, &ax) &&
+        BossRoom_FindAnchor(home_room, home_bt, &by, &bx)) {
+      // The room-data y/x bytes pack the 16px-granular intra-quadrant POSITION in
+      // bits 0-4 only; bits 5-7 carry the floor flag (y bit 7) + sprite subtype
+      // (y bits 5-6, x bits 5-7) — see Dungeon_LoadSingleSprite. So the alignment
+      // delta is a POSITION-FIELD difference, not a raw-byte difference.
+      dy = (int)(ay & 0x1f) - (int)(by & 0x1f);
+      dx = (int)(ax & 0x1f) - (int)(bx & 0x1f);
+    }
+  }
+  const uint8 *src = kDungeonSprites + kDungeonSpriteOffs[src_room];
   byte_7E0FB1 = dungeon_room_index2 >> 3 & 0xfe;
   byte_7E0FB0 = (dungeon_room_index2 & 0xf) << 1;
+  // add-enemy-souls — new room sprite load: restart the suppressed-spawn count
+  // that holds this room's kill-gates shut (souls.h).
+  Souls_ResetRoomSuppressed();
   sort_sprites_setting = *src++;
-  for (int k = 0; *src != 0xff; src += 3)
-    k = Dungeon_LoadSingleSprite(k, src) + 1;
+  uint8 es_slot = 0;  // add-rando-enemy-shuffle — stable per-entry list position
+  for (int k = 0; *src != 0xff; src += 3, es_slot++) {
+    uint8 ent[3] = { src[0], src[1], src[2] };
+    // Shift only real boss sprites; leave overlords (x >= 0xe0) + the 0xe4 control
+    // entry untouched (their bytes are markers, not coordinates). Shift ONLY the
+    // 5-bit position field (bits 0-4) and PRESERVE bits 5-7 per entry, so each
+    // formation member keeps its own floor flag (y bit 7) + subtype (y bits 5-6,
+    // x bits 5-7). Clamp the field to [0,0x1f] — stays in-quadrant, and x can never
+    // reach the 0xe0 overlord range (its preserved high bits are < 0xe0 here).
+    if ((dy || dx) && ent[1] < 0xe0 && ent[2] != 0xe4) {
+      int py = (int)(ent[0] & 0x1f) + dy; if (py < 0) py = 0; else if (py > 0x1f) py = 0x1f;
+      int px = (int)(ent[1] & 0x1f) + dx; if (px < 0) px = 0; else if (px > 0x1f) px = 0x1f;
+      ent[0] = (uint8)((ent[0] & 0xe0) | py);
+      ent[1] = (uint8)((ent[1] & 0xe0) | px);
+    }
+    // add-rando-enemy-shuffle — substitute the sprite TYPE byte (a pure type-byte
+    // swap; the bit-packed y/x bytes above are NOT touched). Skip control (0xe4)
+    // + overlord (x >= 0xe0) markers so we never re-key on a marker. The pick is
+    // a passthrough when the shuffle is off / the type is excluded / no candidate
+    // exists, so vanilla + enemy-shuffle-off play is byte-identical. dungeon_room_
+    // index2 is the room key (matches the boss-shift src_room selection above —
+    // we deliberately key on the ROOM the player is in, not the redirected
+    // src_room, so substitution is per-visited-room deterministic).
+    if (ent[1] < 0xe0 && ent[2] != 0xe4) {
+      ent[2] = EnemyShuffle_PickDungeon(dungeon_room_index2, es_slot, ent[2]);
+    }
+    k = Dungeon_LoadSingleSprite(k, ent, es_slot) + 1;
+  }
 }
 
-void Sprite_ManuallySetDeathFlagUW(int k) {  // 89c2f5
-  if (!player_is_indoors || sprite_defl_bits[k] & 1 || sign8(sprite_N[k]))
-    return;
+bool Sprite_ManuallySetDeathFlagUW(int k) {  // 89c2f5
+  // The randomized enemy transaction applies to every terminal death mode,
+  // including overworld checks and non-persistent underworld actors. Only the
+  // authored killed-bit write below is conditional on indoor persistence.
+  RandoGrantResult result = Rando_TryGrantEnemyCheck(k);
+  if (Rando_GrantResultIsBlocked(result))
+    return false;
+  if (!player_is_indoors || sprite_defl_bits[k] & 1)
+    return true;
+  // Dynamic scripted enemy checks have no authored sprite_N slot.
+  if (sign8(sprite_N[k]))
+    return true;
   sprite_where_in_room[dungeon_room_index2] |= 1 << sprite_N[k];
+  return true;
 }
 
-int Dungeon_LoadSingleSprite(int k, const uint8 *src) {  // 89c327
+int Dungeon_LoadSingleSprite(int k, const uint8 *src, uint8 source_slot) {  // 89c327
   uint8 y = src[0], x = src[1], type = src[2];
+  if (k >= 0 && k < 16)
+    s_rando_dynamic_enemy_check_loc[k] = 0;
   if (type == 0xe4) {
     if (y == 0xfe || y == 0xfd) {
+      if (k > 0 && Rando_EnemyDropKeysActiveRuntime()) {
+        uint8 drop_kind = (y == 0xfe) ? kRandoEnemyDropKind_SmallKey :
+                                        kRandoEnemyDropKind_BigKey;
+        const RandoEnemyDropLookupEntry *drop = Rando_FindEnemyDrop(
+            dungeon_room_index2, (uint8)(k - 1), drop_kind);
+        if (drop != NULL && Rando_IsLocationChecked(drop->loc_id))
+          return k - 1;  // checked enemy-drop check: no forced key respawn
+      }
       sprite_die_action[k - 1] = (y == 0xfe) ? 1 : 2;
       return k - 1;
     }
   } else if (x >= 0xe0) {
-    Dungeon_LoadSingleOverlord(src);
+    Dungeon_LoadSingleOverlord(src, source_slot);
     return k - 1;
   }
-  if (!(kSpriteInit_DeflBits[type] & 1) && (sprite_where_in_room[dungeon_room_index2] & (1 << k)))
+  if (!(MODS_U8(kSpriteInit_DeflBits, 0x8db725)[type] & 1) && (sprite_where_in_room[dungeon_room_index2] & (1 << k)))
     return k;
+  // add-enemy-souls — suppress the spawn while the (post-shuffle) species' soul
+  // is un-owned. Consume the slot index like the checked-enemy-check branch
+  // above (inert state-0 slot, sprite_N[k] = k) so later entries keep their
+  // sprite_where_in_room bit positions, but do NOT set the killed bit — the
+  // enemy must appear once the soul is found. Counted so the room-clear checks
+  // hold kill-gates shut while suppressed spawns exist (souls.h). Forced
+  // key-drop holders spawn regardless while drops are not itemized
+  // (Rando_SoulDropSourceExempt) — their keys are free in the key-count model.
+  if (!Souls_SpriteAllowed(type) &&
+      !Rando_SoulDropSourceExempt(dungeon_room_index2, (uint8)k)) {
+    sprite_state[k] = 0;
+    sprite_type[k] = type;
+    sprite_N[k] = k;
+    sprite_die_action[k] = 0;
+    Souls_NoteRoomSuppressed();
+    return k;
+  }
+  // add-npc-souls — suppress a site-bound NPC while its soul is un-owned.
+  // Consumes the slot EXACTLY like the enemy-souls branch above (room 0x123
+  // holds slot-keyed enemy checks beside the MMC NPC — a skip-without-consume
+  // would shift every later (room, slot) key), but does NOT count toward the
+  // kill-gate hold: no roster NPC participates in a kill gate, and a counted
+  // NPC would wedge any kill-tagged room it shares.
+  if (!Souls_NpcSpriteAllowed(type, dungeon_room_index2, true)) {
+    sprite_state[k] = 0;
+    sprite_type[k] = type;
+    sprite_N[k] = k;
+    sprite_die_action[k] = 0;
+    return k;
+  }
   sprite_state[k] = 8;
   tmp_counter = y;
   sprite_floor[k] = (y >> 7);
@@ -3662,11 +6271,13 @@ int Dungeon_LoadSingleSprite(int k, const uint8 *src) {  // 89c327
   return k;
 }
 
-void Dungeon_LoadSingleOverlord(const uint8 *src) {  // 89c3e8
+void Dungeon_LoadSingleOverlord(const uint8 *src, uint8 source_slot) {  // 89c3e8
   int k = AllocOverlord();
   if (k < 0)
     return;
   uint8 y = src[0], x = src[1], type = src[2];
+  s_rando_overlord_source_slot[k] = source_slot;
+  s_rando_overlord_type_id[k] = type;
   overlord_type[k] = type;
   overlord_floor[k] = (y >> 7);
   int t = ((y << 4) & 0x1ff) + (byte_7E0FB1 << 8);
@@ -3702,6 +6313,7 @@ void Sprite_ResetAll_noDisable() {  // 89c452
   sort_sprites_setting = 0;
   if (follower_indicator != 13)
     super_bomb_indicator_unk2 = 0xfe;
+  Rando_ClearDynamicEnemyCheckMaps();
   memset(sprite_where_in_room, 0, 0x1000);
   memset(overworld_sprite_was_loaded, 0, 0x200);
   memset(dungeon_room_history, 0xff, 8);
@@ -3725,7 +6337,11 @@ void Overworld_LoadSprites() {  // 89c4ac
   const uint8 *src = GetOverworldSpritePtr(overworld_area_index);
   uint8 b;
 
-  for (; (b = src[0]) != 0xff; src += 3) {
+  Rando_ClearOverworldEnemyCheckMap();
+  uint8 rando_ow_stage = Rando_CurrentOverworldEnemyStage();
+  bool rando_ow_checks = Rando_EnemyChecksAllActiveRuntime();
+  uint8 es_slot = 0;  // add-rando-enemy-shuffle — stable per-entry list position
+  for (; (b = src[0]) != 0xff; src += 3, es_slot++) {
     if (src[2] == 0xf4) {
       byte_7E0FFD++;
       continue;
@@ -3733,8 +6349,30 @@ void Overworld_LoadSprites() {  // 89c4ac
     uint8 r2 = (src[0] >> 4) << 2;
     uint8 r6 = (src[1] >> 4) + r2;
     uint8 r5 = src[1] & 0xf | src[0] << 4;
-    sprite_where_in_overworld[r5 | r6 << 8] = src[2] + 1;
+    uint16 block = r5 | r6 << 8;
+    if (rando_ow_checks && src[2] < 0xf3 && block < kRandoOverworldEnemyBlockCount) {
+      const RandoOverworldEnemyCheckLookupEntry *check =
+          Rando_FindOverworldEnemyCheck((uint8)overworld_area_index,
+                                        rando_ow_stage, es_slot);
+      if (check != NULL && check->block == block &&
+          !Rando_IsLocationChecked(check->loc_id)) {
+        s_rando_overworld_enemy_loc_by_block[block] = check->loc_id;
+        s_rando_overworld_enemy_area_by_block[block] = (uint8)overworld_area_index;
+        s_rando_overworld_enemy_stage_by_block[block] = rando_ow_stage;
+      }
+    }
+    // add-rando-enemy-shuffle — substitute the overworld sprite TYPE, then keep
+    // the +1 bias (the stored map value is type+1; overlords are stored as
+    // >= 0xf4 here, i.e. type >= 0xf3). Skip overlord types (>= 0xf3) so we never
+    // re-key a marker; EnemyShuffle_PickOverworld is also a passthrough for
+    // excluded / off / no-candidate cases ⇒ vanilla play byte-identical.
+    uint8 es_type = src[2];
+    if (es_type < 0xf3) {
+      es_type = EnemyShuffle_PickOverworld((uint8)overworld_area_index, es_slot, es_type);
+    }
+    sprite_where_in_overworld[block] = es_type + 1;
   }
+  Rando_AddGoalNpcMapEntry(overworld_area_index);
 }
 
 void Sprite_ActivateAllProxima() {  // 89c55e
@@ -3768,7 +6406,8 @@ void Sprite_ProximityActivation() {  // 89c58f
 void Sprite_ActivateWhenProximal() {  // 89c5bb
   if (byte_7E069E[1]) {
     int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
-    uint16 x = BG2HOFS_copy2 + (sign8(byte_7E069E[1]) ? -0x10 - xt : 0x110 + xt);
+    uint16 x = BG2HOFS_copy2 - ZeldaWidePictureShift() +
+               (sign8(byte_7E069E[1]) ? -0x10 - xt : 0x110 + xt);
     uint16 y = BG2VOFS_copy2 - 0x30;
     for (int i = 21; i >= 0; i--, y += 16)
       Sprite_Overworld_ProximityMotivatedLoad(x, y);
@@ -3778,7 +6417,7 @@ void Sprite_ActivateWhenProximal() {  // 89c5bb
 void Sprite_ActivateWhenProximalBig() {  // 89c5fa
   if (byte_7E069E[0]) {
     int xt = (enhanced_features0 & kFeatures0_ExtendScreen64) ? 0x40 : 0;
-    uint16 x = BG2HOFS_copy2 - 0x30 - xt;
+    uint16 x = BG2HOFS_copy2 - ZeldaWidePictureShift() - 0x30 - xt;
     uint16 y = BG2VOFS_copy2 + (sign8(byte_7E069E[0]) ? -0x10 : 0x110);
     for (int i = 21 + (xt >> 3); i >= 0; i--, x += 16)
       Sprite_Overworld_ProximityMotivatedLoad(x, y);
@@ -3826,6 +6465,17 @@ void Overworld_LoadProximaSpriteIfAlive(uint16 blk) {  // 89c739
     overlord_gen1[k] = 0;
     overlord_gen3[k] = 0;
   } else {
+    // add-enemy-souls — suppress the proximity spawn while the species' soul is
+    // un-owned. The was-loaded bit is deliberately NOT set: the block re-arms so
+    // the enemy appears on the next proximity pass once the soul is found.
+    if (!Souls_SpriteAllowed((uint8)(sprite_to_spawn - 1)))
+      return;
+    // add-npc-souls — site-bound NPCs (by overworld area) while the soul is
+    // un-owned. Same re-arm semantics; NEVER applied to dynamic spawns (the
+    // 0xC0 reward deliveries bypass this path by construction).
+    if (!Souls_NpcSpriteAllowed((uint8)(sprite_to_spawn - 1),
+                                overworld_area_index, false))
+      return;
     // load regular sprite
     int k = Overworld_AllocSprite(sprite_to_spawn);
     if (k < 0)
@@ -3846,6 +6496,9 @@ void Overworld_LoadProximaSpriteIfAlive(uint16 blk) {  // 89c739
 }
 
 void SpriteExplode_SpawnEA(int k) {  // 89ee4c
+  RandoGrantResult result = Rando_TryGrantBossEnemyCheckForCurrentEventResult();
+  if (Rando_ApplyExplosionGrantOutcome(k, result))
+    return;
   tmp_counter = sprite_type[k];
   SpriteSpawnInfo info;
   int j = Sprite_SpawnDynamicallyEx(k, 0xea, &info, 14);
@@ -3967,20 +6620,21 @@ void Sprite_KillSelf(int k) {  // 89f1f8
 void SpritePrep_LoadProperties(int k) {  // 8db818
   SpritePrep_ResetProperties(k);
   int j = sprite_type[k];
-  sprite_flags2[k] = kSpriteInit_Flags2[j];
-  sprite_health[k] = kSpriteInit_Health[j];
-  sprite_flags4[k] = kSpriteInit_Flags4[j];
-  sprite_flags5[k] = kSpriteInit_Flags5[j];
-  sprite_defl_bits[k] = kSpriteInit_DeflBits[j];
-  sprite_bump_damage[k] = kSpriteInit_BumpDamage[j];
-  sprite_flags[k] = kSpriteInit_Flags[j];
+  // As the quest's cartridge has these tables ($8D:B080 to $8D:B817).
+  sprite_flags2[k] = MODS_U8(kSpriteInit_Flags2, 0x8db080)[j];
+  sprite_health[k] = EnemyShuffle_ScaleHealth((uint8)j, MODS_U8(kSpriteInit_Health, 0x8db173)[j]);
+  sprite_flags4[k] = MODS_U8(kSpriteInit_Flags4, 0x8db44c)[j];
+  sprite_flags5[k] = MODS_U8(kSpriteInit_Flags5, 0x8db632)[j];
+  sprite_defl_bits[k] = MODS_U8(kSpriteInit_DeflBits, 0x8db725)[j];
+  sprite_bump_damage[k] = EnemyShuffle_ScaleDamage((uint8)j, MODS_U8(kSpriteInit_BumpDamage, 0x8db266)[j]);
+  sprite_flags[k] = MODS_U8(kSpriteInit_Flags, 0x8db53f)[j];
   sprite_room[k] = player_is_indoors ? dungeon_room_index2 : overworld_area_index;
-  sprite_flags3[k] = kSpriteInit_Flags3[j];
-  sprite_oam_flags[k] = kSpriteInit_Flags3[j] & 0xf;
+  sprite_flags3[k] = MODS_U8(kSpriteInit_Flags3, 0x8db359)[j];
+  sprite_oam_flags[k] = MODS_U8(kSpriteInit_Flags3, 0x8db359)[j] & 0xf;
 }
 
 void SpritePrep_LoadPalette(int k) {  // 8db85c
-  int f = kSpriteInit_Flags3[sprite_type[k]];
+  int f = MODS_U8(kSpriteInit_Flags3, 0x8db359)[sprite_type[k]];
   sprite_flags3[k] = f;
   sprite_oam_flags[k] = f & 15;
 }
@@ -4242,8 +6896,17 @@ int Sprite_SpawnDynamically(int k, uint8 what, SpriteSpawnInfo *info) {  // 9df6
 }
 
 int Sprite_SpawnDynamicallyEx(int k, uint8 what, SpriteSpawnInfo *info, int j) {  // 9df65f
+  // add-enemy-souls — the single funnel for overlord-spawned and
+  // sprite-spawned enemies (both bypass EnemyShuffle_Pick*). Suppress here when
+  // the species' soul is un-owned; the soul map covers only enemy/boss species
+  // (+ boss parts), so item/effect/ancilla spawns through this funnel are never
+  // affected (disjointness asserted in Souls_SelfCheck). Callers already handle
+  // the no-slot -1 result.
+  if (!Souls_SpriteAllowed(what))
+    return -1;
   do {
     if (sprite_state[j] == 0) {
+      s_rando_dynamic_enemy_check_loc[j] = 0;
       sprite_type[j] = what;
       sprite_state[j] = 9;
       info->r0_x = Sprite_GetX(k);
@@ -4325,4 +6988,3 @@ void Sprite_DrawRippleIfInWater(int k) {  // 9eff8d
   Sprite_Get16BitCoords(k);
   Oam_AllocateFromRegionA(((sprite_flags2[k] & 0x1f) + 1) * 4);
 }
-

@@ -28,30 +28,41 @@ static void TestDungeonTransitionTargets(void) {
   assert(WideCamera_FindDungeonTransitionEnd(1024, 1, 256) == 1280);
 }
 
-static void TestRightTransition(void) {
-  assert(WideCamera_InterpolateTransition(
-    256, 256, 184, -72, 1, 256) == 184);
-  assert(WideCamera_InterpolateTransition(
-    384, 256, 184, -72, 1, 256) == 384);
-  assert(WideCamera_InterpolateTransition(
-    512, 256, 184, -72, 1, 256) == 584);
+static void TestLerp(void) {
+  assert(WideCamera_Lerp(72, -72, 0) == 72);
+  assert(WideCamera_Lerp(72, -72, 128) == 0);
+  assert(WideCamera_Lerp(72, -72, 256) == -72);
+  assert(WideCamera_Lerp(0, 16, 8) == 1);    // 0.5 rounds away from zero
+  assert(WideCamera_Lerp(16, 0, 8) == 15);
+  assert(WideCamera_Lerp(0, 16, 7) == 0);
 }
 
-static void TestLeftTransition(void) {
-  assert(WideCamera_InterpolateTransition(
-    512, 512, 584, 72, -1, 256) == 584);
-  assert(WideCamera_InterpolateTransition(
-    384, 512, 584, 72, -1, 256) == 384);
-  assert(WideCamera_InterpolateTransition(
-    256, 512, 584, 72, -1, 256) == 184);
+static void TestApproach(void) {
+  assert(WideCamera_Approach(16, 0, 1) == 15);
+  assert(WideCamera_Approach(0, 72, 3) == 3);
+  assert(WideCamera_Approach(70, 72, 3) == 72);
+  assert(WideCamera_Approach(5, 5, 0) == 5);
+}
+
+static void TestFollow(void) {
+  // Clamped at an edge: the rule moves with the camera, so does the view.
+  assert(WideCamera_Follow(10, 10, 14, 4, 1) == 14);
+  assert(WideCamera_Follow(10, 10, 6, -4, 1) == 6);
+  // A gap already there stays, and closes by the rate.
+  assert(WideCamera_Follow(20, 10, 14, 4, 1) == 23);
+  // A jump the camera does not explain is closed by the rate only.
+  assert(WideCamera_Follow(16, 16, 0, 2, 1) == 15);
+  assert(WideCamera_Follow(16, 16, 0, -2, 1) == 13);
+  assert(WideCamera_Follow(0, 0, 72, 0, 3) == 3);
 }
 
 int main(void) {
   TestWrappedCoordinates();
   TestStableCamera();
   TestDungeonTransitionTargets();
-  TestRightTransition();
-  TestLeftTransition();
+  TestLerp();
+  TestApproach();
+  TestFollow();
   puts("wide camera tests passed");
   return 0;
 }

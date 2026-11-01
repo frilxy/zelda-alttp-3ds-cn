@@ -10,7 +10,7 @@ root=Path(__file__).resolve().parents[3]
 p=argparse.ArgumentParser();p.add_argument('dump',type=Path);args=p.parse_args()
 tools=Path(os.environ.get('DEVKITARM','/opt/devkitpro/devkitARM'))/'bin'
 def cbytes(name,b):return 'static const unsigned char '+name+'[]={'+','.join(map(str,b))+'};\n'
-reference=subprocess.check_output(['git','show','b723a0f:app/jni/src/snes/ppu.c'],cwd=root,text=True)
+reference=subprocess.check_output(['git','show','b723a0f:engine/snes/ppu.c'],cwd=root,text=True)
 exports=re.findall(r'^(?:Ppu\*|void|int|uint8_t)\s+((?:ppu_|Ppu)[A-Za-z0-9_]+)\(',reference,re.M)
 loader=(root/'platform/3ds/tests/ppu_old3ds_test.c').read_text()
 start=loader.index('  const unsigned regs[][2]');end=loader.index('  snprintf(path, sizeof(path), "%s/ppu.txt"',start)

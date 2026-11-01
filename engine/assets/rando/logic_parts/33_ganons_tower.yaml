@@ -1,0 +1,298 @@
+# 33_ganons_tower.yaml — Ganon's Tower logic graph.
+#
+# Mechanically translated from `app/Region/Standard/GanonsTower.php` (MIT,
+# verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# Translation discipline (audit.md §0.10.2):
+#   - Every predicate cites the PHP file:line range it came from.
+#   - Phase B settings branches dropped:
+#       * canOWYBA / canBootsClip / canSuperSpeed / canDungeonRevive /
+#         canOneFrameClipOW — all Phase A pinned false.
+#       * mode.weapons === 'swordless' pinned false.
+#       * itemPlacement !== 'basic' — basic-mode strict branch kept,
+#         advanced branch dropped (EP Big Key Chest precedent in logic.yaml).
+#       * accessibility !== 'locations' branches dropped (Phase A target
+#         is accessibility=items, the default).
+#       * crystals.tower defaults to 7; the can_enter crystal-sum gate
+#         translates to "have all 7 crystals".
+#   - PHP item-name remappings:
+#       * KeyA2 → SmallKey_GanonsTower
+#       * BigKeyA2 → BigKey_GanonsTower
+#       * CompassA2 → Compass_GanonsTower
+#       * MapA2 → Map_GanonsTower
+#       * PegasusBoots → Boots
+#       * RescueZelda → RescuedZelda
+#       * has('CrystalN') → OP_HAS_PRIZE(Prize_CrystalN) NOT used here;
+#         crystal-counting uses HAS_ANY_COUNT over the 7 Prize_CrystalN ids
+#         (the prize-grant path increments these counters as dungeons clear,
+#         per item_registry.yaml ids 114..120 prize_crystal:N).
+
+format_version: 1
+
+regions:
+  # External parent stub — Dark World North East (Pyramid of Power vicinity).
+  # Stubbed for cross-file region reference.
+  - id: DarkWorld_NorthEast
+    name: "Dark World - North East (stub)"
+    source: "stub for cross-file region reference"
+
+  # The PHP can_enter referenced `East Dark World Death Mountain`; we stub
+  # it under a clean local id and the overworld file will merge against it.
+  - id: DarkWorld_DeathMountain_East
+    name: "Dark World - Death Mountain East (stub)"
+    source: "stub for cross-file region reference"
+
+  - id: GanonsTower_Lobby
+    name: "Ganon's Tower - Lobby"
+    dungeon: GanonsTower
+    source: "app/Region/Standard/GanonsTower.php:15-85"
+
+edges:
+  # can_enter (php:396-415). Phase B Slice 4 §7 surfaces three trick
+  # disjuncts behind OP_TRICK / OP_GLITCH_LEVEL gates; under default
+  # settings (tricks=0, logic=no_glitches) all three collapse to FALSE
+  # and the predicate is byte-identical to the Phase A form.
+  #
+  # PHP shape after dropping unsupported macros (no canSuperSpeed,
+  # no canDungeonRevive):
+  #   RescueZelda
+  #   AND (
+  #     ((MoonPearl OR canOWYBA+bottle)
+  #       AND (
+  #         (crystal_count>=tower-count AND East-DM-reach)
+  #         OR (canBootsClip+Boots AND West-DM-reach)
+  #       ))
+  #     OR (canOneFrameClipOW AND (MoonPearl OR canOWYBA+bottle))
+  #   )
+  #
+  # Note: West-DM mirror-clip route is a cross-crystal-count BYPASS —
+  # the crystals.tower gate sits only on the East-DM branch, matching
+  # PHP nesting at php:401-412. Do not factor the crystal gate above
+  # the disjunction.
+  #
+  # add-rando-random-crystals (external-review round 2): the gate is
+  # OP_TOWER_CRYSTALS_MET — crystals held >= the seed's RESOLVED
+  # crystals.tower requirement — replacing the hardcoded
+  # HAS_ANY_COUNT(crystals, 7), which ignored non-7 and random tower
+  # counts entirely (generator spheres disagreed with the runtime door).
+  # Default tower=7 evaluates byte-identically.
+  - from: DarkWorld_DeathMountain_East
+    to: GanonsTower_Lobby
+    predicate: "HAS_ITEM(RescuedZelda) AND (((HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND ((OP_TOWER_CRYSTALS_MET()) OR (CanBootsClip() AND OP_REGION_REACHABLE(DarkWorld_DeathMountain_West)))) OR (CanOneFrameClipOW() AND (HAS_ITEM(MoonPearl) OR CanPearlBypass())))"
+    source: "app/Region/Standard/GanonsTower.php:396-415 (can_enter closure)"
+
+  # Convenience edge from the standard DarkWorld_NorthEast region (the
+  # Pyramid). The actual GT door tile is on East DM; this edge captures
+  # the common spec usage where the parent overworld region is
+  # DarkWorld_NorthEast and the edge predicate factors the East DM
+  # reachability via OP_REGION_REACHABLE. The West-DM boots-clip
+  # disjunct factors West-DM reachability via OP_REGION_REACHABLE too.
+  - from: DarkWorld_NorthEast
+    to: GanonsTower_Lobby
+    predicate: "HAS_ITEM(RescuedZelda) AND (((HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND ((OP_TOWER_CRYSTALS_MET() AND OP_REGION_REACHABLE(DarkWorld_DeathMountain_East)) OR (CanBootsClip() AND OP_REGION_REACHABLE(DarkWorld_DeathMountain_West)))) OR (CanOneFrameClipOW() AND (HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND OP_REGION_REACHABLE(DarkWorld_DeathMountain_East)))"
+    source: "app/Region/Standard/GanonsTower.php:396-415 (can_enter via East DM reach)"
+
+locations:
+  # GT - Bob's Torch (php:194-196): has(PegasusBoots).
+  - id: "Ganon's Tower - Bob's Torch"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Boots)"
+    source: "app/Region/Standard/GanonsTower.php:194-196"
+
+  # GT - DMs Room x4 (php:198-212): Hammer AND Hookshot.
+  - id: "Ganon's Tower - DMs Room - Top Left"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)"
+    source: "app/Region/Standard/GanonsTower.php:198-200"
+
+  - id: "Ganon's Tower - DMs Room - Top Right"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)"
+    source: "app/Region/Standard/GanonsTower.php:202-204"
+
+  - id: "Ganon's Tower - DMs Room - Bottom Left"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)"
+    source: "app/Region/Standard/GanonsTower.php:206-208"
+
+  - id: "Ganon's Tower - DMs Room - Bottom Right"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)"
+    source: "app/Region/Standard/GanonsTower.php:210-212"
+
+  # GT - Randomizer Room x4 (php:214-252):
+  #   Hammer AND Hookshot
+  #   AND ((BigKeyA2 in {other-three-Randomizer-Room-slots} AND KeyA2>=3)
+  #        OR KeyA2>=4)
+  # The itemInLocations branch is a placement-aware Phase B hint; Phase A
+  # conservatively drops it and requires KeyA2>=4.
+  - id: "Ganon's Tower - Randomizer Room - Top Left"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 4)"
+    source: "app/Region/Standard/GanonsTower.php:214-222"
+
+  - id: "Ganon's Tower - Randomizer Room - Top Right"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 4)"
+    source: "app/Region/Standard/GanonsTower.php:224-232"
+
+  - id: "Ganon's Tower - Randomizer Room - Bottom Left"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 4)"
+    source: "app/Region/Standard/GanonsTower.php:234-242"
+
+  - id: "Ganon's Tower - Randomizer Room - Bottom Right"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 4)"
+    source: "app/Region/Standard/GanonsTower.php:244-252"
+
+  # GT - Firesnake Room (php:254-263):
+  #   Hammer AND Hookshot
+  #   AND ((BigKeyA2 in Randomizer-Room-4 OR Firesnake-Room-holds-KeyA2)
+  #        AND KeyA2>=2)
+  #        OR KeyA2>=3
+  # Phase A: drop the location-pinned branch, keep KeyA2>=3.
+  - id: "Ganon's Tower - Firesnake Room"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 3)"
+    source: "app/Region/Standard/GanonsTower.php:254-263"
+
+  # GT - Map Chest (php:265-273):
+  #   Hammer AND (Hookshot OR (itemPlacement !== 'basic' AND Boots))
+  #   AND (Map-Chest-holds-{BigKey,Key} ? KeyA2>=3 : KeyA2>=4)
+  # Drop !== 'basic' advanced branch → Hookshot only.
+  # Drop placement-pinned branch → KeyA2>=4.
+  - id: "Ganon's Tower - Map Chest"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 4)"
+    source: "app/Region/Standard/GanonsTower.php:265-273"
+
+  # GT - Big Chest (php:275-280):
+  #   BigKeyA2 AND KeyA2>=3 AND ((Hammer AND Hookshot) OR (FireRod AND Somaria))
+  - id: "Ganon's Tower - Big Chest"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(BigKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND ((HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)) OR (HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria)))"
+    source: "app/Region/Standard/GanonsTower.php:275-280"
+
+  # GT - Hope Room - Left/Right (php:65-66): no setRequirements; default TRUE.
+  - id: "Ganon's Tower - Hope Room - Left"
+    region: GanonsTower_Lobby
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/GanonsTower.php:65 (no setRequirements)"
+
+  - id: "Ganon's Tower - Hope Room - Right"
+    region: GanonsTower_Lobby
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/GanonsTower.php:66 (no setRequirements)"
+
+  # GT - Bob's Chest (php:282-287):
+  #   ((Hammer AND Hookshot) OR (FireRod AND Somaria))
+  #   AND KeyA2>=3
+  #   AND (itemPlacement != 'basic' || FireRod || (Ether AND hasSword))
+  # Drop != 'basic' advanced branch → keep FireRod OR (Ether AND HasSword(1)).
+  - id: "Ganon's Tower - Bob's Chest"
+    region: GanonsTower_Lobby
+    can_reach: "((HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)) OR (HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria))) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND (HAS_ITEM(FireRod) OR (HAS_ITEM(Ether) AND HasSword(1)))"
+    source: "app/Region/Standard/GanonsTower.php:282-287"
+
+  # GT - Tile Room (php:289-291): CaneOfSomaria.
+  - id: "Ganon's Tower - Tile Room"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(CaneOfSomaria)"
+    source: "app/Region/Standard/GanonsTower.php:289-291"
+
+  # GT - Compass Room x4 (php:293-331):
+  #   FireRod AND Somaria
+  #   AND ((BigKeyA2 in other-three-Compass-Room-slots AND KeyA2>=3)
+  #        OR KeyA2>=4)
+  # Drop placement-pinned branch → KeyA2>=4.
+  - id: "Ganon's Tower - Compass Room - Top Left"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria) AND HAS_AMOUNT(SmallKey_GanonsTower, 4)"
+    source: "app/Region/Standard/GanonsTower.php:293-301"
+
+  - id: "Ganon's Tower - Compass Room - Top Right"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria) AND HAS_AMOUNT(SmallKey_GanonsTower, 4)"
+    source: "app/Region/Standard/GanonsTower.php:303-311"
+
+  - id: "Ganon's Tower - Compass Room - Bottom Left"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria) AND HAS_AMOUNT(SmallKey_GanonsTower, 4)"
+    source: "app/Region/Standard/GanonsTower.php:313-321"
+
+  - id: "Ganon's Tower - Compass Room - Bottom Right"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria) AND HAS_AMOUNT(SmallKey_GanonsTower, 4)"
+    source: "app/Region/Standard/GanonsTower.php:323-331"
+
+  # GT - Big Key Chest (php:333-338) + Big Key Room - Left/Right (php:340-352):
+  #   ((Hammer AND Hookshot) OR (FireRod AND Somaria))
+  #   AND KeyA2>=3
+  #   AND boss_bottom->canBeat(Armos Knights)
+  - id: "Ganon's Tower - Big Key Chest"
+    region: GanonsTower_Lobby
+    can_reach: "((HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)) OR (HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria))) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND CanKillArmosKnights()"
+    source: "app/Region/Standard/GanonsTower.php:333-338"
+
+  - id: "Ganon's Tower - Big Key Room - Left"
+    region: GanonsTower_Lobby
+    can_reach: "((HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)) OR (HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria))) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND CanKillArmosKnights()"
+    source: "app/Region/Standard/GanonsTower.php:340-345"
+
+  - id: "Ganon's Tower - Big Key Room - Right"
+    region: GanonsTower_Lobby
+    can_reach: "((HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)) OR (HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria))) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND CanKillArmosKnights()"
+    source: "app/Region/Standard/GanonsTower.php:347-352"
+
+  # GT - Mini Helmasaur Room - Left/Right (php:354-368):
+  #   canShootArrows AND canLightTorches
+  #   AND BigKeyA2 AND KeyA2>=3
+  #   AND boss_middle->canBeat(Lanmolas)
+  - id: "Ganon's Tower - Mini Helmasaur Room - Left"
+    region: GanonsTower_Lobby
+    can_reach: "CanShootArrowsL1() AND CanLightTorches() AND HAS_ITEM(BigKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND CanKillLanmolas(world)"
+    source: "app/Region/Standard/GanonsTower.php:354-360"
+
+  - id: "Ganon's Tower - Mini Helmasaur Room - Right"
+    region: GanonsTower_Lobby
+    can_reach: "CanShootArrowsL1() AND CanLightTorches() AND HAS_ITEM(BigKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND CanKillLanmolas(world)"
+    source: "app/Region/Standard/GanonsTower.php:362-368"
+
+  # GT - Pre-Moldorm Chest (php:370-376): same as Mini Helmasaur rooms.
+  - id: "Ganon's Tower - Pre-Moldorm Chest"
+    region: GanonsTower_Lobby
+    can_reach: "CanShootArrowsL1() AND CanLightTorches() AND HAS_ITEM(BigKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND CanKillLanmolas(world)"
+    source: "app/Region/Standard/GanonsTower.php:370-376"
+
+  # GT - Moldorm Chest (php:378-386):
+  #   Hookshot AND canShootArrows AND canLightTorches
+  #   AND BigKeyA2 AND KeyA2>=4
+  #   AND boss_middle->canBeat AND boss_top->canBeat(Moldorm)
+  - id: "Ganon's Tower - Moldorm Chest"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hookshot) AND CanShootArrowsL1() AND CanLightTorches() AND HAS_ITEM(BigKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND CanKillLanmolas(world) AND CanKillMoldorm()"
+    source: "app/Region/Standard/GanonsTower.php:378-386"
+
+  # Agahnim 2 (php:388-394) — prize event.
+  #   can_complete = canEnter AND Moldorm-Chest-canAccess AND boss->canBeat(Aga2)
+  # canEnter is the edge predicate; we replicate Moldorm-Chest's requirements
+  # plus Agahnim2-beat for the prize-event location can_reach.
+  - id: "Agahnim 2"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hookshot) AND CanShootArrowsL1() AND CanLightTorches() AND HAS_ITEM(BigKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND CanKillLanmolas(world) AND CanKillMoldorm() AND CanKillAgahnim2()"
+    source: "app/Region/Standard/GanonsTower.php:388-394 (can_complete = Moldorm Chest + Aga2 beat)"
+
+macros:
+  # The GT mid-floor Lanmolas / top Moldorm mini-boss kill predicates reuse
+  # CanKillLanmolas (defined in 10_desert_palace.yaml) and CanKillMoldorm
+  # (11_tower_of_hera.yaml) from the merged macro table — no redefinition
+  # here, so the boss-file copies can't silently diverge under the loader's
+  # last-wins merge.
+
+  # CanKillAgahnim2 — final GT boss (Boss.php:126-128).
+  # PHP: hasSword || Hammer || BugCatchingNet.
+  - name: CanKillAgahnim2
+    parameters: []
+    body: "(HasSword(1) OR HAS_ITEM(Hammer) OR HAS_ITEM(BugCatchingNet)) AND NeedsBossSoul(Soul_Agahnim)"
+    source: "app/Boss.php:126-128 (Agahnim2 can_beat)"

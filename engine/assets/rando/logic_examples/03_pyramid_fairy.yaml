@@ -1,0 +1,93 @@
+# 03_pyramid_fairy.yaml — synthesized multi-slot grant site
+#
+# NOTE (add-rando-fairy-chest-model): this example is now historical. The
+# Pyramid Fairy Sword/Bow Trade slots shown below were RETIRED from the live
+# pool — the pond is a two-chest model (Left/Right, granted on contact). This
+# file is documentation only (not consumed by codegen); kept to illustrate the
+# Trade type + multi-slot pattern.
+#
+# Exercises: Trade location type, world_state_filter for conditional
+# locations, OP_WORLDSTATE_EQ, multi-location grant from a single event.
+#
+# Translated from `app/Region/Standard/DarkWorld/NorthEast.php` lines 34-41.
+# Per audit §0.3.4 and tasks.md §6.7: vanilla LttP has Pyramid Fairy as a
+# fixed-item shrine; this is the synthesized rando-only multi-slot grant.
+
+format_version: 1
+
+regions:
+  # External parent region referenced by the edge below. Worked examples are
+  # self-contained subgraphs — stub the overworld region here so the codegen
+  # well-formedness check passes.
+  - id: DarkWorld_NorthEast
+    name: "Dark World - North East (stub)"
+    source: "stub for self-contained worked example"
+
+  - id: PyramidOfPower
+    name: "Pyramid of Power"
+    source: "app/Region/Standard/DarkWorld/NorthEast.php:21-50"
+
+edges:
+  - from: DarkWorld_NorthEast
+    to: PyramidOfPower
+    # Reaching the pyramid requires that Aga 1 has been defeated (which
+    # opens the pyramid) and that Link can survive dark-world traversal.
+    predicate: "HAS_ITEM(DefeatAgahnim) AND (WORLDSTATE_EQ(inverted) OR HAS_ITEM(MoonPearl))"
+    source: "app/Region/Standard/DarkWorld/NorthEast.php:21-30"
+
+locations:
+  - id: "Pyramid Fairy - Sword"
+    name: "Pyramid Fairy - Sword"
+    region: PyramidOfPower
+    type: Trade
+    vanilla_item: L2Sword
+    # Reaching the fairy requires the master sword (tossed in to upgrade)
+    # and enough hearts to survive the toss-and-receive scene.
+    can_reach: "HasSword(2) AND CanLiftDarkRocks() AND HAS_ITEM(Hammer)"
+    source: "app/Region/Standard/DarkWorld/NorthEast.php:34"
+    notes: |
+      vanilla_item = L2Sword reflects the L2-sword-in-for-L3 upgrade flow.
+      In rando the placed item can be anything; the fall-back if the slot
+      is missing from the placement table is L1Sword per audit §6.7.
+
+  - id: "Pyramid Fairy - Bow"
+    name: "Pyramid Fairy - Bow"
+    region: PyramidOfPower
+    type: Trade
+    vanilla_item: SilverArrowUpgrade
+    can_reach: "CanShootArrows() AND CanLiftDarkRocks() AND HAS_ITEM(Hammer)"
+    source: "app/Region/Standard/DarkWorld/NorthEast.php:35"
+
+  - id: "Pyramid Fairy - Left"
+    name: "Pyramid Fairy - Left"
+    region: PyramidOfPower
+    type: Chest
+    vanilla_item: SilverArrowUpgrade
+    # ALTTPR-conditional: only present when world config enables sword-swap.
+    # Phase A treats as always-present (audit §0.3.5 note).
+    can_reach: "CanLiftDarkRocks() AND HAS_ITEM(Hammer)"
+    source: "app/Region/Standard/DarkWorld/NorthEast.php:40"
+
+  - id: "Pyramid Fairy - Right"
+    name: "Pyramid Fairy - Right"
+    region: PyramidOfPower
+    type: Chest
+    vanilla_item: BottleEmpty
+    can_reach: "CanLiftDarkRocks() AND HAS_ITEM(Hammer)"
+    source: "app/Region/Standard/DarkWorld/NorthEast.php:41"
+
+macros:
+  - name: CanLiftDarkRocks
+    parameters: []
+    body: "HAS_ITEM(TitanMitt) OR HAS_AMOUNT(ProgressiveGlove, 2)"
+    source: "app/Support/ItemCollection.php (canLiftDarkRocks method)"
+
+  - name: HasSword
+    parameters: [min_level]
+    body: "HAS_AMOUNT(ProgressiveSword, min_level) OR HAS_ITEM(L1Sword) OR HAS_ITEM(L2Sword) OR HAS_ITEM(L3Sword) OR HAS_ITEM(L4Sword)"
+    source: "app/Support/ItemCollection.php (hasSword method)"
+
+  - name: CanShootArrows
+    parameters: []
+    body: "HAS_ITEM(Bow) OR HAS_AMOUNT(ProgressiveBow, 1)"
+    source: "app/Support/ItemCollection.php (canShootArrows method)"

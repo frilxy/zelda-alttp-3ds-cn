@@ -1,6 +1,14 @@
 #include "messaging.h"
 #include "zelda_rtl.h"
+#include "test_scenarios.h"
+#include "rando/rando.h"  // Phase B Slice 1 — Rando_OnGameSave
+#include "rando/goal_npc.h"
+#include "rando/goal_runtime.h"
+#include "rando/shuffle_ow_warp.h"  // add-rando-ow-warp-shuffle flute blips
+#include "rando/ow_map_prizes.h"  // fix-ow-map-prize-markers pause-map markers
 #include "variables.h"
+#include "config.h"
+#include "features.h"
 #include "snes/snes_regs.h"
 #include "dungeon.h"
 #include "hud.h"
@@ -16,8 +24,14 @@
 #include "attract.h"
 #include "nmi.h"
 #include "assets.h"
+#include "localized.h"
+#include "mods.h"
+#include "rando/dungeon_ids.h"
+#include "rando/rando_hints.h"
+#include "rando/rando_dialogue.h"
 
-static void WorldMap_AddSprite(int spr, uint8 big, uint8 flags, uint8 ch, uint16 x, uint16 y);
+static void WorldMap_AddSprite(int spr, uint8 big, uint8 flags, uint8 ch, uint16 x, uint16 y,
+                               uint8 num_char);
 static bool WorldMap_CalculateOamCoordinates(Point16U *pt);
 
 static const int8 kDungMap_Tab0[14] = {-1, -1, -1, -1, -1, 2, 0, 10, 4, 8, -1, 6, 12, 14};
@@ -100,13 +114,16 @@ static PlayerHandlerFunc *const kDungMapSubmodules[] = {
   &DungMap_RestoreOld,
 };
 static const uint16 kText_Positions[2] = {0x6125, 0x6244};
+// Where the French Canadian cartridge puts the text box, BG3 being at $7800
+// there ($8C:F109).
+static const uint16 kText_Positions_Loc[2] = {0x7925, 0x7a44};
+static uint16 Text_Position(int i) {
+  return g_loc_rom ? kText_Positions_Loc[i] : kText_Positions[i];
+}
 static const uint16 kSrmOffsets[4] = {0, 0x500, 0xa00, 0xf00};
 static const int8 kText_InitializationData[32] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0x39, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x1c, 4, 0, 0, 0, 0, 0};
 static const uint16 kText_BorderTiles[9] = {0x28f3, 0x28f4, 0x68f3, 0x28c8, 0x387f, 0x68c8, 0xa8f3, 0xa8f4, 0xe8f3};
-static const uint8 kText_CommandLengths[25] = {
-  1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1,
-  2, 2, 2, 2, 1, 1, 1, 1, 1,
-};
+
 static const uint8 kVWF_RenderCharacter_setMasks[8] = {0x80, 0x40, 0x20, 0x10, 8, 4, 2, 1};
 static const uint16 kVWF_RenderCharacter_renderPos[3] = {0, 0x2a0, 0x540};
 static const uint16 kVWF_RenderCharacter_linePositions[3] = {0, 0x40, 0x80};
@@ -124,6 +141,120 @@ static PlayerHandlerFunc *const kMessaging_Text[] = {
   &Text_Render,
   &RenderText_PostDeathSaveOptions,
 };
+
+static bool CutsceneFastForwardEnabled(void) {
+  return (enhanced_features0 & kFeatures0_CutsceneFastForward) &&
+         !ZeldaIsEmulatorAttached();
+}
+
+static uint8 CutsceneClampTimer8(uint8 value, uint8 cap) {
+  return CutsceneFastForwardEnabled() && value > cap ? cap : value;
+}
+
+static bool Text_InstantModeEnabled(void) {
+  return g_config.text_speed == kTextSpeed_Instant && !ZeldaIsEmulatorAttached();
+}
+
+static bool Text_FastModeEnabled(void) {
+  return g_config.text_speed == kTextSpeed_Fast && !ZeldaIsEmulatorAttached();
+}
+
+bool Text_ShouldFastForwardStoryMessage(uint16 msg_id) {
+  if (msg_id == kRandoGoalDialogueId) return false;
+  if (Rando_IsHintTileMessage(msg_id) ||
+      Rando_IsDynamicHintMessage(msg_id))
+    return false;
+
+  // Non-interactive Standard/escape/Aga story text. Randomizer hints stay manual.
+  // Keep these ids grounded at their Sprite_Show* call sites: nearby dialogue
+  // rows include ordinary NPC conversations that must remain player-controlled.
+  switch (msg_id) {
+  case 0x0d:  // Uncle leaves Link's house.
+  case 0x0e:  // Uncle's gift.
+  case 0x17:  // Priest greets rescued Zelda.
+  case 0x18:  // Sanctuary: Zelda is safe.
+  case 0x19:  // Sanctuary priest's long quest explanation.
+  case 0x1c:  // Zelda already abducted / castle prompt.
+  case 0x1d:  // Zelda's long Sanctuary response.
+  case 0x1e:  // Zelda at Sanctuary.
+  case 0x1f:  // Opening Zelda telepathy.
+  case 0x20:  // Opening Zelda telepathy follow-up.
+  case 0x21:  // Opening hidden path hint.
+  case 0x22:  // Throne-room passage.
+  case 0x23:  // Push the throne shelf.
+  case 0x24:  // Post-choice: leave Zelda's cell.
+  case 0x25:  // Leaving Zelda's cell.
+  case 0x26:  // Zelda explains Agahnim.
+  case 0x29:  // Sanctuary attack telepathy.
+  case 0x2a:  // Sewers near Sanctuary.
+  case 0x35:  // Post-Agahnim story state.
+  case 0x36:  // Dark World Sahasrahla telepathy.
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool Text_ShouldFastForwardStoryDialog(void) {
+  return CutsceneFastForwardEnabled() &&
+         Text_ShouldFastForwardStoryMessage(dialogue_message_index);
+}
+
+static uint8 Text_EffectiveLineSpeed(uint8 speed) {
+  if (Text_ShouldFastForwardStoryDialog())
+    return 0;
+  switch (g_config.text_speed) {
+  case kTextSpeed_Instant:
+    return ZeldaIsEmulatorAttached() ? speed : 0;
+  case kTextSpeed_Fast:
+    return ZeldaIsEmulatorAttached() ? speed : (speed > 1 ? 1 : speed);
+  default:
+    return speed;
+  }
+}
+
+static uint16 Text_EffectiveWaitDuration(uint8 wait_index) {
+  uint16 duration = kText_WaitDurations[wait_index & 0xf];
+  if (Text_ShouldFastForwardStoryDialog())
+    return 0;
+  if (ZeldaIsEmulatorAttached())
+    return duration;
+  switch (g_config.text_speed) {
+  case kTextSpeed_Instant:
+    return 0;
+  case kTextSpeed_Fast:
+    duration >>= 2;
+    return duration < 2 ? 2 : duration;
+  default:
+    return duration;
+  }
+}
+
+static uint8 Text_EffectiveInputLatch(void) {
+  // The below-requirement Ganon warning appears automatically as combat starts.
+  // Instant text's one-frame latch makes ordinary attack-button mashing dismiss
+  // this essential rule explanation before it can be read. Keep instant drawing,
+  // but give this one message the vanilla half-second input debounce.
+  if (dialogue_message_index == 0x16f && Rando_IsActive() && !Rando_GoalAllowsGanonDamage())
+    return 28;
+  if (Text_ShouldFastForwardStoryDialog() || Text_InstantModeEnabled())
+    return 1;
+  if (Text_FastModeEnabled())
+    return 8;
+  return 28;
+}
+
+static uint8 Text_EffectiveScrollSpeed(uint8 speed) {
+  if (Text_ShouldFastForwardStoryDialog() || Text_InstantModeEnabled())
+    return 15;  // 16 row-shifts in one frame, enough to finish any alignment.
+  if (Text_FastModeEnabled() && speed < 7)
+    return 7;
+  return speed;
+}
+
+static bool Text_ShouldAutoAdvancePage(void) {
+  return Text_ShouldFastForwardStoryDialog();
+}
 static const uint8 kOverworldMap_tab1[333] = {
   0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xdf,
   0xde, 0xdd, 0xdc, 0xdb, 0xda, 0xd8, 0xd7, 0xd6, 0xd5, 0xd4, 0xd3, 0xd2, 0xd1, 0xd0, 0xcf, 0xce,
@@ -147,14 +278,28 @@ static const uint8 kOverworldMap_tab1[333] = {
   0xf7, 0xf7, 0xf6, 0xf5, 0xf4, 0xf4, 0xf3, 0xf2, 0xf2, 0xf1, 0xf0, 0xef, 0xee, 0xee, 0xed, 0xec,
   0xeb, 0xea, 0xe9, 0xe8, 0xe8, 0xe7, 0xe6, 0xe5, 0xe4, 0xe3, 0xe2, 0xe1, 0xe0,
 };
-static const uint8 kOverworldMapData[7] = {0x79, 0x6e, 0x6f, 0x6d, 0x7c, 0x6c, 0x7f};
+// non-static: see messaging.h — fix-ow-map-prize-markers re-keys the crystal
+// NUMBER glyph by crystal id (prize_shuffle breaks the slot->number match).
+const uint8 kOverworldMapData[7] = {0x79, 0x6e, 0x6f, 0x6d, 0x7c, 0x6c, 0x7f};
 static const uint8 kBirdTravel_tab1[8] = {0x7f, 0x79, 0x6c, 0x6d, 0x6e, 0x6f, 0x7c, 0x7d};
-static const uint8 kBirdTravel_x_lo[8] = {0x80, 0xcf, 0x10, 0xb8, 0x30, 0x70, 0x70, 0xf0};
-static const uint8 kBirdTravel_x_hi[8] = {6, 0xc, 2, 8, 0xf, 0, 7, 0xe};
-static const uint8 kBirdTravel_y_lo[8] = {0x5b, 0x98, 0xc0, 0x20, 0x50, 0xb0, 0x30, 0x80};
-static const uint8 kBirdTravel_y_hi[8] = {3, 5, 7, 0xb, 0xb, 0xf, 0xf, 0xf};
-static const uint8 kPendantBitMask[3] = {4, 1, 2};
-static const uint8 kCrystalBitMask[7] = {2, 0x40, 8, 0x20, 1, 4, 0x10};
+// The flute's eight spots: x low, x high, y low and y high bytes, eight of
+// each. A quest's mod can move them (kModTable_BirdTravel).
+static const uint8 kBirdTravel_Spots[32] = {
+  0x80, 0xcf, 0x10, 0xb8, 0x30, 0x70, 0x70, 0xf0,
+  6, 0xc, 2, 8, 0xf, 0, 7, 0xe,
+  0x5b, 0x98, 0xc0, 0x20, 0x50, 0xb0, 0x30, 0x80,
+  3, 5, 7, 0xb, 0xb, 0xf, 0xf, 0xf,
+};
+// non-static: add-rando-ow-warp-shuffle reuses the hand-tuned vanilla blip
+// positions (shuffle_ow_warp.c) — single source for the rando path + oracle.
+const uint8 kBirdTravel_x_lo[8] = {0x80, 0xcf, 0x10, 0xb8, 0x30, 0x70, 0x70, 0xf0};
+const uint8 kBirdTravel_x_hi[8] = {6, 0xc, 2, 8, 0xf, 0, 7, 0xe};
+const uint8 kBirdTravel_y_lo[8] = {0x5b, 0x98, 0xc0, 0x20, 0x50, 0xb0, 0x30, 0x80};
+const uint8 kBirdTravel_y_hi[8] = {3, 5, 7, 0xb, 0xb, 0xf, 0xf, 0xf};
+// non-static: see messaging.h — rando/ow_map_prizes.c identifies each marker
+// slot's DUNGEON from these bits, an anchor independent of the icon tables.
+const uint8 kPendantBitMask[3] = {4, 1, 2};
+const uint8 kCrystalBitMask[7] = {2, 0x40, 8, 0x20, 1, 4, 0x10};
 static const uint16 kOwMapCrystal0_x[9] = {0x7ff, 0x2c0, 0xd00, 0xf31, 0x6d, 0x7e0, 0xf40, 0xf40, 0x8dc};
 static const uint16 kOwMapCrystal0_y[9] = {0x730, 0x6a0, 0x710, 0x620, 0x70, 0x640, 0x620, 0x620, 0x30};
 static const uint16 kOwMapCrystal1_x[9] = {0xff00, 0xff00, 0xff00, 0x8d0, 0xff00, 0xff00, 0xff00, 0x82, 0xff00};
@@ -176,6 +321,28 @@ static const uint16 kOwMapCrystal3_tab[9] = {0, 0, 0, 0x6234, 0, 0, 0, 0x6434, 0
 static const uint16 kOwMapCrystal4_tab[9] = {0, 0, 0, 0, 0, 0, 0, 0x6434, 0};
 static const uint16 kOwMapCrystal5_tab[9] = {0, 0, 0, 0, 0, 0, 0, 0x6434, 0};
 static const uint16 kOwMapCrystal6_tab[9] = {0, 0, 0, 0, 0, 0, 0, 0x6434, 0};
+// The seven pause-map prize marker slots, gathered so the draw loop below can
+// index them. Slot i draws as sprite `14 - i`; `x == 0xff00` means "no marker
+// in this slot for this map-icon state". The tab word is `ch << 8 | flags`,
+// with `tab == 0` meaning vanilla's blinking "unknown" marker. (kOwMapCrystal_tab
+// is shared with rando/ow_map_prizes.c — declared in messaging.h.)
+static const uint16 *const kOwMapCrystal_x[7] = {
+  kOwMapCrystal0_x, kOwMapCrystal1_x, kOwMapCrystal2_x, kOwMapCrystal3_x,
+  kOwMapCrystal4_x, kOwMapCrystal5_x, kOwMapCrystal6_x,
+};
+static const uint16 *const kOwMapCrystal_y[7] = {
+  kOwMapCrystal0_y, kOwMapCrystal1_y, kOwMapCrystal2_y, kOwMapCrystal3_y,
+  kOwMapCrystal4_y, kOwMapCrystal5_y, kOwMapCrystal6_y,
+};
+const uint16 *const kOwMapCrystal_tab[7] = {
+  kOwMapCrystal0_tab, kOwMapCrystal1_tab, kOwMapCrystal2_tab, kOwMapCrystal3_tab,
+  kOwMapCrystal4_tab, kOwMapCrystal5_tab, kOwMapCrystal6_tab,
+};
+static uint16 WorldMap_PrizeCoordinate(int slot, bool y, int state) {
+  const uint16 *table = y ? kOwMapCrystal_y[slot] : kOwMapCrystal_x[slot];
+  uint32 addr = 0x8abde4 + slot * 36 + (y ? 18 : 0);
+  return ((const uint16 *)Mods_RomTable(addr, table, 9 * sizeof(uint16)))[state];
+}
 static const uint8 kOwMap_tab2[4] = {0x68, 0x69, 0x78, 0x69};
 static const uint8 kOverworldMap_Table4[4] = {0x34, 0x74, 0xf4, 0xb4};
 static const uint8 kOverworldMap_Timer[2] = {33, 12};
@@ -258,19 +425,77 @@ const uint8 *GetLightOverworldTilemap() {
   return kLightOverworldTilemap;
 }
 
-void SaveGameFile() {  // 80894a
-  if (srm_var1 < 2 || srm_var1 > 6 || (srm_var1 & 1))
-    return;
-  int offs = ((srm_var1 >> 1) - 1) * 0x500;
-  memcpy(g_zenv.sram + offs, save_dung_info, 0x500);
-  memcpy(g_zenv.sram + offs + 0xf00, save_dung_info, 0x500);
+static uint16 SaveGameFile_BuildStagedSlot(uint8 staged[0x500]) {
+  memcpy(staged, save_dung_info, 0x500);
   uint16 t = 0x5a5a;
   for (int i = 0; i < 0x4fe; i += 2)
-    t -= *(uint16 *)((char *)save_dung_info + i);
-  word_7EF4FE = t;
-  WORD(g_zenv.sram[offs + 0x4fe]) = t;
-  WORD(g_zenv.sram[offs + 0x4fe + 0xf00]) = t;
-  ZeldaWriteSram();
+    t -= WORD(staged[i]);
+  WORD(staged[0x4fe]) = t;
+  return t;
+}
+
+// Install the staged vanilla slot in both SRAM copies only after the randomizer
+// sidecar has durably accepted the exact same bytes. A failed sidecar write
+// must not leave mutated global SRAM that a later unrelated ZeldaWriteSram call
+// could accidentally persist.
+static bool SaveGameFile_InstallStagedSlot(
+    int slot_index, const uint8 staged[0x500], uint16 checksum,
+    bool sidecar_saved) {
+  if (!sidecar_saved || slot_index < 0 || slot_index >= 3) return false;
+  int offs = slot_index * 0x500;
+  memcpy(g_zenv.sram + offs, staged, 0x500);
+  memcpy(g_zenv.sram + offs + 0xf00, staged, 0x500);
+  word_7EF4FE = checksum;
+  return true;
+}
+
+void SaveGameFile() {  // 80894a
+  if (g_test_scenario_active) return;  // test scenarios never save
+  if (srm_var1 < 2 || srm_var1 > 6 || (srm_var1 & 1)) return;
+  int slot_index = (srm_var1 >> 1) - 1;
+  uint8 staged[0x500];
+  uint16 checksum = SaveGameFile_BuildStagedSlot(staged);
+  // Persist discovery and the other randomizer state to the sidecar first. The
+  // sidecar checksum covers `staged`; only a successful write makes those bytes
+  // eligible to replace either global SRAM copy.
+  bool sidecar_saved =
+      Rando_OnGameSave(slot_index, staged, (uint32)sizeof(staged));
+  if (SaveGameFile_InstallStagedSlot(slot_index, staged, checksum,
+                                    sidecar_saved))
+    ZeldaWriteSram();
+  else
+    fprintf(stderr,
+            "Rando: sidecar save failed; paired SRAM write suppressed\n");
+}
+
+void SaveGameFile_StagingSelfCheck(void) {
+  // Headless self-tests run before the normal frontend allocates cartridge
+  // SRAM. Exercise the install gate against a private full paired-SRAM image
+  // and restore the environment pointer afterward.
+  uint8 scratch_sram[0x1400];
+  uint8 *saved_sram = g_zenv.sram;
+  uint8 primary_before[0x500], backup_before[0x500], staged[0x500];
+  uint16 checksum_before = word_7EF4FE;
+  for (size_t i = 0; i < sizeof(scratch_sram); i++)
+    scratch_sram[i] = (uint8)(i * 17u + 3u);
+  g_zenv.sram = scratch_sram;
+  memcpy(primary_before, g_zenv.sram, sizeof(primary_before));
+  memcpy(backup_before, g_zenv.sram + 0xf00, sizeof(backup_before));
+  memset(staged, 0xA5, sizeof(staged));
+  WORD(staged[0x4fe]) = 0x1357;
+
+  if (SaveGameFile_InstallStagedSlot(0, staged, 0x1357, false) ||
+      memcmp(primary_before, g_zenv.sram, sizeof(primary_before)) != 0 ||
+      memcmp(backup_before, g_zenv.sram + 0xf00,
+             sizeof(backup_before)) != 0 ||
+      word_7EF4FE != checksum_before) {
+    fprintf(stderr,
+            "[SaveGameFile_StagingSelfCheck] FAIL: failed sidecar mutated "
+            "global SRAM/checksum\n");
+    abort();
+  }
+  g_zenv.sram = saved_sram;
+  fprintf(stderr, "[SaveGameFile_StagingSelfCheck] OK\n");
 }
 
 void TransferMode7Characters() {  // 80e399
@@ -395,6 +620,21 @@ void Module1B_SpawnSelect() {  // 828586
   uint8 bak = which_starting_point;
   which_starting_point = kLocationMenuStartPos[choice_in_multiselect_box];
   subsubmodule_index = 0;
+  // add-rando-inverted-dark-chapel-spawn: under an Inverted slot, spawn the player
+  // INSIDE the anchor interior (the vanilla spawn-select room — the "Dark Chapel"
+  // IS the Sanctuary interior, "Dark Mountain" the Mountain Cave) exactly as
+  // vanilla does, and arm the redirect so that walking OUT the door lands in the
+  // Dark World instead of the Light World (consumed in LoadOverworldFromDungeon:
+  // Sanctuary 0x13->0x53, Mountain Cave 0x03->0x43; "@'s House" / Link's House is
+  // already 0x6C via its entrance-swap exit override, so the OR is a no-op there).
+  // Keeping the normal indoor -> walk-out-the-door path (LoadDungeonRoomRebuildHUD)
+  // is deliberate: it sets up the overworld screen the way the game expects. An
+  // earlier revision spawned directly outdoors (main_module 8) and the player
+  // could not move — that shortcut skipped the normal door-exit screen setup.
+  // Non-Inverted is untouched, so the menu RAM-compares byte-identical.
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+      Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */)
+    g_rando_inverted_spawn_redirect = 1;
   LoadDungeonRoomRebuildHUD();
   which_starting_point = bak;
 }
@@ -639,6 +879,7 @@ void Death_Func1() {  // 89f2a4
 }
 
 void GameOver_DelayBeforeIris() {  // 89f33b
+  some_menu_ctr = CutsceneClampTimer8(some_menu_ctr, 4);
   if (--some_menu_ctr)
     return;
   Death_InitializeGameOverLetters();
@@ -687,6 +928,7 @@ void GameOver_IrisWipe() {  // 89f350
 
 void GameOver_SplatAndFade() {  // 89f3de
   if (some_menu_ctr) {
+    some_menu_ctr = CutsceneClampTimer8(some_menu_ctr, 4);
     some_menu_ctr--;
     return;
   }
@@ -700,6 +942,8 @@ void GameOver_SplatAndFade() {  // 89f3de
 
   for (int i = 0; i != 4; i++) {
     if (link_bottle_info[i] == 6) {
+      // rando-exempt: state-shuffle — fairy revive consumes the fairy
+      // (bottle contents 6 → empty 2). Not a grant. (audit.md §0.2.2)
       link_bottle_info[i] = 2;
       some_menu_ctr = 12;
       load_chr_halfslot_even_odd = 15;
@@ -717,7 +961,7 @@ void GameOver_SplatAndFade() {  // 89f3de
 }
 
 void Death_Func6() {  // 89f458
-  some_menu_ctr = 12;
+  some_menu_ctr = CutsceneFastForwardEnabled() ? 4 : 12;
   load_chr_halfslot_even_odd = 15;
   Graphics_LoadChrHalfSlot();
   load_chr_halfslot_even_odd = 0;
@@ -786,7 +1030,14 @@ void Death_Func15(bool count_as_death) {  // 89f50f
     Dungeon_FlagRoomData_Quadrants();
   AdjustLinkBunnyStatus();
   if (sram_progress_indicator < 3) {
-    savegame_is_darkworld = 0;
+    // #82 Inverted: vanilla forces the LIGHT world on a pre-Agahnim death
+    // respawn (darkworldspawn.asm SetDeathWorldChecked/DoWorldFix). In Inverted
+    // the "home" world is the DARK world, so DoWorldFix_Inverted forces 0x40
+    // instead. Keep the respawn in the DW so an Inverted player isn't dumped
+    // into the (mirror-only) Light World on death.
+    bool rando_inverted = (enhanced_features1 & kFeatures1_RandomizerActive) &&
+                          Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */;
+    savegame_is_darkworld = rando_inverted ? 0x40 : 0;
     if (!link_item_moon_pearl)
       ForceNonbunnyStatus();
   }
@@ -799,8 +1050,16 @@ void Death_Func15(bool count_as_death) {  // 89f50f
 
   death_var4 = link_health_current = kHealthAfterDeath[link_health_capacity >> 3];
   uint8 i = BYTE(cur_palace_index_x2);
-  if (i != 0xff)
-    link_keys_earned_per_dungeon[(i == 2 ? 0 : i) >> 1] = link_num_keys;
+  if (i != 0xff) {
+    // rando-exempt: state-shuffle — death-time key save (mirrors
+    // SaveDungeonKeys). Under Retro genericKeys, persist to the shared pool slot
+    // instead of the per-dungeon slot so the shared counter is authoritative at
+    // death (parity with the other key-save sites). Not a grant.
+    if (Rando_IsGenericKeysActive())
+      link_generic_keys = link_num_keys;
+    else
+      link_keys_earned_per_dungeon[(i == 2 ? 0 : i) >> 1] = link_num_keys;
+  }
   Sprite_ResetAll();
   if (death_var2 == 0xffff && (!(enhanced_features0 & kFeatures0_MiscBugFixes) || count_as_death))
     death_save_counter++;
@@ -820,8 +1079,10 @@ void Death_Func15(bool count_as_death) {  // 89f50f
     }
 
     if (sram_progress_indicator) {
-      if (subsubmodule_index == 0)
+      if (subsubmodule_index == 0) {
+        (void)Rando_NormalizeMirrorlessAwayWorld();
         SaveGameFile();
+      }
       main_module_index = 5;
       submodule_index = 0;
       nmi_load_bg_from_vram = 0;
@@ -833,6 +1094,7 @@ void Death_Func15(bool count_as_death) {  // 89f50f
       CopySaveToWRAM();
     }
   } else {
+    (void)Rando_NormalizeMirrorlessAwayWorld();
     SaveGameFile();
     ZeldaClearAutosave();
     TM_copy = 16;
@@ -858,12 +1120,15 @@ void Death_Func15(bool count_as_death) {  // 89f50f
 }
 
 void GameOver_AnimateChoiceFairy() {  // 89f67a
-  SetOamPlain(&oam_buf[0x14], 0x34, kDeath_SprY0[subsubmodule_index], kDeath_SprChar0[frame_counter >> 3 & 1], 0x78, 2);
+  // On the game's screen, as the GAME OVER letters (GameOverText_Draw).
+  uint16 x = 0x34 - ZeldaWidePictureShift();
+  uint8 y = kDeath_SprY0[subsubmodule_index] - g_wide_picture_rows;
+  SetOamPlain(&oam_buf[0x14], x, y, kDeath_SprChar0[frame_counter >> 3 & 1], 0x78, 2 | (x >> 8 & 1));
 }
 
 void GameOver_InitializeRevivalFairy() {  // 89f6a4
   ConfigureRevivalAncillae();
-  link_hearts_filler = 56;
+  link_hearts_filler = (enhanced_features1 & kFeatures1_QolFairyHearts) ? 64 : 56;
   submodule_index += 1;
   overworld_map_state = 0;
 }
@@ -984,21 +1249,40 @@ void FluteMenu_HandleSelection() {  // 8ab78b
   }
   birdtravel_var1[0] = birdtravel_var1[0] & 7;
   if (frame_counter & 0x10 && WorldMap_CalculateOamCoordinates(&pt))
-    WorldMap_AddSprite(16, 2, 0x3e, 0, pt.x - 4, pt.y - 4);
+    WorldMap_AddSprite(16, 2, 0x3e, 0, pt.x - 4, pt.y - 4, 0);
 
   uint16 ybak = link_y_coord_spexit;
   uint16 xbak = link_x_coord_spexit;
+  const uint8 *spots = Mods_Table(kModTable_BirdTravel);
+  if (!spots)
+    spots = kBirdTravel_Spots;
   for (int i = 7; i >= 0; i--) {
-    bird_travel_x_lo[i] = kBirdTravel_x_lo[i];
-    bird_travel_x_hi[i] = kBirdTravel_x_hi[i];
-    link_x_coord_spexit = kBirdTravel_x_hi[i] << 8 | kBirdTravel_x_lo[i];
+    // add-rando-ow-warp-shuffle — under an active flute shuffle the blips
+    // follow the per-seed spots (vanilla screens keep the hand-tuned
+    // positions; shuffled ones derive from the landing). Falls through to
+    // the vanilla const tables otherwise.
+    uint16 rando_bx, rando_by;
+    if (Rando_OwWarp_FluteBlip((uint8)i, &rando_bx, &rando_by)) {
+      bird_travel_x_lo[i] = (uint8)(rando_bx & 0xff);
+      bird_travel_x_hi[i] = (uint8)(rando_bx >> 8);
+      link_x_coord_spexit = rando_bx;
+      bird_travel_y_lo[i] = (uint8)(rando_by & 0xff);
+      bird_travel_y_hi[i] = (uint8)(rando_by >> 8);
+      link_y_coord_spexit = rando_by;
+      if (WorldMap_CalculateOamCoordinates(&pt))
+        WorldMap_AddSprite(i, 0, (i == birdtravel_var1[0]) ? 0x30 + (frame_counter & 6) : 0x32, kBirdTravel_tab1[i], pt.x, pt.y, 0);
+      continue;
+    }
+    bird_travel_x_lo[i] = spots[i];
+    bird_travel_x_hi[i] = spots[8 + i];
+    link_x_coord_spexit = spots[8 + i] << 8 | spots[i];
 
-    bird_travel_y_lo[i] = kBirdTravel_y_lo[i];
-    bird_travel_y_hi[i] = kBirdTravel_y_hi[i];
-    link_y_coord_spexit = kBirdTravel_y_hi[i] << 8 | kBirdTravel_y_lo[i];
+    bird_travel_y_lo[i] = spots[16 + i];
+    bird_travel_y_hi[i] = spots[24 + i];
+    link_y_coord_spexit = spots[24 + i] << 8 | spots[16 + i];
 
     if (WorldMap_CalculateOamCoordinates(&pt))
-      WorldMap_AddSprite(i, 0, (i == birdtravel_var1[0]) ? 0x30 + (frame_counter & 6) : 0x32, kBirdTravel_tab1[i], pt.x, pt.y);
+      WorldMap_AddSprite(i, 0, (i == birdtravel_var1[0]) ? 0x30 + (frame_counter & 6) : 0x32, kBirdTravel_tab1[i], pt.x, pt.y, 0);
   }
   link_x_coord_spexit = xbak;
   link_y_coord_spexit = ybak;
@@ -1159,6 +1443,13 @@ bool DidPressButtonForMap() {
 }
 
 void WorldMap_PlayerControl() {  // 8abae6
+#if defined(__3DS__) || defined(ZELDA3_TEST_NATIVE_FILE_MENU)
+  // B always leaves the map, even when zoomed or X is assigned to an item.
+  if (filtered_joypad_H & 0x80) {
+    overworld_map_state++;
+    return;
+  }
+#endif
   if (overworld_map_flags & 0x80) {
     overworld_map_flags &= ~0x80;
     OverworldMap_SetupHdma();
@@ -1291,19 +1582,27 @@ void WorldMap_HandleSprites() {  // 8abf66
   Point16U pt;
 
   if (frame_counter & 0x10 && WorldMap_CalculateOamCoordinates(&pt))
-    WorldMap_AddSprite(0, 2, 0x3e, 0, pt.x - 4, pt.y - 4);
+    WorldMap_AddSprite(0, 2, 0x3e, 0, pt.x - 4, pt.y - 4, 0);
 
   uint16 ybak = link_y_coord_spexit;
   uint16 xbak = link_x_coord_spexit;
 
   int k = 15;
-  if (BYTE(overworld_screen_index) < 0x40 && (bird_travel_x_lo[k] | bird_travel_x_hi[k] | bird_travel_y_lo[k] | bird_travel_y_hi[k])) {
+  // #82 Inverted: residual-portal map indicator (z3randomizer $8ABFBB BCS->BCC).
+  // Vanilla shows the leftover-portal marker only on the LIGHT-world map
+  // (screen<0x40); Inverted shows it on the DARK-world map instead. Visual-only.
+  bool show_portal_marker =
+      ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+       Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */)
+        ? (BYTE(overworld_screen_index) >= 0x40)
+        : (BYTE(overworld_screen_index) < 0x40);
+  if (show_portal_marker && (bird_travel_x_lo[k] | bird_travel_x_hi[k] | bird_travel_y_lo[k] | bird_travel_y_hi[k])) {
     if (!frame_counter)
       birdtravel_var1[k]++;
     link_x_coord_spexit = bird_travel_x_hi[k] << 8 | bird_travel_x_lo[k];
     link_y_coord_spexit = bird_travel_y_hi[k] << 8 | bird_travel_y_lo[k];
     if (WorldMap_CalculateOamCoordinates(&pt))
-      WorldMap_AddSprite(15, 2, kOverworldMap_Table4[frame_counter >> 1 & 3], 0x6a, pt.x, pt.y);
+      WorldMap_AddSprite(15, 2, kOverworldMap_Table4[frame_counter >> 1 & 3], 0x6a, pt.x, pt.y, 0);
   }
 
   if (save_ow_event_info[0x5b] & 0x20 || (((savegame_map_icons_indicator >= 6) ^ is_in_dark_world) & 1))
@@ -1311,137 +1610,53 @@ void WorldMap_HandleSprites() {  // 8abf66
 
   k = savegame_map_icons_indicator;
 
-  if (!OverworldMap_CheckForPendant(0) && !OverworldMap_CheckForCrystal(0) && !sign16(kOwMapCrystal0_x[k])) {
-    link_x_coord_spexit = kOwMapCrystal0_x[k];
-    link_y_coord_spexit = kOwMapCrystal0_y[k];
-    uint8 t = kOwMapCrystal0_tab[k] >> 8;
-    if (t != 0) {
-      if (t != 100 && frame_counter & 0x10)
-        goto endif_crystal0;
-      link_x_coord_spexit -= 4, link_y_coord_spexit -= 4;
-    }
-    if (WorldMap_CalculateOamCoordinates(&pt)) {
-      uint16 info = kOwMapCrystal0_tab[k];
-      uint8 ext = 2;
-      if (!(info >> 8))
-        info = kOwMap_tab2[frame_counter >> 3 & 3] << 8 | 0x32, ext = 0;
-      WorldMap_AddSprite(14, ext, (uint8)info, (uint8)(info >> 8), pt.x, pt.y);
-    }
-  endif_crystal0:;
-  }
+  // Vanilla draws seven byte-identical copies of this block, one per marker
+  // slot (slot i => sprite 14 - i). Folded into a loop so the rando prize
+  // re-keying below is ONE hook instead of seven. The pendant ownership test
+  // exists only for slots 0..2 in vanilla, and the `i < 3` guard is load-
+  // bearing, not cosmetic: kPendantBitMask has just 3 entries, so dropping it
+  // would read out of bounds. (Slot 3 DOES carry a marker at map-icon state 3
+  // — the Master Sword pedestal — which vanilla deliberately never hides.)
+  for (int i = 0; i < 7; i++) {
+    // fix-ow-map-prize-markers: under prize_shuffle the vanilla (icon, crystal
+    // number, ownership test) triple asserts the VANILLA dungeon->prize
+    // assignment, which the seed has replaced. Resolve the slot by DUNGEON
+    // instead, knowledge-gated: the true prize only once its location is
+    // checked, the vanilla blinking "unknown" marker (tab 0) until then.
+    // Substituting before the `t` branch reuses vanilla's own kOwMap_tab2 path.
+    uint16 tab = kOwMapCrystal_tab[i][k];
+    uint8 num_char = 0;
+    bool rando_marker = RandoOwMap_PrizeMarker(k, (uint8)i, &tab, &num_char);
 
-  if (!OverworldMap_CheckForPendant(1) && !OverworldMap_CheckForCrystal(1) && !sign16(kOwMapCrystal1_x[k])) {
-    link_x_coord_spexit = kOwMapCrystal1_x[k];
-    link_y_coord_spexit = kOwMapCrystal1_y[k];
-    uint8 t = kOwMapCrystal1_tab[k] >> 8;
-    if (t != 0) {
-      if (t != 100 && frame_counter & 0x10)
-        goto endif_crystal1;
-      link_x_coord_spexit -= 4, link_y_coord_spexit -= 4;
+    if (!rando_marker) {
+      // Vanilla hides a marker once the prize TYPE is owned. Under a shuffled
+      // assignment that tests the wrong thing in both directions, so the rando
+      // path keeps the marker for the whole game and lets the icon carry the
+      // state (unknown -> the dungeon's real prize once collected).
+      if (i < 3 && OverworldMap_CheckForPendant(i))
+        continue;
+      if (OverworldMap_CheckForCrystal(i))
+        continue;
     }
-    if (WorldMap_CalculateOamCoordinates(&pt)) {
-      uint16 info = kOwMapCrystal1_tab[k];
-      uint8 ext = 2;
-      if (!(info >> 8))
-        info = kOwMap_tab2[frame_counter >> 3 & 3] << 8 | 0x32, ext = 0;
-      WorldMap_AddSprite(13, ext, (uint8)info, (uint8)(info >> 8), pt.x, pt.y);
-    }
-  endif_crystal1:;
-  }
+    if (sign16(WorldMap_PrizeCoordinate(i, false, k)))
+      continue;
 
-  if (!OverworldMap_CheckForPendant(2) && !OverworldMap_CheckForCrystal(2) && !sign16(kOwMapCrystal2_x[k])) {
-    link_x_coord_spexit = kOwMapCrystal2_x[k];
-    link_y_coord_spexit = kOwMapCrystal2_y[k];
-    uint8 t = kOwMapCrystal2_tab[k] >> 8;
+    link_x_coord_spexit = WorldMap_PrizeCoordinate(i, false, k);
+    link_y_coord_spexit = WorldMap_PrizeCoordinate(i, true, k);
+    uint8 t = tab >> 8;
     if (t != 0) {
       if (t != 100 && frame_counter & 0x10)
-        goto endif_crystal2;
+        continue;
       link_x_coord_spexit -= 4, link_y_coord_spexit -= 4;
     }
     if (WorldMap_CalculateOamCoordinates(&pt)) {
-      uint16 info = kOwMapCrystal2_tab[k];
+      uint16 info = tab;
       uint8 ext = 2;
       if (!(info >> 8))
         info = kOwMap_tab2[frame_counter >> 3 & 3] << 8 | 0x32, ext = 0;
-      WorldMap_AddSprite(12, ext, (uint8)info, (uint8)(info >> 8), pt.x, pt.y);
+      WorldMap_AddSprite(14 - i, ext, (uint8)info, (uint8)(info >> 8), pt.x, pt.y,
+                         num_char);
     }
-  endif_crystal2:;
-  }
-
-  if (!OverworldMap_CheckForCrystal(3) && !sign16(kOwMapCrystal3_x[k])) {
-    link_x_coord_spexit = kOwMapCrystal3_x[k];
-    link_y_coord_spexit = kOwMapCrystal3_y[k];
-    uint8 t = kOwMapCrystal3_tab[k] >> 8;
-    if (t != 0) {
-      if (t != 100 && frame_counter & 0x10)
-        goto endif_crystal3;
-      link_x_coord_spexit -= 4, link_y_coord_spexit -= 4;
-    }
-    if (WorldMap_CalculateOamCoordinates(&pt)) {
-      uint16 info = kOwMapCrystal3_tab[k];
-      uint8 ext = 2;
-      if (!(info >> 8))
-        info = kOwMap_tab2[frame_counter >> 3 & 3] << 8 | 0x32, ext = 0;
-      WorldMap_AddSprite(11, ext, (uint8)info, (uint8)(info >> 8), pt.x, pt.y);
-    }
-  endif_crystal3:;
-  }
-
-  if (!OverworldMap_CheckForCrystal(4) && !sign16(kOwMapCrystal4_x[k])) {
-    link_x_coord_spexit = kOwMapCrystal4_x[k];
-    link_y_coord_spexit = kOwMapCrystal4_y[k];
-    uint8 t = kOwMapCrystal4_tab[k] >> 8;
-    if (t != 0) {
-      if (t != 100 && frame_counter & 0x10)
-        goto endif_crystal4;
-      link_x_coord_spexit -= 4, link_y_coord_spexit -= 4;
-    }
-    if (WorldMap_CalculateOamCoordinates(&pt)) {
-      uint16 info = kOwMapCrystal4_tab[k];
-      uint8 ext = 2;
-      if (!(info >> 8))
-        info = kOwMap_tab2[frame_counter >> 3 & 3] << 8 | 0x32, ext = 0;
-      WorldMap_AddSprite(10, ext, (uint8)info, (uint8)(info >> 8), pt.x, pt.y);
-    }
-  endif_crystal4:;
-  }
-
-  if (!OverworldMap_CheckForCrystal(5) && !sign16(kOwMapCrystal5_x[k])) {
-    link_x_coord_spexit = kOwMapCrystal5_x[k];
-    link_y_coord_spexit = kOwMapCrystal5_y[k];
-    uint8 t = kOwMapCrystal5_tab[k] >> 8;
-    if (t != 0) {
-      if (t != 100 && frame_counter & 0x10)
-        goto endif_crystal5;
-      link_x_coord_spexit -= 4, link_y_coord_spexit -= 4;
-    }
-    if (WorldMap_CalculateOamCoordinates(&pt)) {
-      uint16 info = kOwMapCrystal5_tab[k];
-      uint8 ext = 2;
-      if (!(info >> 8))
-        info = kOwMap_tab2[frame_counter >> 3 & 3] << 8 | 0x32, ext = 0;
-      WorldMap_AddSprite(9, ext, (uint8)info, (uint8)(info >> 8), pt.x, pt.y);
-    }
-  endif_crystal5:;
-  }
-
-  if (!OverworldMap_CheckForCrystal(6) && !sign16(kOwMapCrystal6_x[k])) {
-    link_x_coord_spexit = kOwMapCrystal6_x[k];
-    link_y_coord_spexit = kOwMapCrystal6_y[k];
-    uint8 t = kOwMapCrystal6_tab[k] >> 8;
-    if (t != 0) {
-      if (t != 100 && frame_counter & 0x10)
-        goto endif_crystal6;
-      link_x_coord_spexit -= 4, link_y_coord_spexit -= 4;
-    }
-    if (WorldMap_CalculateOamCoordinates(&pt)) {
-      uint16 info = kOwMapCrystal6_tab[k];
-      uint8 ext = 2;
-      if (!(info >> 8))
-        info = kOwMap_tab2[frame_counter >> 3 & 3] << 8 | 0x32, ext = 0;
-      WorldMap_AddSprite(8, ext, (uint8)info, (uint8)(info >> 8), pt.x, pt.y);
-    }
-  endif_crystal6:;
   }
 
 out:
@@ -1501,10 +1716,15 @@ static bool WorldMap_CalculateOamCoordinates(Point16U *pt) {  // 8ac39f
   }
 }
 
-static void WorldMap_AddSprite(int spr, uint8 big, uint8 flags, uint8 ch, uint16 x, uint16 y) {  // 8ac51c
+// `num_char` overrides the crystal-NUMBER glyph a crystal marker (ch == 100)
+// blinks to. 0 = vanilla, i.e. the glyph baked into this OAM slot. Nonzero only
+// from the rando prize path, where the placed crystal's number no longer
+// matches the slot (fix-ow-map-prize-markers).
+static void WorldMap_AddSprite(int spr, uint8 big, uint8 flags, uint8 ch, uint16 x, uint16 y,
+                               uint8 num_char) {  // 8ac51c
   if (!(frame_counter & 0x10) && ch == 100) {
     assert(spr >= 8);
-    ch = kOverworldMapData[spr - 8];
+    ch = num_char ? num_char : kOverworldMapData[spr - 8];
     flags = 0x32;
     big = 0;
   } else {
@@ -1563,7 +1783,19 @@ void Module0E_03_01_00_PrepMapGraphics() {  // 8ae0e4
 void Module0E_03_01_01_DrawLEVEL() {  // 8ae1a4
   // Display FLOOR instead of MAP
   int i = kDungMap_Tab0[cur_palace_index_x2 >> 1] >> 1;
-  if (i >= 0) {
+  if (i >= 0 && g_loc_rom) {
+    // NIVEAU is a column wider, blank on both sides, drawn at $7883 from
+    // $8A:E15D and $8A:E16D ($8A:E1AB).
+    uint8 *dst = (uint8 *)&vram_upload_data[0];
+    dst[40] = 0xff;
+    WORD(dst[18]) = 0x207f;
+    WORD(dst[18 + 20]) = 0x207f;
+    WORD(dst[16]) = kDungMap_Tab1[i];
+    WORD(dst[16 + 20]) = kDungMap_Tab2[i];
+    memcpy(dst, Loc_Rom(0x8ae15d), 16);
+    memcpy(dst + 20, Loc_Rom(0x8ae16d), 16);
+    nmi_load_bg_from_vram = 1;
+  } else if (i >= 0) {
     uint8 *dst = (uint8 *)&vram_upload_data[0];
     dst[32] = 0xff;
     WORD(dst[14   ]) = kDungMap_Tab1[i];
@@ -1680,6 +1912,21 @@ void DungeonMap_DrawFloorNumbersByRoom(uint16 pd, uint16 r8) {  // 8ae4f9
   int t = ((0x35e + pd) & 0xfff) >> 1;
   uint16 q1 = (dungmap_cur_floor & 0x80) ? 0x1F1C : kDungMap_Tab16[dungmap_cur_floor & 0xf];
   uint16 q2 = (dungmap_cur_floor & 0x80) ? kDungMap_Tab16[(uint8)~dungmap_cur_floor] : 0x1F1D;
+  if (Loc_UsesFrenchFloorNames()) {
+    // SS before a basement, RC for the ground floor, a raised e after the
+    // others, which count from the first floor up ($8A:E533).
+    int f = dungmap_cur_floor & 0xf;
+    if (dungmap_cur_floor & 0x80) {
+      q1 = 0x1F17;
+      q2 = kDungMap_Tab16[(uint8)~dungmap_cur_floor];
+    } else if (f == 0) {
+      q1 = 0x1F1C;
+      q2 = 0x1F1D;
+    } else {
+      q1 = kDungMap_Tab16[f - 1];
+      q2 = 0x1F18;
+    }
+  }
   messaging_buf[t+0] = q1 & r8;
   messaging_buf[t+1] = q2 & r8;
 }
@@ -1836,6 +2083,10 @@ void DungeonMap_HandleInputAndSprites() {  // 8ae954
 }
 
 static inline bool WantExitDungeonMap() {
+#if defined(__3DS__) || defined(ZELDA3_TEST_NATIVE_FILE_MENU)
+  if (filtered_joypad_H & 0x80)
+    return true;
+#endif
   if (hud_cur_item_x != 0)
     return filtered_joypad_H & 0x20;  // Select
   else
@@ -1899,6 +2150,80 @@ void DungeonMap_ScrollFloors() {  // 8aea7f
     dungmap_var2 = 0;
 }
 
+enum { kDungeonMapRandoDigitTileBase = 0xf0 };
+
+// The dungeon-map OBJ sheet contains only floor digits 1..8 at chars 0x1e..0x25;
+// chars 0x26/0x27 are map-border pieces, not 9/0. Upload a complete decimal font
+// into the same borrowed objTileAdr2 chars (0xF0.. — the subset-3 sheet's 4th
+// row, here the map tileset's) used by the mutually-exclusive rando HUD/marker
+// overlays. DungeonMap_RecoverGFX re-runs InitializeTilesets on map close, which
+// reloads the dungeon sheets and clears the stamp masks; stamping here keeps the
+// release restore correct for any path that leaves map mode without that reload.
+static const uint8 kDungeonMapRandoDigitRows[10][8] = {
+  {0x3c, 0x66, 0x6e, 0x76, 0x66, 0x66, 0x3c, 0x00}, // 0
+  {0x18, 0x38, 0x18, 0x18, 0x18, 0x18, 0x7e, 0x00}, // 1
+  {0x3c, 0x66, 0x06, 0x0c, 0x18, 0x30, 0x7e, 0x00}, // 2
+  {0x3c, 0x66, 0x06, 0x1c, 0x06, 0x66, 0x3c, 0x00}, // 3
+  {0x0c, 0x1c, 0x3c, 0x6c, 0x7e, 0x0c, 0x0c, 0x00}, // 4
+  {0x7e, 0x60, 0x7c, 0x06, 0x06, 0x66, 0x3c, 0x00}, // 5
+  {0x1c, 0x30, 0x60, 0x7c, 0x66, 0x66, 0x3c, 0x00}, // 6
+  {0x7e, 0x06, 0x0c, 0x18, 0x30, 0x30, 0x30, 0x00}, // 7
+  {0x3c, 0x66, 0x66, 0x3c, 0x66, 0x66, 0x3c, 0x00}, // 8
+  {0x3c, 0x66, 0x66, 0x3e, 0x06, 0x0c, 0x38, 0x00}, // 9
+};
+
+static void DungeonMap_UploadRandoDigitTiles(void) {
+  for (int digit = 0; digit < 10; digit++) {
+    uint16 *tile = &g_zenv.vram[0x5000 + (kDungeonMapRandoDigitTileBase + digit) * 16];
+    for (int row = 0; row < 8; row++) {
+      uint8 pixels = kDungeonMapRandoDigitRows[digit][row];
+      // Palette index 6: planes 1 and 2 set, matching the vanilla map digits.
+      tile[row] = (uint16)pixels << 8;
+      tile[row + 8] = pixels;
+    }
+  }
+  // Digits occupy chars 0xF0..0xF9 = scratch slots 0-2; record the ownership
+  // so live sprite art is restored once the map overlay stops drawing them.
+  Rando_ObjScratchMarkSlotsDirty(0x07);
+}
+
+static int DungeonMap_DrawRandoCheckCount(int spr_pos) {
+  if (ZeldaIsEmulatorAttached())
+    return spr_pos;
+  if (!(enhanced_features0 & kFeatures0_RandoDungeonCheckCounts) ||
+      !(enhanced_features1 & kFeatures1_RandomizerActive) ||
+      !Rando_IsActive())
+    return spr_pos;
+
+  uint8 game_dungeon = Rando_GameDungeonFromRawPalace((uint8)cur_palace_index_x2);
+  uint8 rando_dungeon = Rando_MapDisplayDungeonFromGameDungeon(game_dungeon);
+  uint16 checked = 0, total = 0;
+  Rando_DungeonCheckCounts(rando_dungeon, &checked, &total);
+  if (total == 0)
+    return spr_pos;
+
+  DungeonMap_UploadRandoDigitTiles();
+
+  uint16 remaining = (checked < total) ? (uint16)(total - checked) : 0;
+  if (remaining > 999)
+    remaining = 999;
+
+  uint8 digits[3];
+  int n = 0;
+  if (remaining >= 100)
+    digits[n++] = (uint8)(remaining / 100);
+  if (remaining >= 10 || n != 0)
+    digits[n++] = (uint8)((remaining / 10) % 10);
+  digits[n++] = (uint8)(remaining % 10);
+
+  int x = 0xd8 - n * 8;
+  for (int i = 0; i < n; i++) {
+    SetOamPlain(&oam_buf[spr_pos++], (uint8)(x + i * 8), 0x20,
+                (uint8)(kDungeonMapRandoDigitTileBase + digits[i]), 0x3d, 0);
+  }
+  return spr_pos;
+}
+
 void DungeonMap_DrawSprites() {  // 8aeab2
   int dung = cur_palace_index_x2 >> 1;
   uint8 r2 = (kDungMap_Tab5[dung] & 0xf);
@@ -1914,6 +2239,7 @@ void DungeonMap_DrawSprites() {  // 8aeab2
   spr_pos = DungeonMap_DrawBlinkingIndicator(spr_pos);
   spr_pos = DungeonMap_DrawBossIcon(spr_pos);
   spr_pos = DungeonMap_DrawFloorNumberObjects(spr_pos);
+  spr_pos = DungeonMap_DrawRandoCheckCount(spr_pos);
   DungeonMap_DrawFloorBlinker();
 }
 
@@ -1965,8 +2291,14 @@ int DungeonMap_DrawFloorNumberObjects(int spr_pos) {  // 8aec0a
   r2--;
   r3 = -r3;
   do {
-    SetOamPlain(&oam_buf[spr_pos + 0], 0x30, r4, sign8(r2) ? 0x1c : kDungMap_Tab34[r2], 0x3d, 0);
-    SetOamPlain(&oam_buf[spr_pos + 1], 0x38, r4, sign8(r2) ? kDungMap_Tab34[r2 ^ 0xff] : 0x1d, 0x3d, 0);
+    uint8 left = sign8(r2) ? 0x1c : kDungMap_Tab34[r2];
+    uint8 right = sign8(r2) ? kDungMap_Tab34[r2 ^ 0xff] : 0x1d;
+    if (Loc_UsesFrenchFloorNames()) {  // the same names as the room grid ($8A:ECB7)
+      left = sign8(r2) ? 0x17 : r2 == 0 ? 0x1c : kDungMap_Tab34[r2 - 1];
+      right = sign8(r2) ? kDungMap_Tab34[r2 ^ 0xff] : r2 == 0 ? 0x1d : 0x18;
+    }
+    SetOamPlain(&oam_buf[spr_pos + 0], 0x30, r4, left, 0x3d, 0);
+    SetOamPlain(&oam_buf[spr_pos + 1], 0x38, r4, right, 0x3d, 0);
     r4 += 16;
   } while (spr_pos += 2, r2-- != r3);
   return spr_pos;
@@ -2105,7 +2437,9 @@ void CopySaveToWRAM() {  // 8ccfbb
   word_7EC013 = 7;
   word_7EC00F = 0;
   word_7EC015 = 0;
-  word_7E0219 = 0x6040;
+  // The HUD goes to the BG3 tilemap: $7840 in the French Canadian cartridge
+  // ($8E:8F23).
+  word_7E0219 = g_loc_rom ? 0x7840 : 0x6040;
   word_7E021D = 0x4841;
   word_7E021F = 0x7f;
   word_7E0221 = 0xffff;
@@ -2120,8 +2454,18 @@ void CopySaveToWRAM() {  // 8ccfbb
   main_module_index = 5;
   submodule_index = 0;
   which_entrance = 0;
+  // add-rando-shopsanity — the overworld-door shop key is the companion of
+  // which_entrance, so it retires with it. Save-and-quit respawns at a start
+  // point, never through a door, and no start-point room is a shop room, so
+  // this is consistency rather than a live fault; leaving a door id behind
+  // would still be a stale signal for the next reader.
+  if (enhanced_features1 & kFeatures1_RandomizerActive)
+    g_ram[kRam_RandoOverworldDoor] = 0;
   nmi_disable_core_updates = 0;
   hud_palette = 0;
+  // The game runs with BG3 as 32x64 there ($8E:8F51).
+  if (g_loc_rom)
+    BG3SC_copy = 0x7a;
 }
 
 void RenderText() {  // 8ec440
@@ -2131,7 +2475,8 @@ void RenderText() {  // 8ec440
 void RenderText_PostDeathSaveOptions() {  // 8ec455
   dialogue_message_index = 3;
   Text_Initialize_initModuleStateLoop();
-  text_msgbox_topleft = 0x61e8;
+  // $79E8 in the French Canadian cartridge ($8C:E124).
+  text_msgbox_topleft = g_loc_rom ? 0x79e8 : 0x61e8;
   text_render_state = 2;
   for (int i = 0; i < 5; i++)
     Text_Render();
@@ -2146,6 +2491,8 @@ void Text_Initialize() {  // 8ec483
 
 void Text_Initialize_initModuleStateLoop() {  // 8ec493
   memcpy(&text_msgbox_topleft_copy, kText_InitializationData, 32);
+  text_wait_countdown2 = Text_EffectiveInputLatch();
+  vwf_line_speed = vwf_line_speed_cur = Text_EffectiveLineSpeed(vwf_line_speed);
   Text_InitVwfState();
   RenderText_SetDefaultWindowPosition();
   text_tilemap_cur = 0x3980;
@@ -2246,6 +2593,10 @@ uint32 Text_DecodeCmd(uint8 a, const uint8 *src) {
     case 2: return TEXTCMD_MK(a & 0xF, kTextCmd_Number, 1);
     case 3: return TEXTCMD_MK(a & 0xF, kTextCmd_Speed, 1);
     case 4: return TEXTCMD_MK(kSoundLut[a & 0xF], kTextCmd_Sound, 1);
+    // The scroll speed. The European cartridges have it too, as command 0x87
+    // with the speed after it; the French Canadian one sets it to 0 for the
+    // legend of the attract mode (message 0x112), as the USA one does.
+    case 5: return TEXTCMD_MK(a & 0xF, kTextCmd_ScrollSpd, 1);
     case 8: {
       static const uint8 kReturns_Ext[] = {
         TEXTCMD_MK(0, kTextCmd_Choose, 1),
@@ -2269,10 +2620,35 @@ uint32 Text_DecodeCmd(uint8 a, const uint8 *src) {
 
 // Perform initial parsing of the string, expanding words, processing some commands, etc.
 void Text_LoadCharacterBuffer() {  // 8ec4e2
+  if (Rando_RenderGoalMessage(dialogue_message_index, messaging_text_buffer)) {
+    dialogue_msg_read_pos = 0;
+    return;
+  }
+  // add-rando-traps: runtime-only trap pickup message. Render before hints and
+  // before vanilla dialogue lookup because this id is not present in assets.
+  if (Rando_RenderTrapMessage(dialogue_message_index, messaging_text_buffer)) {
+    dialogue_msg_read_pos = 0;
+    return;
+  }
+  // add-*-souls: runtime-only soul-pickup name box (also not in assets).
+  if (Rando_RenderSoulMessage(dialogue_message_index, messaging_text_buffer)) {
+    dialogue_msg_read_pos = 0;
+    return;
+  }
+  // Randomizer hints: generated tile/fork surfaces and confirmed vanilla-NPC
+  // fixed-item location redirects share this pre-decode renderer. Successful
+  // hints are written directly into the character buffer (font-encoded,
+  // 0x7f-terminated); every failed applicability gate leaves vanilla decoding
+  // untouched.
+  // See src/rando/rando_hints.c::Rando_RenderHintMessage.
+  if (Rando_RenderHintMessage(dialogue_message_index, messaging_text_buffer)) {
+    dialogue_msg_read_pos = 0;
+    return;
+  }
   MemBlk dictionary = FindIndexInMemblk(g_zenv.dialogue_blk, 0);
   MemBlk dialogue = FindIndexInMemblk(g_zenv.dialogue_blk, 1);
   MemBlk text_str = FindIndexInMemblk(dialogue, dialogue_message_index);
-  const uint8 *src = text_str.ptr, *src_end = src + text_str.size, *src_org = src;
+  const uint8 *src = text_str.ptr, *src_end = src + text_str.size;
   uint8 *dst = messaging_text_buffer;
   while (src < src_end) {
     uint8 c = *src++;
@@ -2297,7 +2673,7 @@ void Text_LoadCharacterBuffer() {  // 8ec4e2
       break;
     }
     case kTextCmd_Position:
-      text_msgbox_topleft = kText_Positions[TEXTCMD_PARAM(cmd)];
+      text_msgbox_topleft = Text_Position(TEXTCMD_PARAM(cmd));
       break;
     case kTextCmd_Color:
       text_tilemap_cur = ((0x387F & 0xe300) | 0x180) | (TEXTCMD_PARAM(cmd) << 10) & 0x3c00;
@@ -2312,6 +2688,25 @@ void Text_LoadCharacterBuffer() {  // 8ec4e2
     src += TEXTCMD_MULTIBYTE(cmd);
   }
   *dst = 0x7f;
+  // Interactive randomizer hints need the decoded command buffer so their
+  // replacement can retain a live Choose command. This covers Stumpy/Flute Boy
+  // and current-schema paid-service no-clue framing; failed gates leave the
+  // vanilla prompt byte-for-byte intact. The resolver/encoder remains owned by
+  // the hint subsystem.
+  Rando_RewriteInteractiveHintMessage(dialogue_message_index,
+                                      messaging_text_buffer);
+  // add-rando-inverted-dark-chapel-spawn: for an Inverted slot, rename the
+  // post-Agahnim spawn-select options in the FINISHED buffer — "Sanctuary" ->
+  // "Dark Chapel", "The Mountain Cave" -> "Dark Mountain" (ALTTPR labels). Done
+  // after the vanilla decode so the player-name expansion / position command /
+  // menu structure are all handled normally; this only swaps the location word's
+  // font-byte run. No-op for any non-menu id / non-Inverted slot.
+  Rando_RewriteInvertedSpawnMenu(dialogue_message_index, messaging_text_buffer);
+  // Randomized NPC/drop rewards must not keep claiming that the player won the
+  // vanilla item. This post-decode pass can preserve selected vanilla tutorial
+  // tails (notably King Zora's whirlpool explanation) while replacing the
+  // reward-specific wording. It is a strict no-op outside an active rando slot.
+  Rando_RewriteRewardDialogue(dialogue_message_index, messaging_text_buffer);
   dialogue_msg_read_pos = 0;
 }
 
@@ -2330,6 +2725,19 @@ uint8 *Text_WritePlayerName(uint8 *p) {  // 8ec5b3
 }
 
 uint8 Text_FilterPlayerNameCharacters(uint8 a) {  // 8ec639
+  if (g_loc_rom) {
+    // The French Canadian font puts I, i and ! elsewhere, and its accented
+    // letters after them ($8C:E2F9).
+    if (a >= 0x81)
+      a -= 0x4d;
+    else if (a == 0x71)
+      a = 8;
+    else if (a == 0x72)
+      a = 0x22;
+    else if (a == 0x73)
+      a = 0x3e;
+    return a;
+  }
   if (a >= 0x5f) {
     if (a >= 0x76)
       a -= 0x42;
@@ -2456,7 +2864,14 @@ RESTART:;
   case kTextCmd_Wait:  // RenderText_Draw_Wait
     switch (joypad1L_last & 0x80 ? 1 : text_wait_countdown) {
     case 0:
-      text_wait_countdown = kText_WaitDurations[TEXTCMD_PARAM(cmd)] - 1;
+      {
+        uint16 duration = Text_EffectiveWaitDuration(TEXTCMD_PARAM(cmd));
+        if (duration == 0) {
+          BYTE(text_wait_countdown) = 0;
+          goto COMMAND_DONE;
+        }
+        text_wait_countdown = duration - 1;
+      }
       break;
     case 1:
       BYTE(text_wait_countdown) = 0;
@@ -2470,15 +2885,16 @@ RESTART:;
     sound_effect_2 = TEXTCMD_PARAM(cmd);
     goto COMMAND_DONE;
   case kTextCmd_Speed:  // RenderText_Draw_SetSpeed
-    vwf_line_speed = vwf_line_speed_cur = TEXTCMD_PARAM(cmd);
+    vwf_line_speed = vwf_line_speed_cur = Text_EffectiveLineSpeed(TEXTCMD_PARAM(cmd));
     goto COMMAND_DONE;
   case kTextCmd_Waitkey:  // RenderText_Draw_PauseForInput
     if (text_wait_countdown2 != 0) {
       if (--text_wait_countdown2 == 1)
         sound_effect_2 = 36;
     } else {
-      if ((filtered_joypad_H | filtered_joypad_L) & 0xc0) {
-        text_wait_countdown2 = 28;
+      if (Text_ShouldAutoAdvancePage() ||
+          ((filtered_joypad_H | filtered_joypad_L) & 0xc0)) {
+        text_wait_countdown2 = Text_EffectiveInputLatch();
         goto COMMAND_DONE;
       }
     }
@@ -2488,9 +2904,9 @@ RESTART:;
       if (--text_wait_countdown2 == 1)
         sound_effect_2 = 36;
     } else {
-      if ((filtered_joypad_H | filtered_joypad_L)) {
+      if (Text_ShouldAutoAdvancePage() || (filtered_joypad_H | filtered_joypad_L)) {
         text_render_state = 4;
-        text_wait_countdown2 = 28;
+        text_wait_countdown2 = Text_EffectiveInputLatch();
       }
     }
     break;
@@ -2719,7 +3135,7 @@ void RenderText_Draw_Choose1Or2() {  // 8ecf72
 }
 
 bool RenderText_Draw_Scroll() {  // 8ecfe2
-  uint8 r2 = dialogue_scroll_speed;
+  uint8 r2 = Text_EffectiveScrollSpeed(dialogue_scroll_speed);
   do {
     for (int i = 0; i < 0x7e0; i += 16) {
       uint16 *p = (uint16 *)((uint8 *)messaging_buf + i);
@@ -2748,7 +3164,7 @@ bool RenderText_Draw_Scroll() {  // 8ecfe2
 void RenderText_SetDefaultWindowPosition() {  // 8ed280
   uint16 y = link_y_coord - BG2VOFS_copy2;
   int flag = (y < 0x78);
-  text_msgbox_topleft = kText_Positions[flag];
+  text_msgbox_topleft = Text_Position(flag);
 }
 
 void RenderText_DrawBorderInitialize() {  // 8ed29c
@@ -2815,6 +3231,9 @@ void DungMap_LightenUpMap() {  // 8ed940
 void DungMap_Backup() {  // 8ed94c
   if (--INIDISP_copy)
     return;
+  // The map has no name-keyboard raster split. A pending file-menu IRQ
+  // (for example after loading a state) must not scroll BG3 at line 128.
+  irq_flag = 0;
   MOSAIC_copy = 3;
   mapbak_HDMAEN = HDMAEN_copy;
   EnableForceBlank();

@@ -1,0 +1,135 @@
+# ThievesTown.yaml — Thieves' Town Inverted world-state (Phase B Slice 2)
+#
+# Mechanically translated from
+# `../alttp_vt_randomizer/app/Region/Inverted/ThievesTown.php` (MIT,
+# verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+# Inverted/ThievesTown.php:10 extends Standard/ThievesTown; the parent's
+# locations, location predicates, can_complete, and boss closure are
+# inherited unchanged (parent::initalize() at php:20). The override at
+# php:22-30 REPLACES the parent's can_enter closure.
+#
+# Translation discipline (audit.md §0.10.2):
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP item-name remappings (per parent file):
+#       KeyD4     → SmallKey_ThievesTown
+#       BigKeyD4  → BigKey_ThievesTown
+#       MapD4     → Map_ThievesTown
+#       CompassD4 → Compass_ThievesTown
+#       RescueZelda → RescuedZelda (parent only; Inverted override drops it)
+#   - Phase A axis pins (collapses for inherited location predicates):
+#       * region.wildKeys / wildBigKeys / wildMaps / wildCompasses → false
+#       * region.bossNormalLocation → true
+#       * itemPlacement === 'advanced' / 'basic' → both false (standard)
+#       * mode.weapons === 'swordless' → false
+#       * accessibility === 'locations' → false (default accessibility=items)
+#       * canOWYBA / canBunnyRevive → all false (NoGlitches)
+#   - Phase B branches dropped from Inverted can_enter (php:22-30):
+#       * `itemPlacement !== 'basic'` disjunct TRUE → basic-mode
+#         health+bottle+sword inner gate is vacuous.
+#   - Inverted TT can_enter REPLACES the parent closure: the parent's
+#     `RescueZelda`, `MoonPearl`, bottle-OWYBA, and canBunnyRevive+spin-speed
+#     branches are NOT inherited (override drops them — Inverted-mode Link
+#     starts in the dark world's Village of Outcasts and reaches TT
+#     directly).
+#   - Inverted parent region: DarkWorld_NorthWest (PHP `North West Dark
+#     World`). Canonical id is defined by the eventual
+#     `inverted/DarkWorld/NorthWest.yaml` translation.
+#
+# Boss: Blind — `CanKillBlind` macro is already defined in
+# `23_thieves_town.yaml` (Standard TT), so this file does NOT re-emit it
+# (codegen "last wins" merge — single canonical macro).
+
+format_version: 1
+
+regions:
+  # External parent stub — Inverted overworld North West dark world
+  # (Village of Outcasts in Inverted). Canonical definition lives in
+  # `inverted/DarkWorld/NorthWest.yaml`.
+  - id: DarkWorld_NorthWest
+    name: "Dark World - North West (stub, Inverted)"
+    world_state_filter: [Inverted]
+    source: "stub for cross-file region reference (Inverted/ThievesTown.php:29)"
+
+  - id: ThievesTown
+    name: "Thieves' Town"
+    dungeon: ThievesTown
+    world_state_filter: [Inverted]
+    source: "app/Region/Inverted/ThievesTown.php:10-33 (extends Standard/ThievesTown.php:15-63)"
+
+edges:
+  # TT Inverted `can_enter` (Inverted php:22-30) REPLACES the parent
+  # (Standard php:118-126):
+  #   (itemPlacement !== 'basic' || <basic-mode health/bottle/sword gate>)
+  #   && getRegion('North West Dark World')->canEnter(...)
+  # Phase A: itemPlacement !== 'basic' TRUE → first conjunct vacuous.
+  # The DarkWorld_NorthWest reachability is modeled by this edge's `from:`
+  # linkage. The parent's RescueZelda / MoonPearl / canOWYBA / canBunnyRevive
+  # gates are NOT inherited (override replaces entire closure).
+  - from: DarkWorld_NorthWest
+    to: ThievesTown
+    predicate: "TRUE()"
+    source: "app/Region/Inverted/ThievesTown.php:22-30 (can_enter closure)"
+
+locations:
+  # ===========================================================================
+  # All location predicates inherited from Standard parent via
+  # parent::initalize() at Inverted php:20. See `23_thieves_town.yaml` for
+  # the canonical author-time comments; we duplicate the predicate bodies
+  # here so the codegen merger has Inverted-tagged location records.
+  # ===========================================================================
+
+  # Big Key Chest (Standard php:51) — no setRequirements; default TRUE.
+  - id: "Thieves' Town - Big Key Chest"
+    region: ThievesTown
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/ThievesTown.php:51 (inherited)"
+
+  # Map Chest (Standard php:52) — no setRequirements; default TRUE.
+  - id: "Thieves' Town - Map Chest"
+    region: ThievesTown
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/ThievesTown.php:52 (inherited)"
+
+  # Compass Chest (Standard php:53) — no setRequirements; default TRUE.
+  - id: "Thieves' Town - Compass Chest"
+    region: ThievesTown
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/ThievesTown.php:53 (inherited)"
+
+  # Ambush Chest (Standard php:54) — no setRequirements; default TRUE.
+  - id: "Thieves' Town - Ambush Chest"
+    region: ThievesTown
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/ThievesTown.php:54 (inherited)"
+
+  # Attic (Standard php:73-75): KeyD4 && BigKeyD4.
+  - id: "Thieves' Town - Attic"
+    region: ThievesTown
+    can_reach: "HAS_ITEM(SmallKey_ThievesTown) AND HAS_ITEM(BigKey_ThievesTown)"
+    source: "app/Region/Standard/ThievesTown.php:73-75 (inherited)"
+
+  # Blind's Cell (Standard php:89-91): BigKeyD4.
+  - id: "Thieves' Town - Blind's Cell"
+    region: ThievesTown
+    can_reach: "HAS_ITEM(BigKey_ThievesTown)"
+    source: "app/Region/Standard/ThievesTown.php:89-91 (inherited)"
+
+  # Big Chest (Standard php:77-87): advanced self-ref branch dropped per
+  # audit; take the else branch.
+  - id: "Thieves' Town - Big Chest"
+    region: ThievesTown
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(SmallKey_ThievesTown) AND HAS_ITEM(BigKey_ThievesTown)"
+    source: "app/Region/Standard/ThievesTown.php:77-87 (inherited)"
+
+  # Boss (Standard php:97-116). canEnter enforced by the edge.
+  # wildCompasses/wildMaps clauses vacuous (Phase A pins false).
+  - id: "Thieves' Town - Boss"
+    region: ThievesTown
+    can_reach: "HAS_ITEM(SmallKey_ThievesTown) AND HAS_ITEM(BigKey_ThievesTown) AND CanKillBoss(ThievesTown)"
+    source: "app/Region/Standard/ThievesTown.php:97-116 (inherited)"
+
+  # Prize (Standard php:59, 93-95, 128) — can_complete = Boss canAccess.
+  - id: "Thieves' Town - Prize"
+    region: ThievesTown
+    can_reach: "HAS_ITEM(SmallKey_ThievesTown) AND HAS_ITEM(BigKey_ThievesTown) AND CanKillBoss(ThievesTown)"
+    source: "app/Region/Standard/ThievesTown.php:59, 93-95, 128 (inherited; can_complete = Boss access)"

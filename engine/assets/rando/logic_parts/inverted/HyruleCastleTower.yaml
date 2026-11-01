@@ -1,0 +1,93 @@
+# HyruleCastleTower.yaml — Hyrule Castle Tower Inverted world-state
+# (Phase B Slice 2)
+#
+# Mechanically translated from
+# `../alttp_vt_randomizer/app/Region/Inverted/HyruleCastleTower.php` (MIT,
+# verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+# Inverted/HyruleCastleTower.php:10 extends Standard/HyruleCastleTower; the
+# parent's locations, location predicates, and can_complete are inherited
+# unchanged (parent::initalize() at php:20). The override at php:22-25
+# REPLACES the parent's can_enter closure.
+#
+# Translation discipline (audit.md §0.10.2):
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `KeyA1` / `BigKeyA1` / `CompassA1` / `MapA1` → registry-canonical
+#     `SmallKey_HyruleCastleTower` (HCT has no big key / map / compass in
+#     vanilla; the region_items list at Standard php:18-27 is a registry-shape
+#     declaration only).
+#   - PHP `RescueZelda` → `RescuedZelda`.
+#   - PHP item.require.Lamp default = 1; PHP `Lamp` → `Lamp` (no remap).
+#   - Phase B branches dropped:
+#       * `mode.weapons == 'swordless'` disjuncts in parent can_complete
+#         (Standard php:65) — swordless not modeled in Phase A. The
+#         Hammer / BugCatchingNet swordless branches drop here; they
+#         re-enter when swordless mode lands.
+#   - Entry parent region: DarkWorld_DeathMountain_West — Inverted moves
+#     Hyrule Castle Tower onto the dark-world Death Mountain plateau
+#     (Inverted php:24 `getRegion('West Dark World Death Mountain')`). The
+#     canonical region id will be defined by the eventual
+#     `inverted/DarkWorld/DeathMountain/West.yaml` translation; we stub it
+#     here for cross-file reference, mirroring the Standard-world pattern.
+
+format_version: 1
+
+regions:
+  # External parent stub — Inverted dark-world Death Mountain west, the
+  # overworld region that hosts the corrupted-castle-tower entrance in
+  # Inverted mode. Canonical definition lives in
+  # `inverted/DarkWorld/DeathMountain/West.yaml` (codegen "last wins"
+  # merge handles cross-file stub collisions).
+  - id: DarkWorld_DeathMountain_West
+    name: "Dark World - Death Mountain West (stub, Inverted)"
+    world_state_filter: [Inverted]
+    source: "stub for cross-file region reference (Inverted/HyruleCastleTower.php:24)"
+
+  - id: HyruleCastleTower
+    name: "Hyrule Castle Tower"
+    dungeon: HyruleCastleTower
+    world_state_filter: [Inverted]
+    source: "app/Region/Inverted/HyruleCastleTower.php:10-28 (extends Standard/HyruleCastleTower.php:14-48)"
+
+edges:
+  # HCT Inverted `can_enter` (Inverted php:22-25) REPLACES the parent
+  # (Standard php:70-76):
+  #   canKillMostThings($world, 8)
+  #   && getRegion('West Dark World Death Mountain')->canEnter(...)
+  # The parent's RescueZelda / Cape / hasSword(2) / swordless+Hammer
+  # disjunctive sword-or-cape gate is DROPPED in Inverted — Inverted only
+  # gates on enemy-kill capacity and DM-west reachability. The DM-west
+  # region reachability is modeled by this edge's `from:` linkage.
+  - from: DarkWorld_DeathMountain_West
+    to: HyruleCastleTower
+    predicate: "CanKillMostThings(world, 8)"
+    source: "app/Region/Inverted/HyruleCastleTower.php:22-25 (can_enter closure)"
+
+locations:
+  # HCT - Room 03 (Standard php:41) — no setRequirements; default TRUE.
+  # Inherited unchanged from Standard parent via parent::initalize().
+  - id: "Castle Tower - Room 03"
+    region: HyruleCastleTower
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/HyruleCastleTower.php:41 (inherited by Inverted parent::initalize at Inverted php:20)"
+
+  # HCT - Dark Maze (Standard php:58-60):
+  #   has(Lamp, item.require.Lamp default 1) AND has(KeyA1)
+  # Inherited unchanged.
+  - id: "Castle Tower - Dark Maze"
+    region: HyruleCastleTower
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(SmallKey_HyruleCastleTower)"
+    source: "app/Region/Standard/HyruleCastleTower.php:58-60 (inherited)"
+
+  # HCT - Agahnim (Standard php:62-68): can_complete; prize_location uses
+  # same predicate.
+  #   canEnter
+  #   && has(KeyA1, 2)
+  #   && has(Lamp, item.require.Lamp default 1)
+  #   && (hasSword() || (swordless && (Hammer || BugCatchingNet)))
+  # canEnter is on the entry edge above. §4 swordless: Agahnim 1 defeatable with
+  # Hammer/BugCatchingNet under swordless (inert under randomized). Mirrors the
+  # Standard HCT override. can_complete is otherwise inherited from the parent.
+  - id: "Agahnim"
+    region: HyruleCastleTower
+    can_reach: "HAS_AMOUNT(SmallKey_HyruleCastleTower, 2) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND (HasSword(1) OR (OP_MODEWEAPONS_EQ(swordless) AND (HAS_ITEM(Hammer) OR HAS_ITEM(BugCatchingNet))))"
+    source: "app/Region/Standard/HyruleCastleTower.php:62-68 (can_complete + prize, inherited)"

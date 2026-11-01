@@ -5,6 +5,8 @@
 #include "zelda_rtl.h"
 #include "variables.h"
 #include "spc_player.h"
+#include "config.h"
+#include "features.h"
 #include "snes/snes.h"
 #include "snes/snes_regs.h"
 #include "snes/cpu.h"
@@ -328,6 +330,21 @@ static void EmuSynchronizeWholeState() {
 }
 
 void EmuRunFrameWithCompare(uint16 input_state, int run_what) {
+  // tasks.md §11.1: when the randomizer is active, the dual-runtime RAM
+  // comparison expects byte-identity between our reimplementation and the
+  // emulated original ROM — but rando intentionally mutates inventory state
+  // away from vanilla, so the comparison would spew on every dispatch. Skip
+  // the comparison in rando mode UNLESS the dev-only INI override
+  // [randomizer] DebugForceRamCompare=true is set (per docs/randomizer.md
+  // and developer-only — not in the user-facing key map).
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+      !g_config.rando_debug_force_ram_compare) {
+    g_snes->input1->currentState = input_state;
+    RunEmulatedSnesFrame(g_snes, run_what);
+    ZeldaRunFrameInternal(input_state, run_what);
+    return;
+  }
+
   MakeSnapshot(&g_snapshot_before);
   MakeMySnapshot(&g_snapshot_mine);
   MakeSnapshot(&g_snapshot_theirs);

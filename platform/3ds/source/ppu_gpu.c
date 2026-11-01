@@ -192,6 +192,15 @@ static bool DrawComposition(void) {
   C3D_DepthTest(false,GPU_ALWAYS,GPU_WRITE_COLOR);
   C3D_TexBind(0,&g.main);C3D_TexBind(1,&g.sub);
   for(unsigned i=0;i<16;i++) if(g.ranges[4+i].count) {ConfigureCompose(i);DrawRange(4+i);}
+  if (g.ranges[PICA_UI_GROUP].count) {
+    ResetTev();
+    C3D_TexBind(0,&g.atlas);
+    C3D_TexEnv *e=C3D_GetTexEnv(0);
+    C3D_TexEnvSrc(e,C3D_Both,GPU_TEXTURE0,GPU_PRIMARY_COLOR,GPU_PREVIOUS);
+    C3D_TexEnvFunc(e,C3D_Both,GPU_MODULATE);
+    C3D_AlphaTest(true,GPU_GREATER,0);
+    DrawRange(PICA_UI_GROUP);
+  }
   return true;
 }
 static uint16_t Pack(uint16_t rgb) { return ((rgb&31)<<11)|((rgb&992)<<1)|((rgb>>9)&62)|1; }

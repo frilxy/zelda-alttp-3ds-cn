@@ -6,20 +6,40 @@
 #include "poly.h"
 #include "attract.h"
 #include "snes/ppu.h"
+#include "snes/ppu_ui.h"
 #include "snes/snes_regs.h"
 #include "snes/dma.h"
 #include "spc_player.h"
+#include "rando/rando.h"
+#include "rando/goal_runtime.h"
+#include "rando/rando_save.h"
+#include "rando/rando_placement.h"
+#include "rando/rando_snapshot_tail.h"
+#include "hud.h"
+#include "sprite.h"
+#include "load_gfx.h"
+#include "snes/dsp.h"
 #include "util.h"
 #include "dump_state.h"
 #include <stddef.h>
 #include <SDL.h>
 #include "audio.h"
 #include "assets.h"
+#include "localized.h"
+#include "overworld.h"
 #include "android_logging.h"
+#include "test_scenarios.h"
+#include "messaging.h"
 #include "wide_camera.h"
+#include "dungeon.h"
+#include "config.h"
+#include "quality_of_life.h"
 #ifdef __3DS__
 #include <3ds.h>
 #include "platform_3ds.h"
+#include "sram_store.h"
+#include "native_menu.h"
+#include "native_file_labels.h"
 #include "ppu_gpu.h"
 #endif
 /*
@@ -30,15 +50,18 @@ ZeldaEnv g_zenv;
 uint8 g_ram[131072];
 
 uint32 g_wanted_zelda_features;
+uint32 g_wanted_zelda_features1;
 static int g_widescreen_edge_mode;
 
 static void Startup_InitializeMemory();
+static bool g_rendering_startup_logo;
+bool g_test_scenario_active;
+static bool g_test_scenario_building;
+static int g_test_scenario_index=-1;
 
 static bool IsDungeonMapMenuActive(void) {
-  // The supplied dump is module 14 / submodule 3 while preserving module 7.
-  // That stays true during every map initialization state.
-  return main_module_index == 14 && submodule_index == 3 &&
-         saved_module_for_menu == 7;
+  return saved_module_for_menu == 7 &&
+    WideCamera_DungeonMapPicture(main_module_index, submodule_index, overworld_map_state);
 }
 
 typedef struct SimpleHdma {
@@ -162,80 +185,6 @@ static void SimpleHdma_DoLine(SimpleHdma *c, Ppu *ppu) {
   c->rep_count--;
 }
 
-static void ConfigurePpuSideSpace(int visual_x, bool fixed_camera,
-                                  bool horizontal_transition) {
-  // Let PPU impl know about the maximum allowed extra space on the sides and bottom
-  int extra_right = 0, extra_left = 0, extra_bottom = 0;
-  if (IsDungeonMapMenuActive()) {
-    // Keep map background tiles and the sprite overlay in the same native
-    // 256-pixel coordinate space while the dungeon map is open.
-    PpuSetExtraSideSpace(g_zenv.ppu, 0, 0, 0);
-    return;
-  }
-//  printf("main %d, sub %d  (%d, %d, %d)\n", main_module_index, submodule_index, BG2HOFS_copy2, room_bounds_x.v[2 | (quadrant_fullsize_x >> 1)], quadrant_fullsize_x >> 1);
-  int mod = main_module_index;
-  if (mod == 14)
-    mod = saved_module_for_menu;
-  if ((enhanced_features0 & kFeatures0_WidescreenVisualFixes) &&
-      (mod == 6 || mod == 8 || mod == 10 || mod == 15 || mod == 16 || mod == 17 ||
-       mod == 18 || mod == 19 || mod == 21 || mod == 22 || mod == 23))
-    mod = player_is_indoors ? 7 : 9;
-  if (mod == 9) {
-    // Outdoors
-    if (horizontal_transition) {
-      extra_left = extra_right = kPpuExtraLeftRight;
-    } else if (fixed_camera) {
-      int left = WideCamera_Unwrap16(ow_scroll_vars0.xstart, visual_x);
-      int right = WideCamera_Unwrap16(ow_scroll_vars0.xend, visual_x);
-      extra_left = IntMax(visual_x - left, 0);
-      extra_right = IntMax(right - visual_x, 0);
-    } else {
-      extra_left = BG2HOFS_copy2 - ow_scroll_vars0.xstart;
-      extra_right = ow_scroll_vars0.xend - BG2HOFS_copy2;
-    }
-    extra_bottom = ow_scroll_vars0.yend - BG2VOFS_copy2;
-  } else if (mod == 7) {
-    // indoors, except when the light cone is in use
-    if (!(hdr_dungeon_dark_with_lantern && TS_copy != 0)) {
-      int qm = quadrant_fullsize_x >> 1;
-      if (horizontal_transition) {
-        extra_left = extra_right = kPpuExtraLeftRight;
-      } else if (fixed_camera) {
-        int left = WideCamera_Unwrap16(room_bounds_x.v[qm], visual_x);
-        int right = WideCamera_Unwrap16(room_bounds_x.v[qm + 2], visual_x);
-        extra_left = IntMax(visual_x - left, 0);
-        extra_right = IntMax(right - visual_x, 0);
-      } else {
-        extra_left = IntMax(BG2HOFS_copy2 - room_bounds_x.v[qm], 0);
-        extra_right = IntMax(room_bounds_x.v[qm + 2] - BG2HOFS_copy2, 0);
-      }
-    }
-
-    int qy = quadrant_fullsize_y >> 1;
-    extra_bottom = IntMax(room_bounds_y.v[qy + 2] - BG2VOFS_copy2, 0);
-  } else if (mod == 20 || mod == 0 || mod == 1) {
-    extra_left = kPpuExtraLeftRight, extra_right = kPpuExtraLeftRight;
-    extra_bottom = 16;
-  }
-  PpuSetExtraSideSpace(g_zenv.ppu, extra_left, extra_right, extra_bottom);
-}
-
-typedef struct FixedCameraTracker {
-  bool initialized;
-  bool transition_active;
-  uint8 context;
-  int direction;
-  uint16 last_logical_x;
-  int last_visual_x;
-  uint16 transition_start_x;
-  int transition_end_x;
-  int transition_distance;
-  int transition_start_visual_x;
-  int transition_end_offset;
-} FixedCameraTracker;
-
-static FixedCameraTracker g_fixed_camera_tracker;
-
 static uint8 GetFixedCameraEffectiveContext(void) {
   int mod = main_module_index;
   if (mod == 14)
@@ -247,10 +196,49 @@ static uint8 GetFixedCameraEffectiveContext(void) {
   return mod == 7 || mod == 9 ? (uint8)mod : 0;
 }
 
+// The WIDE picture around the SNES one.
+//
+// The SNES draws 256x224 pixels at the game's camera (BG2HOFS/BG2VOFS_copy2).
+// The WIDE picture adds side bands and, 240 lines high, 16 rows. A WideView
+// places it: offset_x is the game's camera x minus the drawn camera x (the
+// fixed camera stops short of an area's edges), delta_y the rows drawn above
+// the SNES view (at the bottom of an area there is nothing below it), and
+// left/right the side bands drawn.
+//
+// The rules for these change at once when an area or room edge moves, at the
+// start or the end of a scroll transition. The drawn view does not jump:
+// across a scroll transition it goes from the view before it to the view the
+// destination has at its end, with the scroll's progress, and elsewhere it
+// follows the rules at the camera's speed plus a few pixels per frame. It
+// snaps only where two frames are not one picture: a new place, a dark
+// screen, the light cone of a dark room.
+typedef struct WideView {
+  int offset_x;
+  int delta_y;
+  int left, right;
+} WideView;
+
+typedef struct WideBounds {
+  int left, right;  // leftmost and rightmost camera x
+  int bottom;       // lowest camera y
+} WideBounds;
+
+typedef struct WideViewTracker {
+  bool valid;
+  uint8 context;
+  uint8 axis;       // scroll transition in progress: 1 horizontal, 2 vertical
+  int direction;
+  int start, end;   // game camera along the axis, from and to
+  uint16 last_x, last_y;
+  WideView last, last_target, from;
+} WideViewTracker;
+
+static WideViewTracker g_wide_view;
+
 void ZeldaSetWidescreenEdgeMode(int mode) {
   int new_mode = mode == 1 ? 1 : 0;
   if (g_widescreen_edge_mode != new_mode)
-    memset(&g_fixed_camera_tracker, 0, sizeof(g_fixed_camera_tracker));
+    memset(&g_wide_view, 0, sizeof(g_wide_view));
   g_widescreen_edge_mode = new_mode;
 }
 
@@ -258,71 +246,122 @@ int ZeldaGetWidescreenEdgeMode(void) {
   return g_widescreen_edge_mode;
 }
 
-int ZeldaGetWidescreenFixedCameraMargin(void) {
+static bool WideFixedCameraEnabled(void) {
   bool visual_fixes_enabled =
     (enhanced_features0 & kFeatures0_WidescreenVisualFixes) != 0;
 #ifdef ZELDA_CAMERA_TEST
   visual_fixes_enabled = true;
 #endif
+  return g_widescreen_edge_mode == 1 && visual_fixes_enabled &&
+         g_zenv.ppu && g_zenv.ppu->extraLeftRight != 0;
+}
+
+static bool QolBrightRoomActive(void);
+static struct { bool active,reveal; uint8 tick; int axis,source,end; unsigned light; } g_private_fade;
+static void UpdatePrivateRoomFade(void);
+static bool WideLanternRoom(uint8 context) {
+  return context == 7 && hdr_dungeon_dark_with_lantern && TS_copy != 0 && !QolBrightRoomActive();
+}
+
+// Set as each picture is drawn, read by the game logic of the next frame.
+static int g_wide_picture_shift;
+static uint32 g_wide_render_flags;
+// The rows above the game's screen whose sprite tiles the game keeps
+// (sprite.h): those of the last picture, then of the picture of this frame
+// once its camera is set (ZeldaWideBeforeSprites).
+int g_wide_picture_rows;
+
+int ZeldaWidePictureShift(void) {
+  return (enhanced_features0 & kFeatures0_ExtendScreen64) ? g_wide_picture_shift : 0;
+}
+
+// Both maps fade the gameplay picture before drawing the map. The dungeon
+// map also restores the room before fading back in. Keep gameplay presentation
+// during those phases; module 14 alone does not identify the visible picture.
+static bool UseNativeMapCamera(void) {
+  if (!WideCamera_IsMapMenu(main_module_index, submodule_index)) return false;
+  if (submodule_index == 3 && !IsDungeonMapMenuActive()) return false;
+  bool world_fade = (submodule_index == 7 || submodule_index == 10) &&
+                    overworld_map_state == 0 && g_zenv.ppu->mode == 1;
+  return !world_fade;
+}
+
+int ZeldaGetWidescreenFixedCameraMargin(void) {
   uint8 context = GetFixedCameraEffectiveContext();
-  if (g_widescreen_edge_mode != 1 ||
-      !visual_fixes_enabled ||
-      !g_zenv.ppu || g_zenv.ppu->extraLeftRight == 0 ||
-      context == 0)
+  if (!WideFixedCameraEnabled() || context == 0)
     return 0;
   // Map sprites are projected in map-screen coordinates, not the gameplay
   // camera. Applying the outdoor/dungeon camera delta hides or shifts them.
-  if (WideCamera_IsMapMenu(main_module_index, submodule_index))
+  if (UseNativeMapCamera())
     return 0;
-  if (context == 7) {
-    if (hdr_dungeon_dark_with_lantern && TS_copy != 0)
-      return 0;
-  }
+  if (WideLanternRoom(context))
+    return 0;
   return g_zenv.ppu->extraLeftRight;
 }
 
-typedef struct FixedCameraRenderState {
-  bool active;
-  bool uses_visual_camera;
-  bool horizontal_transition;
-  int visual_x;
-  uint16 ppu_bg1_hscroll;
-  uint16 ppu_bg2_hscroll;
-  int16 ppu_obj_x_offset;
-} FixedCameraRenderState;
-
-static uint8 GetFixedCameraContext(void) {
-  if (!ZeldaGetWidescreenFixedCameraMargin())
-    return 0;
-  return GetFixedCameraEffectiveContext();
-}
-
-static void GetFixedCameraBounds(uint8 context, int reference_x,
-                                 int *left, int *right) {
-  uint16 left_raw, right_raw;
+static void GetWideBounds(uint8 context, int x, int y, WideBounds *b) {
+  uint16 left, right, bottom;
   if (context == 7) {
     int qm = quadrant_fullsize_x >> 1;
-    left_raw = room_bounds_x.v[qm];
-    right_raw = room_bounds_x.v[qm + 2];
+    left = room_bounds_x.v[qm];
+    right = room_bounds_x.v[qm + 2];
+    bottom = room_bounds_y.v[(quadrant_fullsize_y >> 1) + 2];
   } else {
-    left_raw = ow_scroll_vars0.xstart;
-    right_raw = ow_scroll_vars0.xend;
+    left = ow_scroll_vars0.xstart;
+    right = ow_scroll_vars0.xend;
+    bottom = ow_scroll_vars0.yend;
   }
-  *left = WideCamera_Unwrap16(left_raw, reference_x);
-  *right = WideCamera_Unwrap16(right_raw, reference_x);
+  b->left = WideCamera_Unwrap16(left, x);
+  b->right = WideCamera_Unwrap16(right, x);
+  b->bottom = WideCamera_Unwrap16(bottom, y);
 }
 
-static int GetFixedCameraTransitionDirection(uint8 context) {
+// The bounds of the overworld area being entered, which the game sets only
+// once the scroll is over (Overworld_SetCameraBoundaries, from the same base
+// and size).
+static void GetOverworldDestinationBounds(int x, int y, WideBounds *b) {
+  bool big = BYTE(overworld_area_is_big) != 0;
+  b->left = WideCamera_Unwrap16(overworld_offset_base_x << 3, x);
+  b->right = b->left + (big ? 0x300 : 0x100);
+  b->bottom = WideCamera_Unwrap16(overworld_offset_base_y, y) +
+              (big ? 0x31e : 0x11e);
+}
+
+// Axis (1 horizontal, 2 vertical) and direction of the scroll transition in
+// progress: overworld screen edges, dungeon room and door edges, straight
+// stairs. Indoors overworld_screen_transition is 0 down, 1 up, 2 right,
+// 3 left (kStaircaseTab3).
+static int GetWideTransition(uint8 context, int *direction) {
+  *direction = 0;
   if (context == 9) {
-    int direction = BYTE(overworld_screen_trans_dir_bits) & 3;
-    return direction == 1 ? 1 : direction == 2 ? -1 : 0;
+    // The bits also follow the player near edges outside transitions: only
+    // the scroll submodules, plain (1-8) and with mosaic (0x0d-0x16), count.
+    if (main_module_index != 9 || submodule_index == 0 ||
+        submodule_index > 0x16)
+      return 0;
+    int bits = BYTE(overworld_screen_trans_dir_bits);
+    if (bits & 3) {
+      *direction = bits & 1 ? 1 : -1;
+      return 1;
+    }
+    if (bits & 12) {
+      *direction = bits & 4 ? 1 : -1;
+      return 2;
+    }
+    return 0;
   }
-  if ((submodule_index == 1 || submodule_index == 2) &&
-      overworld_screen_transition >= 2) {
-    return overworld_screen_transition == 2 ? 1 :
-           overworld_screen_transition == 3 ? -1 : 0;
+  int sub = submodule_index, t = overworld_screen_transition;
+  if (main_module_index != 7 || t > 3 ||
+      !(sub == 1 || sub == 2 || (sub >= 0x11 && sub <= 0x13)))
+    return 0;
+  if (t >= 2) {
+    if (sub > 2)
+      return 0;
+    *direction = t == 2 ? 1 : -1;
+    return 1;
   }
-  return 0;
+  *direction = t == 0 ? 1 : -1;
+  return 2;
 }
 
 static int GetFixedCameraTransitionEndX(uint8 context, int direction,
@@ -343,316 +382,1012 @@ static int GetFixedCameraTransitionEndX(uint8 context, int direction,
   return end_logical_x;
 }
 
-static int GetFixedCameraTransitionEndOffset(uint8 context,
-                                             int end_logical_x,
-                                             int margin) {
-  int left, right;
-  if (context == 9) {
-    uint16 destination_left = overworld_offset_base_x << 3;
-    left = WideCamera_Unwrap16(destination_left, end_logical_x);
-    right = left + (BYTE(overworld_area_is_big) ? 0x300 : 0x100);
+// Where the game's camera stops, along the axis: the scroll targets the
+// transition compares against.
+static int GetWideTransitionEnd(uint8 context, int axis, int direction,
+                                int start) {
+  if (axis == 1)
+    return WideCamera_Unwrap16(
+      GetFixedCameraTransitionEndX(context, direction, (uint16)start), start);
+  if (context == 7)  // DungeonTransition_ScrollRoom: 0 down, 1 up
+    return WideCamera_Unwrap16(WideCamera_FindDungeonTransitionEnd(
+      (uint16)start, direction,
+      direction > 0 ? up_down_scroll_target : up_down_scroll_target_end),
+      start);
+  // OverworldScrollTransition: 0 up, 1 down
+  uint16 target = direction > 0 ? up_down_scroll_target_end :
+                                  up_down_scroll_target;
+  int end = WideCamera_Unwrap16(target, start);
+  if ((end - start) * direction <= 0)
+    end = start + direction * 224;
+  return end;
+}
+
+static WideView WideView_Steady(int margin, bool rows, int x, int y,
+                                const WideBounds *b) {
+  WideView v;
+  int visual = WideCamera_ClampToBounds(x, b->left, b->right, margin);
+  v.offset_x = x - visual;
+  v.left = IntMin(IntMax(visual - b->left, 0), margin);
+  v.right = IntMin(IntMax(b->right - visual, 0), margin);
+  v.delta_y = rows ? IntMin(IntMax(16 - (b->bottom - y), 0), 16) : 0;
+  return v;
+}
+
+// Without commit, the view a picture drawn now would have, the tracking of
+// the last one kept.
+static WideView UpdateWideView(uint8 context, int margin, bool rows,
+                               bool smooth, bool smooth_x, bool *settled,
+                               bool commit) {
+  WideViewTracker next = g_wide_view, *t = &next;
+  uint16 x = BG2HOFS_copy2, y = BG2VOFS_copy2;
+  WideBounds bounds;
+  GetWideBounds(context, x, y, &bounds);
+  WideView target = WideView_Steady(margin, rows, x, y, &bounds);
+  if (!t->valid || t->context != context) {
+    memset(t, 0, sizeof(*t));
+    t->valid = true;
+    t->context = context;
+    t->last = target;
+    t->last_target = target;
+    t->last_x = x;
+    t->last_y = y;
+  }
+  int dx = (int16)(x - t->last_x), dy = (int16)(y - t->last_y);
+  int direction, axis = GetWideTransition(context, &direction);
+  WideView v = target;
+  if (axis) {
+    int cur = axis == 1 ? x : y;
+    if (t->axis != axis || t->direction != direction) {
+      int step = axis == 1 ? dx : dy;
+      t->axis = (uint8)axis;
+      t->direction = direction;
+      t->start = step >= -16 && step <= 16 ? cur - step : cur;
+      t->end = GetWideTransitionEnd(context, axis, direction, t->start);
+      t->from = t->last;
+    }
+    int moved = (WideCamera_Unwrap16(cur, t->start) - t->start) * direction;
+    int total = (t->end - t->start) * direction;
+    int progress = total > 0 ? IntMin(IntMax(moved * 256 / total, 0), 256) : 256;
+    WideBounds destination = bounds;
+    if (context == 9)
+      GetOverworldDestinationBounds(x, y, &destination);
+    // Into or out of a dark room the side bands close: its light cone keeps
+    // them dark once there.
+    int end_margin = context == 7 && submodule_index == 2 &&
+      (dung_want_lights_out | dung_want_lights_out_copy) && !QolBrightRoomActive() ? 0 : margin;
+    WideView end = WideView_Steady(end_margin, rows, axis == 1 ? t->end : x,
+                                   axis == 2 ? t->end : y, &destination);
+    if (smooth)
+      v.delta_y = WideCamera_Lerp(t->from.delta_y, end.delta_y, progress);
+    if (smooth && smooth_x) {
+      v.offset_x = WideCamera_Lerp(t->from.offset_x, end.offset_x, progress);
+      v.left = WideCamera_Lerp(t->from.left, end.left, progress);
+      v.right = WideCamera_Lerp(t->from.right, end.right, progress);
+    }
   } else {
-    GetFixedCameraBounds(context, end_logical_x, &left, &right);
+    t->axis = 0;
+    t->direction = 0;
+    // Take the part of the rules' change the camera's own move explains
+    // (the picture stays put at an edge), then close the rest slowly.
+    if (smooth && abs(dx) <= 48 && abs(dy) <= 48) {
+      v.delta_y = WideCamera_Follow(t->last.delta_y, t->last_target.delta_y,
+                             target.delta_y, dy, 1);
+      if (smooth_x) {
+        v.offset_x = WideCamera_Follow(t->last.offset_x, t->last_target.offset_x,
+                                target.offset_x, dx, 3);
+        v.left = WideCamera_Follow(t->last.left, t->last_target.left, target.left,
+                            dx, 3);
+        v.right = WideCamera_Follow(t->last.right, t->last_target.right,
+                             target.right, -dx, 3);
+      }
+    }
   }
-  int end_visual_x =
-    WideCamera_ClampToBounds(end_logical_x, left, right, margin);
-  return end_logical_x - end_visual_x;
+#ifdef ZELDA_CAMERA_TEST
+  // The drawn picture follows the game's camera, gliding by a few pixels.
+  int picture_x = dx - (v.offset_x - t->last.offset_x);
+  int picture_y = dy - (v.delta_y - t->last.delta_y);
+  if (commit && smooth && abs(dx) <= 48 && abs(dy) <= 48 &&
+      (abs(picture_x - dx) > 12 || abs(picture_y - dy) > 4))
+    fprintf(stderr, "camera ERROR jump: context=%u axis=%d camera=%d,%d "
+            "picture=%d,%d\n", context, axis, dx, dy, picture_x, picture_y);
+#endif
+  *settled = !axis && !memcmp(&v, &target, sizeof(v));
+  t->last = v;
+  t->last_target = target;
+  t->last_x = x;
+  t->last_y = y;
+  if (commit)
+    g_wide_view = next;
+  return v;
 }
 
-static int CalculateFixedCameraVisualX(uint8 context, int margin,
-                                       bool *transitioning) {
-  const uint16 logical_x = BG2HOFS_copy2;
-  int left, right;
-  GetFixedCameraBounds(context, logical_x, &left, &right);
-  int direction = GetFixedCameraTransitionDirection(context);
-  *transitioning = direction != 0;
-
-#ifdef ZELDA_CAMERA_TEST
-  bool was_transition_active = g_fixed_camera_tracker.transition_active;
-  int previous_direction = g_fixed_camera_tracker.direction;
-  uint16 previous_logical_x = g_fixed_camera_tracker.last_logical_x;
-  int previous_visual_x = g_fixed_camera_tracker.last_visual_x;
-#endif
-
-  if (!g_fixed_camera_tracker.initialized ||
-      g_fixed_camera_tracker.context != context) {
-    memset(&g_fixed_camera_tracker, 0, sizeof(g_fixed_camera_tracker));
-    g_fixed_camera_tracker.initialized = true;
-    g_fixed_camera_tracker.context = context;
-    g_fixed_camera_tracker.last_logical_x = logical_x;
-    g_fixed_camera_tracker.last_visual_x =
-      WideCamera_ClampToBounds(logical_x, left, right, margin);
-  }
-
-  int visual_x;
-  if (direction != 0) {
-#ifdef ZELDA_CAMERA_TEST
-    bool started_transition = false;
-#endif
-    if (!g_fixed_camera_tracker.transition_active ||
-        g_fixed_camera_tracker.direction != direction) {
-      int logical_step =
-        (int16)(logical_x - g_fixed_camera_tracker.last_logical_x);
-      int previous_offset =
-        logical_x - g_fixed_camera_tracker.last_visual_x;
-      bool use_previous_frame =
-        logical_step >= -16 && logical_step <= 16 &&
-        previous_offset >= -margin - 16 &&
-        previous_offset <= margin + 16;
-      g_fixed_camera_tracker.transition_start_x = use_previous_frame ?
-        g_fixed_camera_tracker.last_logical_x : logical_x;
-      g_fixed_camera_tracker.transition_start_visual_x = use_previous_frame ?
-        g_fixed_camera_tracker.last_visual_x : logical_x - direction * margin;
-      g_fixed_camera_tracker.transition_end_x =
-        GetFixedCameraTransitionEndX(
-          context, direction, g_fixed_camera_tracker.transition_start_x);
-      g_fixed_camera_tracker.transition_distance =
-        direction > 0 ?
-          g_fixed_camera_tracker.transition_end_x -
-            g_fixed_camera_tracker.transition_start_x :
-          g_fixed_camera_tracker.transition_start_x -
-            g_fixed_camera_tracker.transition_end_x;
-      if (g_fixed_camera_tracker.transition_distance <= 0)
-        g_fixed_camera_tracker.transition_distance = 256;
-      g_fixed_camera_tracker.transition_active = true;
-      g_fixed_camera_tracker.direction = direction;
-#ifdef ZELDA_CAMERA_TEST
-      started_transition = true;
-#endif
-    }
-    if (logical_x == g_fixed_camera_tracker.transition_start_x) {
-      g_fixed_camera_tracker.transition_end_offset =
-        GetFixedCameraTransitionEndOffset(
-          context, g_fixed_camera_tracker.transition_end_x, margin);
-    }
-#ifdef ZELDA_CAMERA_TEST
-    if (started_transition) {
-      fprintf(stderr,
-              "camera transition context=%u dir=%d logical=%u visual=%d "
-              "end=%d distance=%d end_offset=%d "
-              "sub=%u room=%04x bounds=%04x,%04x,%04x,%04x qm=%u "
-              "ow_base=%04x big=%u\n",
-              context, direction,
-              g_fixed_camera_tracker.transition_start_x,
-              g_fixed_camera_tracker.transition_start_visual_x,
-              g_fixed_camera_tracker.transition_end_x,
-              g_fixed_camera_tracker.transition_distance,
-              g_fixed_camera_tracker.transition_end_offset,
-              submodule_index, dungeon_room_index,
-              room_bounds_x.v[0], room_bounds_x.v[1],
-              room_bounds_x.v[2], room_bounds_x.v[3],
-              quadrant_fullsize_x >> 1,
-              overworld_offset_base_x << 3,
-              BYTE(overworld_area_is_big) != 0);
-    }
-#endif
-    visual_x = WideCamera_InterpolateTransition(
-      logical_x,
-      g_fixed_camera_tracker.transition_start_x,
-      g_fixed_camera_tracker.transition_start_visual_x,
-      g_fixed_camera_tracker.transition_end_offset,
-      direction, g_fixed_camera_tracker.transition_distance);
-  } else {
-    g_fixed_camera_tracker.transition_active = false;
-    g_fixed_camera_tracker.direction = 0;
-    visual_x = WideCamera_ClampToBounds(logical_x, left, right, margin);
-  }
-
-#ifdef ZELDA_CAMERA_TEST
-  if (direction != 0 && was_transition_active &&
-      previous_direction == direction) {
-    int logical_step = direction *
-      (int16)(logical_x - previous_logical_x);
-    int visual_step = direction * (visual_x - previous_visual_x);
-    if (logical_step >= 0 && visual_step < 0) {
-      fprintf(stderr,
-              "camera ERROR reversed during transition: context=%u "
-              "dir=%d logical=%u->%u visual=%d->%d\n",
-              context, direction, previous_logical_x, logical_x,
-              previous_visual_x, visual_x);
-    }
-  } else if (direction == 0 && was_transition_active) {
-    int exit_step = visual_x - previous_visual_x;
-    if (exit_step < 0)
-      exit_step = -exit_step;
-    if (exit_step > 4) {
-      fprintf(stderr,
-              "camera ERROR jump after transition: context=%u "
-              "logical=%u visual=%d->%d step=%d\n",
-              context, logical_x, previous_visual_x, visual_x, exit_step);
-    }
-  }
-#endif
-
-  g_fixed_camera_tracker.last_logical_x = logical_x;
-  g_fixed_camera_tracker.last_visual_x = visual_x;
-  return visual_x;
+static bool WideRowsEnabled(uint32 render_flags) {
+  // The original camera's lower limit is defined for 224 lines. Near that
+  // limit the 240-line picture reveals the missing rows above instead of
+  // reading beyond the room or area.
+  return (render_flags & kPpuRenderFlags_Height240) != 0;
 }
 
-static FixedCameraRenderState BeginFixedCameraRender(void) {
-  FixedCameraRenderState state = {0};
-  state.visual_x = BG2HOFS_copy2;
-  int margin = ZeldaGetWidescreenFixedCameraMargin();
-  uint8 context = GetFixedCameraContext();
-  if (!margin || !context) {
-    memset(&g_fixed_camera_tracker, 0, sizeof(g_fixed_camera_tracker));
-    return state;
-  }
+typedef struct WideFrame {
+  uint8 context;      // 7 or 9 while the picture follows the game's camera
+  bool fixed_camera;  // the drawn camera and the side bands follow the view
+  bool rows;          // 240-line picture
+  bool settled;       // no transition, and the view is the rules' one
+  WideView view;
+} WideFrame;
 
-  state.uses_visual_camera = true;
-  state.visual_x = CalculateFixedCameraVisualX(
-    context, margin, &state.horizontal_transition);
-  int delta = (int16)(BG2HOFS_copy2 - (uint16)state.visual_x);
-  if (delta == 0)
-    return state;
-
-  state.active = true;
-  state.ppu_bg1_hscroll = g_zenv.ppu->bgLayer[0].hScroll;
-  state.ppu_bg2_hscroll = g_zenv.ppu->bgLayer[1].hScroll;
-  state.ppu_obj_x_offset = g_zenv.ppu->renderObjXOffset;
-
-  g_zenv.ppu->bgLayer[0].hScroll =
-      (state.ppu_bg1_hscroll - delta) & 0x3ff;
-  g_zenv.ppu->bgLayer[1].hScroll =
-      (state.ppu_bg2_hscroll - delta) & 0x3ff;
-  g_zenv.ppu->renderObjXOffset = state.ppu_obj_x_offset + delta;
-  return state;
-}
-
-static void EndFixedCameraRender(const FixedCameraRenderState *state) {
-  if (!state->active)
-    return;
-  g_zenv.ppu->bgLayer[0].hScroll = state->ppu_bg1_hscroll;
-  g_zenv.ppu->bgLayer[1].hScroll = state->ppu_bg2_hscroll;
-  g_zenv.ppu->renderObjXOffset = state->ppu_obj_x_offset;
-}
-
-// The SNES streamer may recycle columns still visible behind the fixed WIDE
-// camera. Supply only that narrow visible fringe from the current world map.
-// Restore VRAM after joined CPU rendering / synchronous GPU scene preparation,
-// so prefetch state, game logic and subsequent area transitions remain intact.
-#ifdef __3DS__
-static struct {
-  uint16 address[512], value[512];
-  unsigned count, last_count;
-} g_wide_column_repair;
-
-static void BeginWideOverworldColumns(uint32 render_flags) {
-  g_wide_column_repair.count = g_wide_column_repair.last_count = 0;
+// Only the drawing moves: collision, camera RAM and saved state stay intact.
+static WideFrame WideFrameNow(uint32 render_flags, bool commit) {
+  WideFrame f = {0};
   Ppu *p = g_zenv.ppu;
-  int margin = p->extraLeftRight;
-  if (!margin || g_widescreen_edge_mode != 1 ||
-      !(enhanced_features0 & kFeatures0_WidescreenVisualFixes) ||
-      GetFixedCameraEffectiveContext() != 9 || player_is_indoors ||
-      WideCamera_IsMapMenu(main_module_index, submodule_index) ||
-      (main_module_index == 9 && submodule_index != 0) ||
-      GetFixedCameraTransitionDirection(9) != 0 || p->mode != 1 ||
-      !p->bgLayer[1].tilemapWider || !p->bgLayer[1].tilemapHigher ||
-      (p->bgLayer[1].hScroll & 511) != (BG2HOFS_copy2 & 511) ||
-      (p->bgLayer[1].vScroll & 511) != (BG2VOFS_copy2 & 511))
-    return;
-  int logical = BG2HOFS_copy2, left, right;
-  GetFixedCameraBounds(9, logical, &left, &right);
-  int visual = WideCamera_ClampToBounds(logical, left, right, margin);
-  int x0 = IntMax(visual - margin, left);
-  int x1 = IntMin(visual + 256 + margin, right + 256);
-  // While the visual camera is clamped, the logical camera can move in either
-  // direction without moving the picture. Cover its entire possible range,
-  // including a column recycled before the player reversed direction.
-  int logical_min = logical, logical_max = logical;
-  if (right - left >= margin * 2) {
-    if (visual == left + margin) logical_min = left;
-    if (visual == right - margin) logical_max = right;
+  uint8 context = UseNativeMapCamera() ?
+                  0 : GetFixedCameraEffectiveContext();
+  bool fixed = WideFixedCameraEnabled();
+  bool rows = WideRowsEnabled(render_flags);
+  if (!context || !(fixed || rows)) {
+    if (commit)
+      memset(&g_wide_view, 0, sizeof(g_wide_view));
+    return f;
   }
-  int safe_left = (logical_max & ~15) - 128;
-  int safe_right = (logical_min & ~15) + 384;
-  if (x0 >= safe_left && x1 <= safe_right) return;
-  int height = (render_flags & kPpuRenderFlags_Height240) ? 240 : 224;
-  int delta_y = height == 240 ? IntMin(IntMax(16 - (int16)(ow_scroll_vars0.yend - BG2VOFS_copy2), 0), 16) : 0;
-  int y0 = BG2VOFS_copy2 - delta_y + 1;
-  int base_x = WideCamera_Unwrap16(overworld_offset_base_x << 3, visual);
-  int base_y = WideCamera_Unwrap16(overworld_offset_base_y, y0);
-  const uint16 *map8 = kMap16ToMap8;
-  if (!map8) return;
-  for (int x = x0 & ~7; x < x1; x += 8) {
-    if (x >= safe_left && x + 8 <= safe_right) continue;
-    int mx = x - base_x;
-    if ((unsigned)mx >= 1024) continue;
-    for (int y = y0 & ~7; y < y0 + height; y += 8) {
-      int my = y - base_y;
-      if ((unsigned)my >= 1024) continue;
-      unsigned tile = dung_bg2[(my >> 4) * 64 + (mx >> 4)];
-      if (tile >= kMap16ToMap8_SIZE / 8) continue;
-      unsigned part = ((my & 8) >> 2) | ((mx & 8) >> 3);
-      uint16 value = map8[tile * 4 + part];
-      unsigned wx = x & 511, wy = y & 511;
-      unsigned address = (p->bgLayer[1].tilemapAdr + (wy >> 3 & 31) * 32 +
-        (wx >> 3 & 31) + (wx >= 256 ? 0x400 : 0) + (wy >= 256 ? 0x800 : 0)) & 0x7fff;
-      if (p->vram[address] == value) continue;
-      unsigned n = g_wide_column_repair.count;
-      if (n == countof(g_wide_column_repair.address)) return;
-      g_wide_column_repair.address[n] = address;
-      g_wide_column_repair.value[n] = p->vram[address];
-      g_wide_column_repair.count = n + 1;
-      p->vram[address] = value;
+  bool lantern = WideLanternRoom(context);
+  bool visible = !p->forcedBlank && p->brightness != 0;
+  f.context = context;
+  f.fixed_camera = fixed;
+  f.rows = rows;
+  f.view = UpdateWideView(context, fixed && !lantern ? p->extraLeftRight : 0,
+                          rows, visible, !lantern, &f.settled, commit);
+  if(g_private_fade.active) {
+    if(g_private_fade.axis==1)f.view.offset_x=(int16)(BG2HOFS_copy2-g_private_fade.source);
+    else f.view.delta_y=(int16)(BG2VOFS_copy2-g_private_fade.source);
+    f.view.left=f.view.right=0;f.settled=false;
+  }
+  return f;
+}
+
+static WideFrame BeginWideFrame(uint32 render_flags) {
+  return WideFrameNow(render_flags, true);
+}
+
+// The 240-line picture moves up at the bottom of an area or a room: the
+// sprite tiles of the rows it then shows above the game's screen are kept
+// with WidescreenVisualFixes.
+static int WideSpriteRows(const WideFrame *f) {
+  return f->rows && (enhanced_features0 & kFeatures0_WidescreenVisualFixes) ?
+         f->view.delta_y : 0;
+}
+
+void ZeldaWideBeforeSprites(void) {
+  WideFrame f = WideFrameNow(g_wide_render_flags, false);
+  g_wide_picture_rows = WideSpriteRows(&f);
+}
+
+static bool WideRoomVoidActive(void);
+
+static void ConfigurePpuSideSpace(const WideFrame *f) {
+  // Let PPU impl know about the maximum allowed extra space on the sides and bottom
+  int extra_right = 0, extra_left = 0, extra_bottom = 0;
+  if (IsDungeonMapMenuActive()) {
+    // The outer 16 native pixels contain only the map backdrop. Continue
+    // that strip through Wide margins without wrapping floor grids or
+    // moving the frame and its sprite markers out of native coordinates.
+    PpuSetExtraSideSpace(g_zenv.ppu, 0, 0, 16);
+    g_zenv.ppu->wideMarginRepeat = 1;
+    return;
+  }
+  bool repeat_margins = false;
+//  printf("main %d, sub %d  (%d, %d, %d)\n", main_module_index, submodule_index, BG2HOFS_copy2, room_bounds_x.v[2 | (quadrant_fullsize_x >> 1)], quadrant_fullsize_x >> 1);
+  int mod = main_module_index;
+  if (mod == 14)
+    mod = saved_module_for_menu;
+  if ((enhanced_features0 & kFeatures0_WidescreenVisualFixes) &&
+      (mod == 6 || mod == 8 || mod == 10 || mod == 15 || mod == 16 || mod == 17 ||
+       mod == 18 || mod == 19 || mod == 21 || mod == 22 || mod == 23))
+    mod = player_is_indoors ? 7 : 9;
+  if (mod == 9) {
+    // Outdoors
+    if (f->fixed_camera) {
+      extra_left = f->view.left;
+      extra_right = f->view.right;
+    } else {
+      extra_left = BG2HOFS_copy2 - ow_scroll_vars0.xstart;
+      extra_right = ow_scroll_vars0.xend - BG2HOFS_copy2;
+    }
+    extra_bottom = ow_scroll_vars0.yend - BG2VOFS_copy2;
+  } else if (mod == 7) {
+    // indoors, except when the light cone is in use
+    if (!WideLanternRoom(7)) {
+      // Rooms end at their bounds. Beside them draw the room's void, or else
+      // repeat its outer edge (shaking or layered rooms) instead of black.
+      repeat_margins = false;
+      int qm = quadrant_fullsize_x >> 1;
+      if (WideRoomVoidActive()) {
+        // The bands beside the room draw its void (BeginWideRoomVoid).
+        extra_left = extra_right = kPpuExtraLeftRight;
+        repeat_margins = false;
+      } else if (f->fixed_camera) {
+        extra_left = f->view.left;
+        extra_right = f->view.right;
+      } else {
+        extra_left = IntMax(BG2HOFS_copy2 - room_bounds_x.v[qm], 0);
+        extra_right = IntMax(room_bounds_x.v[qm + 2] - BG2HOFS_copy2, 0);
+      }
+    }
+
+    int qy = quadrant_fullsize_y >> 1;
+    extra_bottom = IntMax(room_bounds_y.v[qy + 2] - BG2VOFS_copy2, 0);
+  } else if (mod == 20 || mod == 0 || mod == 1) {
+    extra_left = kPpuExtraLeftRight, extra_right = kPpuExtraLeftRight;
+    extra_bottom = 16;
+  }
+  // The 240-line picture is drawn whole: delta_y moves it up instead.
+  if (f->rows && f->context)
+    extra_bottom = 16;
+  PpuSetExtraSideSpace(g_zenv.ppu, extra_left, extra_right, extra_bottom);
+  g_zenv.ppu->wideMarginRepeat = repeat_margins;
+}
+
+typedef struct WideRenderState {
+  int dx, dy;
+  uint16 bg1_h, bg2_h, bg1_v, bg2_v;
+  int16 obj_x, obj_y;
+} WideRenderState;
+
+static WideRenderState BeginWideRender(const WideFrame *f) {
+  WideRenderState s = {0};
+  Ppu *p = g_zenv.ppu;
+  if (!f->context)
+    return s;
+  s.dx = f->fixed_camera ? f->view.offset_x : 0;
+  s.dy = f->rows ? f->view.delta_y : 0;
+  s.bg1_h = p->bgLayer[0].hScroll;
+  s.bg2_h = p->bgLayer[1].hScroll;
+  s.bg1_v = p->bgLayer[0].vScroll;
+  s.bg2_v = p->bgLayer[1].vScroll;
+  s.obj_x = p->renderObjXOffset;
+  s.obj_y = p->renderObjYOffset;
+  if (s.dx) {
+    p->bgLayer[0].hScroll = (s.bg1_h - s.dx) & 0x3ff;
+    p->bgLayer[1].hScroll = (s.bg2_h - s.dx) & 0x3ff;
+    p->renderObjXOffset = s.obj_x + s.dx;
+  }
+  if (s.dy) {
+    p->bgLayer[0].vScroll = (s.bg1_v - s.dy) & 0x3ff;
+    p->bgLayer[1].vScroll = (s.bg2_v - s.dy) & 0x3ff;
+    p->renderObjYOffset = s.obj_y + s.dy;
+  }
+  return s;
+}
+
+static void EndWideRender(const WideRenderState *s) {
+  Ppu *p = g_zenv.ppu;
+  if (s->dx) {
+    p->bgLayer[0].hScroll = s->bg1_h;
+    p->bgLayer[1].hScroll = s->bg2_h;
+    p->renderObjXOffset = s->obj_x;
+  }
+  if (s->dy) {
+    p->bgLayer[0].vScroll = s->bg1_v;
+    p->bgLayer[1].vScroll = s->bg2_v;
+    p->renderObjYOffset = s->obj_y;
+  }
+}
+
+// The maps the game keeps in WRAM of the room (BG2 at $2000, BG1 at $4000,
+// 64x64 entries) or of the overworld area (map16 at $2000), and of the place
+// before them: the game rebuilds them for the next place before the scroll
+// towards it, and streams the tile maps in VRAM only for the SNES picture.
+typedef struct WideRegion {
+  uint8 context;     // 7 room, 9 overworld area, 0 unknown
+  int x, y, size;    // world rectangle
+  uint16 room;       // room whose geometry is retained (may differ during a load)
+  int room_left, room_right; // selected subroom span, relative to x
+  bool private_room; // houses/caves keep closed neighboring chambers covered
+} WideRegion;
+
+static WideRegion g_wide_live, g_wide_prev;
+static uint16 g_wide_prev_maps[0x2000];
+
+static void WideRoomUpdateSpan(WideRegion *r) {
+  int qx = quadrant_fullsize_x >> 1;
+  int left = (int16)(room_bounds_x.v[qx] - r->x);
+  int right = (int16)(room_bounds_x.v[qx + 2] - r->x) + 256;
+  if(g_private_fade.active && r->private_room && g_private_fade.axis==1) {
+    left=(int16)(g_private_fade.source-r->x);right=left+256;
+  }
+  if (left >= 0 && right <= 512 && left < right) {
+    r->room_left = left;
+    r->room_right = right;
+  }
+}
+
+static WideRegion WideRegionFromGame(uint8 context) {
+  WideRegion r = {0};
+  r.context = context;
+  if (context == 7) {
+    r.room = dungeon_room_index;
+    r.private_room = (uint8)cur_palace_index_x2 == 0xff;
+    r.x = (dungeon_room_index & 15) * 512;
+    r.y = (dungeon_room_index >> 4) * 512;
+    r.size = r.room_right = 512;
+    WideRoomUpdateSpan(&r);
+  } else {
+    r.x = overworld_offset_base_x << 3;
+    r.y = overworld_offset_base_y;
+    r.size = BYTE(overworld_area_is_big) ? 1024 : 512;
+  }
+  return r;
+}
+
+// Rooms have no fixed place in the camera's frame: teleport doors and
+// stairs move the frame (Dungeon_AdjustForTeleportDoors,
+// Dungeon_AdjustAfterSpiralStairs). The room the SNES camera shows sits in
+// the 512-pixel block around it.
+static bool WideRegionHas(const WideRegion *r, int x, int y) {
+  return (unsigned)(int16)(x - r->x) < (unsigned)r->size &&
+         (unsigned)(int16)(y - r->y) < (unsigned)r->size;
+}
+
+static void WideRoomFollowCamera(void) {
+  int x = BG2HOFS_copy2 & ~0x1ff, y = BG2VOFS_copy2 & ~0x1ff;
+  if (g_wide_live.context != 7 || (main_module_index == 7 && submodule_index == 2 &&
+      abs((int16)(x - g_wide_live.x)) <= 512 &&
+      abs((int16)(y - g_wide_live.y)) <= 512) ||
+      WideRegionHas(&g_wide_live, x, y) ||
+      (g_wide_prev.context == 7 && WideRegionHas(&g_wide_prev, x, y)))
+    return;
+  g_wide_live.x = x;
+  g_wide_live.y = y;
+}
+
+// The game calls these around rebuilding a room (Dungeon_LoadRoom) or an
+// area (Overworld_DecompressAndDrawAllQuadrants) in WRAM.
+static void InvalidateWideRoomVoid(void);
+
+void ZeldaWideBeforeMapLoad(int context) {
+  g_wide_prev = g_wide_live;
+  if (context == 7 && g_wide_prev.context == 7) {
+    // The room being left is the one the camera shows.
+    g_wide_prev.x = BG2HOFS_copy2 & ~0x1ff;
+    g_wide_prev.y = BG2VOFS_copy2 & ~0x1ff;
+  }
+  if (g_wide_prev.context)
+    memcpy(g_wide_prev_maps, g_ram + 0x2000, sizeof(g_wide_prev_maps));
+}
+
+void ZeldaWideAfterMapLoad(int context) {
+  InvalidateWideRoomVoid();
+  g_wide_live = WideRegionFromGame((uint8)context);
+}
+
+// Beside the two regions, outdoors: across a scroll the drawn camera glides
+// from the view of one area to the view of the next, so the rows of one area
+// can show the screen beside it, which neither region holds and the game has
+// not loaded. Its map16 is decoded from the map data
+// (Overworld_DecodeScreenMap16, without the overlays the game adds when it
+// enters an area) and kept for the frames after.
+static struct {
+  int room[4];
+  bool valid[4];
+  uint8 next, pinned;
+  uint16 maps[4][0x2000];
+} g_wide_rooms;
+
+static struct {
+  int16 screen[4];  // screen index + 1, 0 while free
+  bool valid[4];
+  uint8 next;
+  uint16 map16[4][32 * 32];
+} g_wide_screens;
+
+// Outdoors, a scroll transition puts the next area's aux graphics in VRAM
+// (Module09_LoadAuxGFX, then the NMI of that frame and of the next) before
+// the camera moves. The SNES picture shows the area being left only where
+// the two share their graphics; the WIDE picture shows more of it, whose
+// tiles would take the next area's graphics (a house of Secrets of the Past
+// turns into pale scales). The graphics of the area left are kept here, and
+// for the frames of the transition its cells in the WIDE picture draw them
+// from tiles the frame does not show.
+static struct {
+  bool valid;
+  WideRegion region;    // the area they belong to
+  uint16 tile_adr;      // VRAM address of BG tile 0
+  uint16 chr[0x2000];   // BG tiles 0-511
+} g_wide_old_chr;
+
+static void ResetWideTracking(void) {
+  InvalidateWideRoomVoid();
+  memset(&g_wide_view, 0, sizeof(g_wide_view));
+  memset(&g_private_fade,0,sizeof(g_private_fade));
+  memset(&g_wide_live, 0, sizeof(g_wide_live));
+  memset(&g_wide_prev, 0, sizeof(g_wide_prev));
+  memset(g_wide_screens.screen, 0, sizeof(g_wide_screens.screen));
+  g_wide_old_chr.valid = false;
+  memset(&g_wide_rooms, 0, sizeof(g_wide_rooms));
+}
+
+// The WIDE picture shows tile map cells the SNES picture does not, which the
+// game may have filled for another place or not yet. Draw them from the
+// maps above for the duration of the frame. VRAM is restored after joined
+// CPU rendering / synchronous GPU scene preparation, so prefetch state, game
+// logic and later transitions remain intact.
+static struct {
+  uint16 address[8192], value[8192];
+  unsigned count, last_count;
+} g_wide_tile_repair;
+
+void ZeldaWideBeforeAuxGfx(void) {
+  Ppu *p = g_zenv.ppu;
+  g_wide_old_chr.valid = false;
+  // Only the scroll transitions (submodule 1); the others change the whole
+  // picture at once.
+  if (!p || !p->extraLeftRight || main_module_index != 9 || submodule_index != 1 ||
+      g_wide_live.context != 9)
+    return;
+  g_wide_old_chr.region = g_wide_live;
+  g_wide_old_chr.tile_adr = p->bgLayer[1].tileAdr;
+  for (int i = 0; i < 0x2000; i++)
+    g_wide_old_chr.chr[i] = p->vram[(g_wide_old_chr.tile_adr + i) & 0x7fff];
+  g_wide_old_chr.valid = true;
+}
+
+static bool WidePatchVram(unsigned address, uint16 value) {
+  Ppu *p = g_zenv.ppu;
+  address &= 0x7fff;
+  if (p->vram[address] == value)
+    return true;
+  unsigned n = g_wide_tile_repair.count;
+  if (n == countof(g_wide_tile_repair.address))
+    return false;
+  g_wide_tile_repair.address[n] = address;
+  g_wide_tile_repair.value[n] = p->vram[address];
+  g_wide_tile_repair.count = n + 1;
+  p->vram[address] = value;
+  return true;
+}
+
+static unsigned WideMapAddress(const BgLayer *bg, int tx, int ty) {
+  unsigned wx = tx & 511, wy = ty & 511;
+  return (bg->tilemapAdr + (wy >> 3 & 31) * 32 + (wx >> 3 & 31) +
+          (wx >= 256 ? 0x400 : 0) + (wy >= 256 ? 0x800 : 0)) & 0x7fff;
+}
+
+// The cells of the area left, beside the SNES picture of BG2 (x0..x1, y0..y1
+// around the camera x, y), take its graphics from tiles no cell of BG1 or BG2
+// shows in this frame.
+static void WideRepairOldGraphics(int x, int y, int x0, int x1, int y0, int y1) {
+  Ppu *p = g_zenv.ppu;
+  const BgLayer *bg2 = &p->bgLayer[1];
+  if (main_module_index != 9 || submodule_index == 0)
+    g_wide_old_chr.valid = false;  // the transition is over
+  if (!g_wide_old_chr.valid || bg2->tileAdr != g_wide_old_chr.tile_adr ||
+      p->bgLayer[0].tileAdr != g_wide_old_chr.tile_adr)
+    return;
+  int ox = g_wide_old_chr.region.x, oy = g_wide_old_chr.region.y;
+  int osize = g_wide_old_chr.region.size;
+  if (x1 <= ox || x0 >= ox + osize || y1 <= oy || y0 >= oy + osize)
+    return;
+  // Tiles 0-511 a cell of the frame shows, or whose words hold other data.
+  static uint8 busy[512];
+  static int16 slot_of[512];
+  memset(busy, 0, sizeof(busy));
+  for (int layer = 0; layer < 2; layer++) {
+    const BgLayer *bg = &p->bgLayer[layer];
+    if (!((p->screenEnabled[0] | p->screenEnabled[1]) & (1 << layer)))
+      continue;
+    int lx = (int16)(layer ? BG2HOFS_copy2 : BG1HOFS_copy2) + (x - (int16)BG2HOFS_copy2);
+    int ly = (int16)(layer ? BG2VOFS_copy2 : BG1VOFS_copy2) + (y - (int16)BG2VOFS_copy2);
+    int dx = lx - x, dy = ly - y;
+    for (int ty = (y0 + dy) & ~7; ty < y1 + dy; ty += 8)
+      for (int tx = (x0 + dx) & ~7; tx < x1 + dx; tx += 8) {
+        unsigned t = p->vram[WideMapAddress(bg, tx, ty)] & 0x3ff;
+        if (t < 512)
+          busy[t] = 1;
+      }
+  }
+  // The words of BG3's tiles and of the sprites' are not borrowed.
+  const unsigned other[3][2] = {
+    { p->bgLayer[2].tileAdr, 0x2000 }, { p->objTileAdr1, 0x1000 }, { p->objTileAdr2, 0x1000 },
+  };
+  for (int t = 0; t < 512; t++) {
+    unsigned a = (g_wide_old_chr.tile_adr + t * 16) & 0x7fff;
+    for (int i = 0; i < 3; i++)
+      if (((a - other[i][0]) & 0x7fff) < other[i][1] || ((other[i][0] - a) & 0x7fff) < 16)
+        busy[t] = 1;
+  }
+  for (int t = 0; t < 512; t++)
+    slot_of[t] = -1;
+  int next_free = 0;
+  for (int ty = y0 & ~7; ty < y1; ty += 8) {
+    bool row_in_view = ty + 8 > y + 1 && ty <= y + 224;
+    for (int tx = x0 & ~7; tx < x1; tx += 8) {
+      if (row_in_view && tx + 8 > x && tx < x + 256)
+        continue;  // the SNES picture: as the game draws it
+      if ((unsigned)(tx - ox) >= (unsigned)osize || (unsigned)(ty - oy) >= (unsigned)osize)
+        continue;
+      unsigned address = WideMapAddress(bg2, tx, ty);
+      uint16 cell = p->vram[address];
+      unsigned t = cell & 0x3ff;
+      if (t >= 512)
+        continue;
+      const uint16 *old = &g_wide_old_chr.chr[t * 16];
+      unsigned chr = (g_wide_old_chr.tile_adr + t * 16) & 0x7fff;
+      bool same = true;
+      for (int i = 0; i < 16 && same; i++)
+        same = p->vram[(chr + i) & 0x7fff] == old[i];
+      if (same)
+        continue;
+      if (slot_of[t] < 0) {
+        while (next_free < 512 && busy[next_free])
+          next_free++;
+        if (next_free == 512)
+          return;
+        unsigned dst = (g_wide_old_chr.tile_adr + next_free * 16) & 0x7fff;
+        for (int i = 0; i < 16; i++)
+          if (!WidePatchVram(dst + i, old[i]))
+            return;
+        busy[next_free] = 1;
+        slot_of[t] = (int16)next_free;
+      }
+      if (!WidePatchVram(address, (cell & ~0x3ff) | slot_of[t]))
+        return;
     }
   }
 }
 
-static void EndWideOverworldColumns(void) {
-  g_wide_column_repair.last_count = g_wide_column_repair.count;
-  while (g_wide_column_repair.count) {
-    unsigned n = --g_wide_column_repair.count;
-    g_zenv.ppu->vram[g_wide_column_repair.address[n]] = g_wide_column_repair.value[n];
+static int WideTileTruth(const WideRegion *r, const uint16 *maps, int layer,
+                         int x, int y, const uint16 *map8) {
+  int rx = (int16)(x - r->x), ry = (int16)(y - r->y);
+  if ((unsigned)rx >= (unsigned)r->size || (unsigned)ry >= (unsigned)r->size)
+    return -1;
+  if (r->context == 7)
+    return maps[(layer ? 0 : 0x1000) + (ry >> 3) * 64 + (rx >> 3)];
+  if (layer != 1 || !map8)
+    return -1;
+  unsigned tile = maps[(ry >> 4) * 64 + (rx >> 4)];
+  if (tile >= kMap16ToMap8_SIZE / 8)
+    return -1;
+  return map8[tile * 4 + (((ry & 8) >> 2) | ((rx & 8) >> 3))];
+}
+
+static int WideScreenTruth(int x, int y, const uint16 *map8) {
+  if (!map8 || (unsigned)x >= 0x1000 || (unsigned)y >= 0x1000 ||
+      overworld_screen_index >= 0x80)
+    return -1;
+  int screen = (y >> 9) * 8 + (x >> 9) + (overworld_screen_index & 0x40);
+  int i = 0;
+  while (i < 4 && g_wide_screens.screen[i] != screen + 1)
+    i++;
+  if (i == 4) {
+    i = g_wide_screens.next++ & 3;
+    g_wide_screens.screen[i] = (int16)(screen + 1);
+    g_wide_screens.valid[i] =
+      Overworld_DecodeScreenMap16(screen, g_wide_screens.map16[i]);
+  }
+  if (!g_wide_screens.valid[i])
+    return -1;
+  unsigned tile = g_wide_screens.map16[i][(y >> 4 & 31) * 32 + (x >> 4 & 31)];
+  if (tile >= kMap16ToMap8_SIZE / 8)
+    return -1;
+  return map8[tile * 4 + (((y & 8) >> 2) | ((x & 8) >> 3))];
+}
+
+static void BeginWideTileRepair(const WideFrame *f) {
+  g_wide_tile_repair.count = g_wide_tile_repair.last_count = 0;
+  Ppu *p = g_zenv.ppu;
+  if (!f->context || !f->fixed_camera || p->mode != 1)
+    return;
+  if (!g_wide_live.context) {
+    g_wide_live = WideRegionFromGame(f->context);
+    int previous=dungeon_room_index_prev,delta=previous-dungeon_room_index;
+    if(f->context==7&&!g_wide_live.private_room&&main_module_index==7&&submodule_index==2&&
+       (abs(delta)==16||(abs(delta)==1&&(previous>>4)==(dungeon_room_index>>4)))&&
+       previous<0x140&&Dungeon_DecodeRoomMaps(previous,g_wide_prev_maps)) {
+      g_wide_prev=g_wide_live;g_wide_prev.room=previous;
+      g_wide_prev.x=(previous&15)*512;g_wide_prev.y=(previous>>4)*512;
+      g_wide_prev.room_left=0;g_wide_prev.room_right=512;
+    }
+  }
+  if (g_wide_live.context != f->context)
+    return;
+  WideRoomFollowCamera();
+  // Settled indoors, the whole room stays in VRAM, and the game animates
+  // some of it there only.
+  if (f->context == 7 && f->settled && main_module_index == 7 &&
+      submodule_index == 0)
+    return;
+  const uint16 *map8 = kMap16ToMap8 ? GetMap16toMap8Table() : NULL;
+  const WideRegion *regions[2] = { &g_wide_live, &g_wide_prev };
+  const uint16 *maps[2] = { (const uint16 *)(g_ram + 0x2000), g_wide_prev_maps };
+  int nregions = g_wide_prev.context == g_wide_live.context ? 2 : 1;
+  for (int layer = f->context == 7 ? 0 : 1; layer < 2; layer++) {
+    BgLayer *bg = &p->bgLayer[layer];
+    uint16 sx = layer ? BG2HOFS_copy2 : BG1HOFS_copy2;
+    uint16 sy = layer ? BG2VOFS_copy2 : BG1VOFS_copy2;
+    // The picture shakes (bg1_x_offset, bg1_y_offset) by what the scroll
+    // registers add to the camera.
+    int shake_x = ((bg->hScroll - sx) & 511) ^ 256, shake_y = ((bg->vScroll - sy) & 511) ^ 256;
+    shake_x -= 256, shake_y -= 256;
+    if (!((p->screenEnabled[0] | p->screenEnabled[1]) & (1 << layer)) ||
+        !bg->tilemapWider || !bg->tilemapHigher ||
+        sx != BG2HOFS_copy2 || sy != BG2VOFS_copy2 ||
+        abs(shake_x) > 16 || abs(shake_y) > 16)
+      continue;
+    int x = (int16)sx + shake_x, y = (int16)sy + shake_y;
+    int visual = x - f->view.offset_x;
+    int x0 = visual - f->view.left, x1 = visual + 256 + f->view.right;
+    int y0 = y + 1 - f->view.delta_y, y1 = y0 + (f->rows ? 240 : 224);
+    for (int ty = y0 & ~7; ty < y1; ty += 8) {
+      bool row_in_view = ty + 8 > y + 1 && ty <= y + 224;
+      for (int tx = x0 & ~7; tx < x1; tx += 8) {
+        if (row_in_view && tx + 8 > x && tx < x + 256)
+          continue;  // the SNES picture: VRAM is right
+        int value = -1;
+        for (int i = 0; i < nregions && value < 0; i++)
+          value = WideTileTruth(regions[i], maps[i], layer, tx, ty, map8);
+        if (value < 0 && f->context == 9)
+          value = WideScreenTruth(tx, ty, map8);
+        if (value < 0)
+          continue;
+        unsigned wx = tx & 511, wy = ty & 511;
+        unsigned address = (bg->tilemapAdr + (wy >> 3 & 31) * 32 + (wx >> 3 & 31) +
+          (wx >= 256 ? 0x400 : 0) + (wy >= 256 ? 0x800 : 0)) & 0x7fff;
+        if (p->vram[address] == value)
+          continue;
+        unsigned n = g_wide_tile_repair.count;
+        if (n == countof(g_wide_tile_repair.address))
+          return;
+        g_wide_tile_repair.address[n] = address;
+        g_wide_tile_repair.value[n] = p->vram[address];
+        g_wide_tile_repair.count = n + 1;
+        p->vram[address] = value;
+      }
+    }
+    if (f->context == 9 && layer == 1)
+      WideRepairOldGraphics(x, y, x0, x1, y0, y1);
   }
 }
-#endif
+
+// Fixed-camera rooms stop at their bounds, which left black bands beside
+// small rooms. The cells of those bands, which belong to other parts of the
+// 512-pixel room or to nothing, draw the room's void instead: the 16x16
+// block (BG1 and BG2) most common along the edge of its bounds, which is
+// what surrounds the room (the dark of a house, the sand outside a tower).
+// Sprites wholly outside the room are hidden for the frame, so enemies of
+// the next quadrant do not appear on the void. Like the tile repair above,
+// VRAM and OAM are restored after rendering.
+typedef struct WideVoidBlock { uint16 cell[2][4]; } WideVoidBlock;
+static struct {
+  bool active;
+  int key[5];
+  bool cached_ok;
+  WideVoidBlock block;
+  uint16 oam_index[128], oam_value[128];
+  unsigned oam_count;
+} g_wide_void;
+
+static void InvalidateWideRoomVoid(void) {
+  g_wide_void.cached_ok = false;
+}
+
+static bool WideVoidBlockAt(const WideRegion *r, const uint16 *maps, int x, int y,
+                            WideVoidBlock *b) {
+  for (int layer = 0; layer < 2; layer++)
+    for (int i = 0; i < 4; i++) {
+      int v = WideTileTruth(r, maps, layer, x + (i & 1) * 8, y + (i >> 1) * 8, NULL);
+      if (v < 0)
+        return false;
+      b->cell[layer][i] = (uint16)v;
+    }
+  return true;
+}
+
+static bool WideFindRoomVoid(int bx0, int by0, int bx1, int by1, WideVoidBlock *out) {
+  const uint16 *maps = (const uint16 *)(g_ram + 0x2000);
+  static WideVoidBlock seen[256];
+  static uint16 count[256];
+  unsigned n = 0;
+  for (int side = 0; side < 4; side++) {
+    bool horizontal = side < 2;
+    int fixed = side == 0 ? by0 : side == 1 ? by1 - 16 : side == 2 ? bx0 : bx1 - 16;
+    int from = horizontal ? bx0 : by0, to = horizontal ? bx1 : by1;
+    for (int t = from; t + 16 <= to; t += 16) {
+      WideVoidBlock b;
+      if (!WideVoidBlockAt(&g_wide_live, maps, horizontal ? t : fixed,
+                           horizontal ? fixed : t, &b))
+        continue;
+      unsigned i = 0;
+      while (i < n && memcmp(&seen[i], &b, sizeof(b)))
+        i++;
+      if (i == n) {
+        if (n == countof(seen))
+          continue;
+        seen[n] = b, count[n++] = 0;
+      }
+      count[i]++;
+    }
+  }
+  if (!n)
+    return false;
+  unsigned best = 0;
+  for (unsigned i = 1; i < n; i++)
+    if (count[i] > count[best])
+      best = i;
+  *out = seen[best];
+  return true;
+}
+
+// A continuous floor along at least 32 pixels at the camera boundary is an
+// open seam, rather than a door. Sample both sides; walls/pits/closed doors
+// retain the room's own surround. This also covers internal quadrant edges.
+static bool WideOpenSeam(const uint16 *a, int ax, const uint16 *b, int bx,
+                         int y0, int y1, const WideVoidBlock *surround) {
+  int run = 0;
+  for (int y = IntMax(y0, 0); y < IntMin(y1, 512); y += 8) {
+    int ta = a[(y >> 3) * 64 + ax] & 1023;
+    int tb = b[(y >> 3) * 64 + bx] & 1023;
+    bool void_tile=false;
+    if(surround)for(int i=0;i<4;i++)
+      void_tile|=a[(y>>3)*64+ax]==surround->cell[1][i];
+    if (!void_tile && attributes_for_tile[ta] == 0 && attributes_for_tile[tb] == 0) {
+      if (++run >= 4) return true;
+    } else run = 0;
+  }
+  return false;
+}
+
+static void UpdatePrivateRoomFade(void) {
+  if(!WideFixedCameraEnabled()){memset(&g_private_fade,0,sizeof(g_private_fade));return;}
+  int direction,axis=GetWideTransition(7,&direction);
+  bool closed=false;
+  if(main_module_index==7&&submodule_index==1&&(uint8)cur_palace_index_x2==0xff&&axis) {
+    const uint16 *maps=(const uint16*)(g_ram+0x2000);int run=0;
+    closed=true;
+    for(int i=0;i<64;i++) {
+      int a=axis==1?i*64+31:31*64+i,b=axis==1?i*64+32:32*64+i;
+      if(attributes_for_tile[maps[a]&1023]==0&&attributes_for_tile[maps[b]&1023]==0) {
+        if(++run>=4){closed=false;break;}
+      } else run=0;
+    }
+  }
+  if(closed) {
+    int current=axis==1?BG2HOFS_copy2:BG2VOFS_copy2;
+    int end=subsubmodule_index>=4?current:GetWideTransitionEnd(7,axis,direction,current);
+    // Native room scrolls advance four pixels. The general two-pixel camera
+    // estimator can stop two pixels early when travelling up or left.
+    end=(end&~3)|(current&2);
+    // At the last scroll coordinate the target equals current, while the
+    // native landing phase is still in flight. Keep the established source.
+    if(!g_private_fade.active) {
+      g_private_fade.axis=axis;g_private_fade.end=end;
+      g_private_fade.source=end-direction*256;
+    }
+    g_private_fade.active=true;g_private_fade.reveal=false;
+    int moved=(current-g_private_fade.source)*direction;
+    g_private_fade.light=(unsigned)IntMax(0,15-IntMax(moved,0)*15/128);
+  } else {
+    if(g_private_fade.active){g_private_fade.reveal=true;g_private_fade.tick=frame_counter;}
+    g_private_fade.active=false;g_private_fade.light=15;
+    if(g_private_fade.reveal) {
+      unsigned age=(uint8)(frame_counter-g_private_fade.tick);
+      if(age>=18)g_private_fade.reveal=false;
+      else g_private_fade.light=age*15/18;
+    }
+  }
+}
+
+static unsigned WideRoomOpenSides(const WideRegion *r, const uint16 *maps,
+                                  int y0, int y1) {
+  if (r->context != 7 || !r->private_room) return 0;
+  unsigned open = 0;
+  const int edges[2] = {r->room_left, r->room_right};
+  for (int side = 0; side < 2; side++) {
+    int seam = edges[side];
+    if (seam > 0 && seam < 512 &&
+        WideOpenSeam(maps, (seam - 1) >> 3, maps, seam >> 3, y0 - r->y, y1 - r->y, NULL))
+      open |= 1u << side;
+  }
+  return open;
+}
+
+static bool WideRoomTileVisible(const WideRegion *r, unsigned open, int x, int y) {
+  if (r->context != 7 || !WideRegionHas(r, x, y)) return false;
+  if (!r->private_room) return true;
+  int rx = (int16)(x - r->x);
+  if (rx >= r->room_left && rx < r->room_right) return true;
+  return (open & (rx < r->room_left ? 1 : 2)) != 0;
+}
+
+static const uint16 *WideNeighborMaps(int room) {
+  if (room < 0 || room >= 0x140) return NULL;
+  for (int i = 0; i < 4; i++)
+    if (g_wide_rooms.room[i] == room + 1) {
+      g_wide_rooms.pinned |= 1u << i;
+      return g_wide_rooms.valid[i] ? g_wide_rooms.maps[i] : NULL;
+    }
+  if(g_wide_rooms.pinned==15)return NULL;
+  int i;do {i=g_wide_rooms.next++&3;}while(g_wide_rooms.pinned&(1u<<i));
+  g_wide_rooms.pinned|=1u<<i;
+  g_wide_rooms.room[i] = room + 1;
+  g_wide_rooms.valid[i] = Dungeon_DecodeRoomMaps((uint16)room, g_wide_rooms.maps[i]);
+  return g_wide_rooms.valid[i] ? g_wide_rooms.maps[i] : NULL;
+}
+
+static void WideHideSpritesOutside(int left, int right, unsigned live_open, unsigned prev_open) {
+  static const uint8 kSizes[8][2] = {
+    {8, 16}, {8, 32}, {8, 64}, {16, 32}, {16, 64}, {32, 64}, {16, 32}, {16, 32},
+  };
+  Ppu *p = g_zenv.ppu;
+  for (unsigned index = 0; index < 256; index += 2) {
+    uint16 word = p->oam[index];
+    if ((word >> 8) == 0xf0)
+      continue;
+    unsigned high = p->oam[0x100 + (index >> 4)] >> (index & 15);
+    int size = kSizes[p->objSize & 7][(high >> 1) & 1];
+    // As the renderers place it: 9-bit X, shifted with the drawn camera.
+    int x = (word & 255) + (high & 1) * 256 + g_wide_picture_shift;
+    x = ((x + 256 - p->extraLeftRight) & 511) - 256 + p->extraLeftRight;
+    if (x + size > left && x < right) {
+      int wx = BG2HOFS_copy2 + x - g_wide_picture_shift;
+      int sy = word >> 8;
+      if (sy >= 240) sy -= 256;
+      int wy = BG2VOFS_copy2 + sy;
+      bool native = wx + size > BG2HOFS_copy2 && wx < BG2HOFS_copy2 + 256;
+      bool shown = native;
+      for (int end = 0; end < 2 && !shown; end++) {
+        int sx = wx + (end ? size - 1 : 0);
+        shown = WideRoomTileVisible(&g_wide_live, live_open, sx, wy) ||
+                WideRoomTileVisible(&g_wide_prev, prev_open, sx, wy);
+      }
+      if (shown) continue;
+    }
+    unsigned n = g_wide_void.oam_count;
+    g_wide_void.oam_index[n] = (uint16)index;
+    g_wide_void.oam_value[n] = word;
+    g_wide_void.oam_count = n + 1;
+    p->oam[index] = (word & 0xff) | 0xf000;
+  }
+}
+
+static void BeginWideRoomVoid(const WideFrame *f) {
+  g_wide_void.active = false;
+  g_wide_void.oam_count = 0;
+  Ppu *p = g_zenv.ppu;
+  if (f->context != 7 || !f->fixed_camera || p->mode != 1 || !p->extraLeftRight ||
+      WideLanternRoom(7) ||
+      (f->settled && f->view.left >= p->extraLeftRight && f->view.right >= p->extraLeftRight))
+    return;
+  if (!g_wide_live.context)
+    g_wide_live = WideRegionFromGame(f->context);
+  if (g_wide_live.context != 7)
+    return;
+  if (g_wide_live.room == dungeon_room_index)
+    WideRoomUpdateSpan(&g_wide_live);
+  const BgLayer *room_bg = &p->bgLayer[1];
+  if (!room_bg->tilemapWider || !room_bg->tilemapHigher)
+    return;
+  int shake_x = (int)((room_bg->hScroll - BG2HOFS_copy2 + 256) & 511) - 256;
+  int shake_y = (int)((room_bg->vScroll - BG2VOFS_copy2 + 256) & 511) - 256;
+  if (abs(shake_x) > 16 || abs(shake_y) > 16) return;
+  int qx = quadrant_fullsize_x >> 1, qy = quadrant_fullsize_y >> 1;
+  int bx0 = room_bounds_x.v[qx] & ~15, bx1 = (room_bounds_x.v[qx + 2] + 256 + 15) & ~15;
+  int by0 = room_bounds_y.v[qy] & ~15, by1 = (room_bounds_y.v[qy + 2] + 224 + 15) & ~15;
+  // The game changes the destination index/bounds before rebuilding WRAM.
+  // Until that load, use the bounds of the geometry actually retained.
+  if (bx0 < g_wide_live.x || bx1 > g_wide_live.x + 512 ||
+      by0 < g_wide_live.y || by1 > g_wide_live.y + 512) {
+    bx0 = g_wide_live.x; bx1 = bx0 + 512;
+    by0 = g_wide_live.y; by1 = by0 + 512;
+  }
+  int key[5] = { g_wide_live.room, bx0, by0, bx1, by1 };
+  if (memcmp(key, g_wide_void.key, sizeof(key)) || !g_wide_void.cached_ok) {
+    memcpy(g_wide_void.key, key, sizeof(key));
+    g_wide_void.cached_ok = WideFindRoomVoid(bx0, by0, bx1, by1, &g_wide_void.block);
+  }
+  if (!g_wide_void.cached_ok)
+    return;
+  // Use the PPU sampling origin, including sub-tile shake/scroll latency.
+  int x = BG2HOFS_copy2 + shake_x, y = BG2VOFS_copy2 + shake_y;
+  int visual = x - f->view.offset_x;
+  int in0 = visual - f->view.left, in1 = visual + 256 + f->view.right;
+  int out0 = visual - p->extraLeftRight, out1 = visual + 256 + p->extraLeftRight;
+  int y0 = y + 1 - f->view.delta_y, y1 = y0 + (f->rows ? 240 : 224);
+  const uint16 *live = (const uint16 *)(g_ram + 0x2000);
+  unsigned live_open = WideRoomOpenSides(&g_wide_live, live, y0, y1);
+  unsigned prev_open = WideRoomOpenSides(&g_wide_prev, g_wide_prev_maps, y0, y1);
+  g_wide_rooms.pinned=0; // retain all neighbor pointers for this picture
+  const uint16 *connected[2][2] = {{NULL}};
+  const WideRegion *owners[2] = {&g_wide_live,&g_wide_prev};
+  const uint16 *owner_maps[2] = {live,g_wide_prev_maps};
+  WideRegion region[2][2];
+  for(int owner=0;owner<2;owner++)for(int side=0;side<2;side++) {
+    const WideRegion *r=owners[owner];const uint16 *maps=owner_maps[owner];
+    region[owner][side]=*r;
+    if(r->context!=7)continue;
+    int boundary=side?r->room_right:r->room_left;
+    if(boundary!=0&&boundary!=512)continue;
+    if((side&&(r->room&15)==15)||(!side&&(r->room&15)==0))continue;
+    int ax=side?63:0,bx=side?0:63;
+    // Connectivity belongs to the room, not the moving viewport. A doorway
+    // going off screen during a vertical scroll must not remove its neighbor.
+    int first=r->private_room?y0-r->y:0,last=r->private_room?y1-r->y:512;
+    if(!WideOpenSeam(maps,ax,maps,ax,first,last,&g_wide_void.block))continue;
+    const uint16 *neighbor=WideNeighborMaps(r->room+(side?1:-1));
+    if(neighbor&&WideOpenSeam(maps,ax,neighbor,bx,first,last,&g_wide_void.block)) {
+      connected[owner][side]=neighbor;region[owner][side].x+=side?512:-512;
+    }
+  }
+  unsigned restore = g_wide_tile_repair.count;
+  for (int layer = 0; layer < 2; layer++) {
+    const BgLayer *bg = &p->bgLayer[layer];
+    if (!bg->tilemapWider || !bg->tilemapHigher) continue;
+    int dx = (bg->hScroll - room_bg->hScroll) & 511;
+    int dy = (bg->vScroll - room_bg->vScroll) & 511;
+    bool aligned = layer == 1 || (BG1HOFS_copy2 == BG2HOFS_copy2 && BG1VOFS_copy2 == BG2VOFS_copy2);
+    for (int ty = y0 & ~7; ty < y1; ty += 8)
+      for (int tx = out0 & ~7; tx < out1; tx += 8) {
+        if (tx + 8 > x && tx < x + 256 && !g_private_fade.active)
+          continue;  // preserve the game's original picture, including doors
+        unsigned parity = (((ty - by0) >> 3) & 1) * 2 + (((tx - bx0) >> 3) & 1);
+        int value = -1, side = tx < x ? 0 : 1;
+        bool preview = false;
+        // During scrolls the two retained live maps take priority over static
+        // previews, preserving opened chests and changed room tiles.
+        if (aligned) {
+          if (WideRoomTileVisible(&g_wide_live, live_open, tx, ty))
+            value = WideTileTruth(&g_wide_live, live, layer, tx, ty, NULL);
+          if (value < 0 && WideRoomTileVisible(&g_wide_prev, prev_open, tx, ty))
+            value = WideTileTruth(&g_wide_prev, g_wide_prev_maps, layer, tx, ty, NULL);
+          // An external open passage may extend beyond both retained maps.
+          for(int owner=0;owner<2&&value<0;owner++)if(connected[owner][side]) {
+            value=WideTileTruth(&region[owner][side],connected[owner][side],layer,tx,ty,NULL);
+            preview=value>=0;
+          }
+        }
+        // Tile repair already supplied visible geometry inside the moving
+        // view. Only missing geometry receives the repeating surround.
+        if (value >= 0 && !preview && tx + 8 > in0 && tx < in1) continue;
+        if (value < 0) value = g_wide_void.block.cell[layer][parity];
+        if (!WidePatchVram(WideMapAddress(bg, tx + dx, ty + dy), (uint16)value)) {
+          // Out of room: undo this pass and keep the black bands.
+          while (g_wide_tile_repair.count > restore) {
+            unsigned n = --g_wide_tile_repair.count;
+            p->vram[g_wide_tile_repair.address[n]] = g_wide_tile_repair.value[n];
+          }
+          return;
+        }
+      }
+  }
+  g_wide_void.active = true;
+  WideHideSpritesOutside(-p->extraLeftRight, 256 + p->extraLeftRight, live_open, prev_open);
+}
+
+static bool WideRoomVoidActive(void) {
+  return g_wide_void.active;
+}
+
+static void EndWideTileRepair(void) {
+  g_wide_tile_repair.last_count = g_wide_tile_repair.count;
+  while (g_wide_tile_repair.count) {
+    unsigned n = --g_wide_tile_repair.count;
+    g_zenv.ppu->vram[g_wide_tile_repair.address[n]] = g_wide_tile_repair.value[n];
+  }
+  while (g_wide_void.oam_count) {
+    unsigned n = --g_wide_void.oam_count;
+    g_zenv.ppu->oam[g_wide_void.oam_index[n]] = g_wide_void.oam_value[n];
+  }
+}
 
 uint32 ZeldaGetWideColumnRepairCount(void) {
-#ifdef __3DS__
-  return g_wide_column_repair.last_count;
-#else
-  return 0;
-#endif
+  return g_wide_tile_repair.last_count;
 }
 
-// The original camera's lower limit is defined for 224 lines. Near that
-// limit, reveal the missing rows above instead of reading beyond the room.
-// This affects drawing only: collision, camera RAM and saved state stay intact.
-typedef struct VerticalCameraRenderState {
-  int delta;
-  uint16 bg1, bg2;
-  int16 obj;
-} VerticalCameraRenderState;
-
-static VerticalCameraRenderState BeginVerticalCameraRender(void) {
-  VerticalCameraRenderState state = {0};
-#ifdef __3DS__
-  Ppu *p = g_zenv.ppu;
-  uint8 context = GetFixedCameraEffectiveContext();
-  if (!(p->renderFlags & kPpuRenderFlags_Height240) || !context ||
-      WideCamera_IsMapMenu(main_module_index, submodule_index))
-    return state;
-  uint16 bottom = context == 7 ?
-    room_bounds_y.v[(quadrant_fullsize_y >> 1) + 2] : ow_scroll_vars0.yend;
-  int available = (int16)(bottom - BG2VOFS_copy2);
-  state.delta = IntMin(IntMax(16 - available, 0), 16);
-  if (!state.delta) return state;
-  state.bg1 = p->bgLayer[0].vScroll;
-  state.bg2 = p->bgLayer[1].vScroll;
-  state.obj = p->renderObjYOffset;
-  p->bgLayer[0].vScroll = (state.bg1 - state.delta) & 0x3ff;
-  p->bgLayer[1].vScroll = (state.bg2 - state.delta) & 0x3ff;
-  p->renderObjYOffset = state.obj + state.delta;
-#endif
-  return state;
-}
-
-static void EndVerticalCameraRender(const VerticalCameraRenderState *state) {
-  if (!state->delta) return;
-  g_zenv.ppu->bgLayer[0].vScroll = state->bg1;
-  g_zenv.ppu->bgLayer[1].vScroll = state->bg2;
-  g_zenv.ppu->renderObjYOffset = state->obj;
+static bool QolBrightRoomActive(void) {
+  int module=main_module_index==14?saved_module_for_menu:main_module_index;
+  bool transition=module!=7||submodule_index!=0;
+  bool indoor_scene=module==7||module==6||module==8||module==15||module==16||module==17;
+  return (enhanced_features1 & kFeatures1_QolBrightRooms) && player_is_indoors && indoor_scene &&
+    (hdr_dungeon_dark_with_lantern || dung_want_lights_out || (transition&&dung_want_lights_out_copy));
 }
 
 static void ZeldaDrawPpuLines(Ppu *ppu, int height,
@@ -669,8 +1404,25 @@ static void ZeldaDrawPpuLines(Ppu *ppu, int height,
       ppu_write(ppu, (uint8)BG3VOFS, 0);
       ppu_write(ppu, (uint8)BG3VOFS, 0);
     }
-    if (i >= first_line && i <= last_line)
+    if (i >= first_line && i <= last_line) {
+      // Presentation-only accessibility: retain the exact dungeon lighting
+      // state and HDMA. Temporarily remove its darkening/window for this line.
+      bool bright=QolBrightRoomActive();
+      uint8 main=ppu->screenEnabled[0],window=ppu->screenWindowed[0];
+      uint8 clip=ppu->clipMode,prevent=ppu->preventMathMode,math=ppu->mathEnabled;
+      if(bright){
+        ppu->screenEnabled[0]|=ppu->screenEnabled[1];
+        if(hdr_dungeon_dark_with_lantern || ((ppu->screenEnabled[1]&1) && ppu->subtractColor))
+          ppu->screenEnabled[0]&=~1; // Includes the retained mask after the header changes.
+        ppu->screenWindowed[0]=0;
+        ppu->clipMode=ppu->preventMathMode=ppu->mathEnabled=0;
+      }
       ppu_runLine(ppu, i);
+      if(bright){
+        ppu->screenEnabled[0]=main;ppu->screenWindowed[0]=window;
+        ppu->clipMode=clip;ppu->preventMathMode=prevent;ppu->mathEnabled=math;
+      }
+    }
     SimpleHdma_DoLine(&hdma_chans[0], ppu);
     SimpleHdma_DoLine(&hdma_chans[1], ppu);
   }
@@ -898,10 +1650,26 @@ static int g_ppu_phase_split;
 
 void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   SimpleHdma hdma_probe;
+#ifdef __3DS__
+  NativeFileLabels_Apply(g_zenv.vram, main_module_index, g_config.language, g_loc_rom != NULL);
+  g_zenv.ppu->wideUi = PpuUiChooseSceneLayout(main_module_index, submodule_index, overworld_map_state);
+  g_zenv.ppu->wideUiSaveX = (text_msgbox_topleft & 31) * 8;
+  g_zenv.ppu->wideUiSaveY = ((text_msgbox_topleft >> 5) & 31) * 8;
+#endif
+  UpdatePrivateRoomFade();
+  uint8 original_brightness = g_zenv.ppu->brightness;
+  if(QolBrightRoomActive())g_zenv.ppu->brightness=original_brightness*12/15;
+  if(g_private_fade.active||g_private_fade.reveal)g_zenv.ppu->brightness=g_zenv.ppu->brightness*g_private_fade.light/15;
+  WideFrame wide = BeginWideFrame(render_flags);
+  BeginWideTileRepair(&wide);
+  g_wide_picture_shift = wide.fixed_camera ? wide.view.offset_x : 0;
+  BeginWideRoomVoid(&wide);
+  g_wide_render_flags = render_flags;
+  g_wide_picture_rows = WideSpriteRows(&wide);
 
 #ifdef __3DS__
-  BeginWideOverworldColumns(render_flags);
-  bool gpu_candidate = (render_flags & kPpuRenderFlags_Old3DS) && PpuGpuCanAttempt();
+  bool gpu_candidate = (render_flags & kPpuRenderFlags_Old3DS) &&
+    !QolBrightRoomActive() && PpuGpuCanAttempt();
   if (gpu_candidate) {
     // The GPU consumes register/tile/OAM state; do not rasterize or rebuild
     // E11's software background cache on a GPU frame.
@@ -930,17 +1698,10 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
       PpuSetMode7PerspectiveCorrection(g_zenv.ppu, 0, 0);
   }
 
-  FixedCameraRenderState fixed_camera_state = BeginFixedCameraRender();
-  VerticalCameraRenderState vertical_camera_state = BeginVerticalCameraRender();
+  WideRenderState wide_render = BeginWideRender(&wide);
 
-  if (g_zenv.ppu->extraLeftRight != 0 || render_flags & kPpuRenderFlags_Height240) {
-    ConfigurePpuSideSpace(fixed_camera_state.visual_x,
-                          fixed_camera_state.uses_visual_camera,
-                          fixed_camera_state.horizontal_transition);
-  }
-
-  if (vertical_camera_state.delta)
-    g_zenv.ppu->extraBottomCur = UintMin(16, g_zenv.ppu->extraBottomCur + vertical_camera_state.delta);
+  if (g_zenv.ppu->extraLeftRight != 0 || render_flags & kPpuRenderFlags_Height240)
+    ConfigurePpuSideSpace(&wide);
 
   PpuSetWindow1Ext(g_zenv.ppu, g_spotlight_ext_active ? g_spotlight_ext_left : NULL,
                    g_spotlight_ext_active ? g_spotlight_ext_right : NULL);
@@ -961,7 +1722,7 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     g_zenv.ppu->renderObjYOffset = obj_y_offset;
   }
   if (render_flags & kPpuRenderFlags_Old3DS) PpuGpuCpuFrame();
-  if (ZeldaEnsurePpuWorkers()) {
+  if (!g_rendering_startup_logo && ZeldaEnsurePpuWorkers()) {
     PpuWorkerState *system_worker = &g_ppu_system_worker;
     PpuWorkerState *new_worker = &g_ppu_new_worker;
     int main_first = 1;
@@ -992,9 +1753,9 @@ void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
       PpuWorkerState *state = workers[i];
       if (!state->thread)
         continue;
-      // The appended candidate/color caches are Old-only. New keeps the
-      // original snapshot span and does not copy unused Old frame data.
-      size_t snapshot_size = (render_flags & kPpuRenderFlags_Old3DS) ?
+      // The fast paths read the caches appended after the original span
+      // (sprite lines, retained planes); without them that span is enough.
+      size_t snapshot_size = (render_flags & (kPpuRenderFlags_Old3DS | kPpuRenderFlags_FastPaths)) ?
         sizeof(Ppu) : offsetof(Ppu, spriteLines);
       memcpy(&state->ppu, g_zenv.ppu, snapshot_size);
       state->ppu.tileCache = &state->tile_cache;
@@ -1039,11 +1800,9 @@ rendering_complete:
       (player_is_indoors ? dungeon_room_index : overworld_area_index);
   }
 #endif
-#ifdef __3DS__
-  EndWideOverworldColumns();
-#endif
-  EndVerticalCameraRender(&vertical_camera_state);
-  EndFixedCameraRender(&fixed_camera_state);
+  EndWideTileRepair();
+  EndWideRender(&wide_render);
+  g_zenv.ppu->brightness=original_brightness;
 }
 
 void HdmaSetup(uint32 addr6, uint32 addr7, uint8 transfer_unit, uint8 reg6, uint8 reg7, uint8 indirect_bank) {
@@ -1088,7 +1847,11 @@ static void ZeldaRunGameLoop() {
   frame_counter++;
   g_spotlight_ext_active = false;
   ClearOamBuffer();
+  Rando_TickTrapEffects();
+  Rando_TickDiscovery();
   Module_MainRouting();
+  Rando_TickGoalCompletion();
+  Hud_RandoDrawTrackers();
   NMI_PrepareSprites();
   nmi_boolean = 0;
 }
@@ -1104,7 +1867,8 @@ void ZeldaInitialize() {
   g_zenv.sram = (uint8*)calloc(8192, 1);
   g_zenv.vram = g_zenv.ppu->vram;
   g_zenv.player = SpcPlayer_Create();
-  SpcPlayer_Initialize(g_zenv.player);
+  ZeldaResetAudio_Locked();
+  ResetWideTracking();
   dma_reset(g_zenv.dma);
   ppu_reset(g_zenv.ppu);
 }
@@ -1138,6 +1902,7 @@ static int IncrementCrystalCountdown(uint8 *a, int v) {
 int frame_ctr_dbg;
 static uint8 *g_emu_memory_ptr;
 static ZeldaRunFrameFunc *g_emu_runframe;
+bool ZeldaIsEmulatorAttached(void) { return g_emu_runframe != NULL; }
 static ZeldaSyncAllFunc *g_emu_syncall;
 
 void ZeldaSetupEmuCallbacks(uint8 *emu_ram, ZeldaRunFrameFunc *func, ZeldaSyncAllFunc *sync_all) {
@@ -1213,14 +1978,17 @@ static void InternalSaveLoad(SaveLoadFunc *func, void *ctx) {
 
 void ZeldaReset(bool preserve_sram) {
   frame_ctr_dbg = 0;
+  g_test_scenario_active = false;
   dma_reset(g_zenv.dma);
   ppu_reset(g_zenv.ppu);
+  Rando_ObjScratchInvalidateAll();
   memset(g_zenv.ram, 0, 0x20000);
   if (!preserve_sram)
     memset(g_zenv.sram, 0, 0x2000);
   ZeldaApuLock();
   ZeldaRestoreMusicAfterLoad_Locked(true);
   ZeldaApuUnlock();
+  ResetWideTracking();
   EmuSynchronizeWholeState();
 
 }
@@ -1233,6 +2001,10 @@ static void LoadSnesState(SaveLoadFunc *func, void *ctx) {
 
   ZeldaRestoreMusicAfterLoad_Locked(false);
   ZeldaApuUnlock();
+  Localized_AfterStateLoad();
+  Rando_InvalidateTransientVideoState();
+  Rando_ObjScratchInvalidateAll();
+  ResetWideTracking();
   EmuSynchronizeWholeState();
 }
 
@@ -1262,8 +2034,32 @@ typedef struct StateRecorder {
 
 static StateRecorder state_recorder;
 
+void ZeldaClearInputLog(void) {
+  ByteArray_Destroy(&state_recorder.log);
+  ByteArray_Destroy(&state_recorder.base_snapshot);
+  memset(&state_recorder,0,sizeof(state_recorder));
+}
+
 void StateRecorder_Init(StateRecorder *sr) {
   memset(sr, 0, sizeof(*sr));
+}
+
+// Called only after audio, UI and PPU workers have stopped using the session.
+void ZeldaShutdownSession(void) {
+  ZeldaShutdownPpuWorker();
+  Rando_DeactivateSlot();
+  if (g_zenv.player) {
+    dsp_free(g_zenv.player->dsp);
+    free(g_zenv.player); g_zenv.player = NULL;
+  }
+  if (g_zenv.dma) dma_free(g_zenv.dma);
+  ppu_free(g_zenv.ppu);
+  free(g_zenv.sram);
+  memset(&g_zenv, 0, sizeof(g_zenv));
+  ByteArray_Destroy(&state_recorder.log);
+  ByteArray_Destroy(&state_recorder.base_snapshot);
+  StateRecorder_Init(&state_recorder);
+  memset(&g_wide_view, 0, sizeof(g_wide_view));
 }
 
 void StateRecorder_RecordCmd(StateRecorder *sr, uint8 cmd) {
@@ -1323,6 +2119,31 @@ void ReadFromFile(SDL_RWops *stream, void *data, size_t n) {
   }
 }
 
+// Optional developer footer, after the unchanged SNES/randomizer snapshot.
+// Versioned magic, LE index and its complement. Ordinary and legacy states
+// have no footer. A test snapshot must retain its no-SRAM-write protection
+// when explicitly loaded after a cold launch.
+enum { kTestFooterSize=16 };
+static void TestFooterEncode(uint8 footer[kTestFooterSize]) {
+  memcpy(footer,"Z3TEST01",8);
+  uint32 index=(uint32)g_test_scenario_index;
+  for(int i=0;i<4;i++){footer[8+i]=index>>(8*i);footer[12+i]=~index>>(8*i);}
+}
+static int TestFooterDecode(const uint8 *footer) {
+  if(memcmp(footer,"Z3TEST01",8))return -1;
+  uint32 index=0,check=0;
+  for(int i=0;i<4;i++){index|=(uint32)footer[8+i]<<(8*i);check|=(uint32)footer[12+i]<<(8*i);}
+  return index<(uint32)kTestScenarioCount&&check==~index?(int)index:-1;
+}
+static int TestFooterRead(SDL_RWops *file) {
+  Sint64 position=SDL_RWtell(file),size=SDL_RWsize(file);
+  uint8 footer[kTestFooterSize];int index=-1;
+  if(size>=kTestFooterSize&&SDL_RWseek(file,size-kTestFooterSize,RW_SEEK_SET)>=0&&
+     SDL_RWread(file,footer,1,sizeof(footer))==sizeof(footer))index=TestFooterDecode(footer);
+  SDL_RWseek(file,position,RW_SEEK_SET);
+  return index;
+}
+
 void StateRecorder_Load(StateRecorder *sr, SDL_RWops *f, bool replay_mode) {
   // todo: fix robustness on invalid data.
   uint32 hdr[8] = { 0 };
@@ -1341,6 +2162,7 @@ void StateRecorder_Load(StateRecorder *sr, SDL_RWops *f, bool replay_mode) {
 
   sr->replay_next_cmd_at = 0;
 
+  uint64 oncheck_before = g_rando_oncheck_call_count;
   sr->replay_mode = replay_mode;
   if (replay_mode) {
     sr->frames_since_last = 0;
@@ -1370,6 +2192,23 @@ void StateRecorder_Load(StateRecorder *sr, SDL_RWops *f, bool replay_mode) {
     ByteArray_Destroy(&arr);
     assert(state.p == state.pend);
   }
+  // Replay restores the base snapshot above, but the file still contains the
+  // saved current-state chunk before its extension chain.
+  if (replay_mode && SDL_RWseek(f, hdr[6], RW_SEEK_CUR) < 0)
+    Die("Unable to seek to randomizer snapshot metadata");
+  bool randomizer_snapshot = g_rando_slot_active != 0;
+  (void)RandoSnapshotTail_LoadRW(f);
+  Rando_BumpReachabilityCounter();
+  g_recv_item_slot_owner = 0xffff;
+  Rando_InvalidateTransientVideoState();
+  if (g_rando_oncheck_call_count != oncheck_before)
+    Die("Game dispatch ran while restoring randomizer metadata");
+  if (randomizer_snapshot && !Rando_IsActive())
+    Die("Randomizer snapshot metadata is missing or incompatible");
+
+  g_test_scenario_index=TestFooterRead(f);
+  g_test_scenario_active=g_test_scenario_index>=0;
+
 }
 
 /*void StateRecorder_Save(StateRecorder *sr, FILE *f) {
@@ -1400,7 +2239,11 @@ void StateRecorder_Load(StateRecorder *sr, SDL_RWops *f, bool replay_mode) {
   ByteArray_Destroy(&arr);
 }*/
 
+void StateRecorder_ClearKeyLog(StateRecorder *sr);
+
 void StateRecorder_Save(StateRecorder* sr, SDL_RWops* rwops) {
+  if (Placement_GetActive() && sr->base_snapshot.size == 0)
+    StateRecorder_ClearKeyLog(sr);
   uint32 hdr[8] = { 0 };
   ByteArray arr = { 0 };
   SaveSnesState(&saveFunc, &arr);
@@ -1425,6 +2268,12 @@ void StateRecorder_Save(StateRecorder* sr, SDL_RWops* rwops) {
   SDL_RWwrite(rwops, sr->base_snapshot.data, sr->base_snapshot.size, 1);
   SDL_RWwrite(rwops, arr.data, arr.size, 1);
 
+  if (!RandoSnapshotTail_SaveRW(rwops))
+    fprintf(stderr, "Unable to append randomizer snapshot metadata\n");
+  if(g_test_scenario_active) {
+    uint8 footer[kTestFooterSize];TestFooterEncode(footer);
+    SDL_RWwrite(rwops,footer,1,sizeof(footer));
+  }
   ByteArray_Destroy(&arr);
 }
 
@@ -1438,8 +2287,12 @@ typedef struct ZeldaDumpPayloadHeader {
 
 enum { kZeldaDumpPayloadVersion = 1 };
 
+#ifdef ZELDA3_TEST_DUMP_STATE
+extern uint32_t Platform3DS_GetActiveProfileId(void);
+#endif
+
 bool ZeldaWriteDumpState(const char *dump_directory) {
-#ifdef __3DS__
+#if defined(__3DS__) || defined(ZELDA3_TEST_DUMP_STATE)
   if (!dump_directory || !dump_directory[0])
     return false;
 
@@ -1460,6 +2313,10 @@ bool ZeldaWriteDumpState(const char *dump_directory) {
   ByteArray payload = {0};
   ByteArray_AppendData(&payload, (const uint8 *)&header, sizeof(header));
   ByteArray_AppendData(&payload, snapshot.data, snapshot.size);
+  if(g_test_scenario_active) {
+    uint8 footer[kTestFooterSize];TestFooterEncode(footer);
+    ByteArray_AppendData(&payload,footer,sizeof(footer));
+  }
 
   char path[512];
   int length = snprintf(path, sizeof(path), "%s/%s", dump_directory,
@@ -1477,7 +2334,7 @@ bool ZeldaWriteDumpState(const char *dump_directory) {
 }
 
 ZeldaDumpStateResult ZeldaLoadLatestDumpState(void) {
-#ifdef __3DS__
+#if defined(__3DS__) || defined(ZELDA3_TEST_DUMP_STATE)
   uint8 *payload = NULL;
   size_t payload_size = 0;
   ZeldaDumpStateResult result =
@@ -1492,9 +2349,13 @@ ZeldaDumpStateResult ZeldaLoadLatestDumpState(void) {
   }
   ZeldaDumpPayloadHeader header;
   memcpy(&header, payload, sizeof(header));
-  size_t snapshot_size = payload_size - sizeof(header);
+  size_t snapshot_size=header.snapshot_size;
+  size_t extra=payload_size-sizeof(header);
+  int scenario=-1;
+  if(extra>=kTestFooterSize&&extra==snapshot_size+kTestFooterSize)
+    scenario=TestFooterDecode(payload+payload_size-kTestFooterSize);
   if (header.version != kZeldaDumpPayloadVersion ||
-      header.snapshot_size != snapshot_size ||
+      (extra!=snapshot_size && (extra!=snapshot_size+kTestFooterSize || scenario<0)) ||
       header.last_inputs > 0x0fff) {
     free(payload);
     return kZeldaDumpStateInvalid;
@@ -1514,7 +2375,7 @@ ZeldaDumpStateResult ZeldaLoadLatestDumpState(void) {
 
   LoadFuncState load = {
     payload + sizeof(header),
-    payload + payload_size,
+    payload + sizeof(header) + snapshot_size,
   };
   LoadSnesState(&loadFunc, &load);
   bool fully_consumed = load.p == load.pend;
@@ -1528,6 +2389,8 @@ ZeldaDumpStateResult ZeldaLoadLatestDumpState(void) {
   state_recorder.total_frames = header.total_frames;
   state_recorder.last_inputs = (uint16)header.last_inputs;
   state_recorder.frames_since_last = header.frames_since_last;
+  g_test_scenario_index=scenario;
+  g_test_scenario_active=scenario>=0;
   return kZeldaDumpStateLoaded;
 #else
   return kZeldaDumpStateIoError;
@@ -1668,6 +2531,7 @@ bool ZeldaRunFrame(int inputs) {
 
   frame_ctr_dbg++;
 
+  uint32 previous_features1=enhanced_features1;
   bool is_replay = state_recorder.replay_mode;
 
   // Either copy state or apply state
@@ -1676,6 +2540,11 @@ bool ZeldaRunFrame(int inputs) {
   } else {
     //    input_state = InputStateReadFromFile();
     StateRecorder_Record(&state_recorder, inputs);
+    if (Qol_Ready()) {
+      g_wanted_zelda_features=Qol_Features0(g_wanted_zelda_features);
+      g_wanted_zelda_features1=Qol_Features1(g_wanted_zelda_features1);
+      Rando_ApplyActiveForcedFeatures0();
+    }
 
     // This is whether APUI00 is true or false, this is used by the ancilla code.
     uint8 apui00 = ZeldaIsMusicPlaying();
@@ -1699,8 +2568,23 @@ bool ZeldaRunFrame(int inputs) {
         EmuSyncMemoryRegion(&enhanced_features0, sizeof(enhanced_features0));
         StateRecorder_RecordPatchByte(&state_recorder, kRam_Features0, (uint8 *)&enhanced_features0, 4);
       }
+      if (enhanced_features1 != g_wanted_zelda_features1) {
+        enhanced_features1 = g_wanted_zelda_features1;
+        EmuSyncMemoryRegion(&enhanced_features1, sizeof(enhanced_features1));
+        StateRecorder_RecordPatchByte(&state_recorder, kRam_Features1,
+                                      (uint8 *)&enhanced_features1, 4);
+      }
     }
   }
+
+  if ((previous_features1 ^ enhanced_features1)&kFeatures1_QolInventory)
+    Hud_QolTranslateInventory((enhanced_features1&kFeatures1_QolInventory)!=0);
+  {
+    extern void ZeldaApplyDimFlashesPalette(bool enable);
+    ZeldaApplyDimFlashesPalette((enhanced_features0 & kFeatures0_DimFlashes) != 0);
+  }
+  if (enhanced_features1 & kFeatures1_QolManaged)
+    Hud_QolNormalizeInventory();
 
   int run_what;
   if (g_ram[kRam_BugsFixed] < kBugFix_PolyRenderer) {
@@ -1715,7 +2599,7 @@ bool ZeldaRunFrame(int inputs) {
     EmuSyncMemoryRegion(&g_ram[kRam_CrystalRotateCounter], 1);
   }
 
-  if (g_emu_runframe == NULL || enhanced_features0 != 0 || g_zenv.dialogue_flags) {
+  if (g_emu_runframe == NULL || enhanced_features0 != 0 || enhanced_features1 != 0 || g_zenv.dialogue_flags) {
     // can't compare against real impl when running with extra features.
     ZeldaRunFrameInternal(inputs, run_what);
   } else {
@@ -1740,6 +2624,7 @@ bool ZeldaRunFrame(int inputs) {
 void ZeldaSetLanguage(const char *language) {
   static const uint8 kDefaultConf[3] = { 0, 0, 0 };
   MemBlk found = { kDefaultConf, 3 };
+  bool language_found = false;
   if (language) {
     size_t n = strlen(language);
     for (int i = 0; ; i++) {
@@ -1751,13 +2636,33 @@ void ZeldaSetLanguage(const char *language) {
       MemBlk name = FindIndexInMemblk(mb, 0);
       if (name.size == n && !memcmp(name.ptr, language, n)) {
         found = FindIndexInMemblk(mb, 1);
+        language_found = true;
         break;
       }
+    }
+  }
+  // Assets built from a translated cartridge alone hold no USA text: their
+  // map names the language of dialogue 0, which then needs no Language line.
+  char base_language[16];
+  for (int i = 0; !language_found; i++) {
+    MemBlk mb = kDialogueMap(i);
+    if (mb.ptr == 0)
+      break;
+    MemBlk name = FindIndexInMemblk(mb, 0), conf = FindIndexInMemblk(mb, 1);
+    if (conf.size >= 3 && conf.ptr[0] == 0 && conf.ptr[2] != 0 &&
+        name.size < sizeof(base_language)) {
+      memcpy(base_language, name.ptr, name.size);
+      base_language[name.size] = 0;
+      language = base_language;
+      found = conf;
+      language_found = true;
     }
   }
   g_zenv.dialogue_blk = kDialogue(found.ptr[0]);
   g_zenv.dialogue_font_blk = kDialogueFont(found.ptr[1]);
   g_zenv.dialogue_flags = found.ptr[2];
+  // The screens follow the dialogue: a cartridge's menus only go with its text.
+  Localized_SetLanguage(language_found ? language : NULL);
 }
 
 
@@ -1801,6 +2706,21 @@ void SaveLoadSlot(int cmd, int which) {
   }
 }*/
 
+// The path of a save: saves/<file>, or <SaveFolder>/<file> when zelda3.ini
+// names a folder (a QUEST's own saves) outside the 3DS, whose profiles keep
+// their saves. The reference saves stay in saves/ref.
+void ZeldaFormatSavePath(const char *name, char *path, size_t size) {
+#ifdef __3DS__
+  Platform3DS_FormatSavePath(name, path, size);
+#else
+  if (g_config.save_folder && strncmp(name, "saves/", 6) == 0 &&
+      strncmp(name, "saves/ref/", 10) != 0)
+    snprintf(path, size, "%s/%s", g_config.save_folder, name + 6);
+  else
+    snprintf(path, size, "%s", name);
+#endif
+}
+
 void SaveLoadSlot(int cmd, int which) {
   char name[128];
   char path[256];
@@ -1814,11 +2734,7 @@ void SaveLoadSlot(int cmd, int which) {
     snprintf(name, sizeof(name), "saves/save%d.sav", which);
   }
 
-#ifdef __3DS__
-  Platform3DS_FormatSavePath(name, path, sizeof(path));
-#else
-  snprintf(path, sizeof(path), "%s", name);
-#endif
+  ZeldaFormatSavePath(name, path, sizeof(path));
   rwops = SDL_RWFromFileInExternal(path, cmd != kSaveLoad_Save ? "rb" : "wb");
   if (rwops) {
     printf("*** %s slot %d\n",
@@ -1830,16 +2746,250 @@ void SaveLoadSlot(int cmd, int which) {
       StateRecorder_Save(&state_recorder, rwops);
 
     SDL_RWclose(rwops);
+#ifdef __3DS__
+    // Older builds wrote slot 0 even in naming/credits. Recover those boots
+    // through the ordinary clean reset, which reloads SRAM from disk.
+    if (cmd == kSaveLoad_Load && which == 0 &&
+        !NativeMenu_CanAutosave(main_module_index))
+      Platform3DS_RequestReset();
+#endif
   }
+}
+
+
+// A scenario state is the snapshot cut into sections, so the 64-bit tool
+// that builds it and the 32-bit 3DS agree on it: the DSP and DMA state are
+// copies of C structs whose padding differs between the two.
+static const uint8 kScenarioMagic[8] = { 'Z', '3', 'S', 'C', 'E', 'N', 'E', '1' };
+enum { kScenarioSections = 6 };  // APU RAM, DSP, DMA, PPU, SRAM, RAM
+
+static size_t ScenarioDspSize(void) {  // the fields, without padding
+  return offsetof(Dsp, sampleOffset) + sizeof(uint16_t) - offsetof(Dsp, ram);
+}
+static size_t ScenarioDmaSize(void) {
+  return offsetof(Dma, dmaBusy) + sizeof(bool) - offsetof(Dma, channel);
+}
+
+static void DrawStartupLogoFrame(uint32 *pixels) {
+  uint8 tm=TM_copy,ts=TS_copy,math=CGADSUB_copy,window=CGWSEL_copy;
+  uint16 backdrop=g_zenv.ppu->cgram[0];
+  TM_copy=0x11;TS_copy=0;CGADSUB_copy=0;CGWSEL_copy=0;
+  g_zenv.ppu->screenEnabled[0]=0x11;g_zenv.ppu->screenEnabled[1]=0;
+  g_zenv.ppu->mathEnabled=0;g_zenv.ppu->cgram[0]=0;
+  g_rendering_startup_logo=true;
+  ZeldaDrawPpuFrame((uint8*)pixels,256*4,kPpuRenderFlags_NewRenderer);
+  g_rendering_startup_logo=false;
+  // Cool silver highlights on the blade only. Track the native sword's
+  // descending OAM position; leave the golden hilt and title art untouched.
+  if(main_module_index==0&&submodule_index>=6) {
+    int shift=(int16)WORD(g_ram[0xc8])-30; // intro_sword_ypos in ending.c
+    int top=84+shift,bottom=165+shift;
+    if(top<0)top=0;if(bottom>224)bottom=224;
+    for(int y=top;y<bottom;y++)for(int x=67;x<=75;x++) {
+      uint32 *pixel=&pixels[y*256+x];
+      if((*pixel&0xffffff)==0xffde6b)*pixel=(*pixel&0xff000000)|0xe7efff;
+    }
+  }
+  TM_copy=tm;TS_copy=ts;CGADSUB_copy=math;CGWSEL_copy=window;
+  g_zenv.ppu->screenEnabled[0]=tm;g_zenv.ppu->screenEnabled[1]=ts;
+  g_zenv.ppu->mathEnabled=math;g_zenv.ppu->cgram[0]=backdrop;
+}
+void ZeldaDrawStartupLogo(uint32 *pixels) {
+  int extra=g_zenv.ppu->extraLeftRight;g_zenv.ppu->extraLeftRight=0;
+  for(int f=0;f<2000&&!(main_module_index==0&&submodule_index==8);f++)ZeldaRunFrame(0);
+  DrawStartupLogoFrame(pixels);
+  ZeldaReset(true);g_zenv.ppu->extraLeftRight=extra;ZeldaClearInputLog();
+}
+void ZeldaAnimateStartupLogoWithAudio(uint32 *pixels,bool (*present)(const uint32 *,unsigned,void *),
+                                     void (*audio)(const int16 *,unsigned,void *),void *context) {
+  int extra=g_zenv.ppu->extraLeftRight;g_zenv.ppu->extraLeftRight=0;
+  unsigned tick=0,settled=0;
+  int16 samples[534*2];
+  for(int frame=0;frame<2000;frame++) {
+    ZeldaRunFrame(0);
+    ZeldaRenderStartupSfx(samples,534);
+    if(main_module_index!=0||submodule_index<5)continue;
+    if(audio)audio(samples,534,context);
+    // Native title palettes, sword OAM and sparkle frames; display at 30 Hz
+    // while keeping the original 60 Hz animation logic and timing.
+    if(!(tick&1)) {DrawStartupLogoFrame(pixels);if(!present(pixels,tick,context))break;}
+    tick++;
+    if(submodule_index>=7&&++settled>=100)break;
+  }
+  ZeldaReset(true);g_zenv.ppu->extraLeftRight=extra;ZeldaClearInputLog();
+}
+
+void ZeldaAnimateStartupLogo(uint32 *pixels,bool (*present)(const uint32 *,unsigned,void *),void *context) {
+  ZeldaAnimateStartupLogoWithAudio(pixels,present,NULL,context);
+}
+
+static void ApplyNativeTestScenario(const TestScenario *scenario) {
+  for (const TestScenarioSet *set = scenario->sets; set->addr; set++)
+    g_ram[0xf000 + set->addr] = set->value;
+  follower_indicator = 0;
+  link_health_current=link_health_capacity;link_magic_power=0x80;
+  // Explicit low-health/empty-magic settings are applied again below.
+  for (const TestScenarioSet *set=scenario->sets;set->addr;set++)
+    g_ram[0xf000+set->addr]=set->value;
+  if (scenario->dark_world && !link_item_moon_pearl) {
+    link_is_bunny=link_is_bunny_mirror=1; link_player_handler_state=23;
+  }
+  DecompressSwordGraphics(); DecompressShieldGraphics();
+  Palette_Load_Sword(); Palette_Load_Shield(); Palette_Load_LinkArmorAndGloves();
+  Hud_SearchForEquippedItem(); Hud_Rebuild(); Hud_UpdateEquippedItem();
+}
+
+bool ZeldaLoadTestScenario(int index) {
+  if (!ZELDA3_ENABLE_DEVELOPER_TESTS) return false;
+  if (index < 0 || index >= kTestScenarioCount) return false;
+  g_test_scenario_building=true;
+  const TestScenario *scenario = &kTestScenarios[index];
+  // Only authored inventory/story flags are built in. Every tile, sprite and
+  // sound is initialized by the engine from the user's selected cartridge.
+  // Preserve the player's entire SRAM even when starting from a randomizer.
+  static uint8 player_sram[0x2000];
+  memcpy(player_sram, g_zenv.sram, sizeof(player_sram));
+  if (Rando_IsActive()) Rando_DeactivateSlot();
+  ZeldaReset(true);
+  g_test_scenario_active = true;
+  ByteArray_Destroy(&state_recorder.log);
+  ByteArray_Destroy(&state_recorder.base_snapshot);
+  memset(&state_recorder, 0, sizeof(state_recorder));
+  TestScenario_InitSram(index, g_zenv.sram);
+  // Initialize the normal game's memory and graphics, then use its own room
+  // and overworld loaders. This does not read or write a snapshot file.
+  ZeldaRunFrame(0);
+  WORD(g_ram[0]) = 0;
+  srm_var1 = 2;
+  CopySaveToWRAM();
+  // Direct developer loads bypass the file-select fade that builds this table.
+  DecompressEnemyDamageSubclasses();
+  // The intro also builds shared item/peg animation data before file select.
+  LoadItemGFXIntoWRAM4BPPBuffer();
+  Module05_LoadFile();
+  g_test_scenario_active = true;
+  ApplyNativeTestScenario(scenario);
+  savegame_is_darkworld = scenario->dark_world ? 0x40 : 0;
+  link_auxiliary_state = link_incapacitated_timer = 0;
+  submodule_index = subsubmodule_index = 0;
+  if (scenario->kind == kTestScenario_Entrance) {
+    which_entrance = scenario->target;
+    main_module_index = 6;
+  } else {
+    EnableForceBlank();
+    dungeon_room_index = scenario->target;
+    player_is_indoors = 1;
+    main_module_index = 8;
+  }
+  int want = scenario->kind == kTestScenario_Entrance ? 7 : 9;
+  int frames = 0;
+  while (frames++ < 1500 && !(main_module_index == want && submodule_index == 0))
+    ZeldaRunFrame(0);
+  for (int i = 0; i < 90; i++) ZeldaRunFrame(0);
+  ApplyNativeTestScenario(scenario);
+  for (int i = 0; i < 10; i++) ZeldaRunFrame(0);
+  memcpy(g_zenv.sram, player_sram, sizeof(player_sram));
+  g_test_scenario_active = true;
+  g_test_scenario_index = index;
+  LoadHudGraphics(); Hud_Rebuild();
+  ResetWideTracking();
+  Rando_InvalidateTransientVideoState();
+  g_test_scenario_building=false;
+  return main_module_index == want || main_module_index == 14;
+}
+
+int ZeldaGetTestScenarioIndex(void) {
+  return g_test_scenario_active ? g_test_scenario_index : -1;
+}
+
+bool ZeldaRestartTestScenario(void) {
+  if(!g_test_scenario_active||g_test_scenario_building||g_test_scenario_index<0)return false;
+  return ZeldaLoadTestScenario(g_test_scenario_index);
+}
+
+bool ZeldaWriteTestScenarioState(const char *path) {
+  ByteArray snapshot = { 0 };
+  SaveSnesState(&saveFunc, &snapshot);
+  size_t dsp = sizeof(Dsp) - offsetof(Dsp, ram), dma = sizeof(Dma) - offsetof(Dma, channel);
+  size_t apu_at = 27, dsp_at = apu_at + 0x10000 + 40, dma_at = dsp_at + dsp + 15;
+  size_t ppu_at = dma_at + dma;
+  size_t ppu = snapshot.size - ppu_at - 0x2000 - 58 - 0x20000 - 4;
+  const uint8 *base = snapshot.data;
+  const uint8 *data[kScenarioSections] = {
+    base + apu_at, base + dsp_at, base + dma_at, base + ppu_at,
+    base + ppu_at + ppu, base + ppu_at + ppu + 0x2000 + 58,
+  };
+  uint32 sizes[kScenarioSections] = {
+    0x10000, (uint32)ScenarioDspSize(), (uint32)ScenarioDmaSize(), (uint32)ppu, 0x2000, 0x20000,
+  };
+  SDL_RWops *rwops = SDL_RWFromFile(path, "wb");
+  bool ok = rwops != NULL;
+  uint32 count = kScenarioSections;
+  ok = ok && SDL_RWwrite(rwops, kScenarioMagic, sizeof(kScenarioMagic), 1) == 1 &&
+       SDL_RWwrite(rwops, &count, 4, 1) == 1;
+  for (int i = 0; ok && i < kScenarioSections; i++)
+    ok = SDL_RWwrite(rwops, &sizes[i], 4, 1) == 1 && SDL_RWwrite(rwops, data[i], sizes[i], 1) == 1;
+  ok = ok && RandoSnapshotTail_SaveRW(rwops);
+  if (rwops)
+    SDL_RWclose(rwops);
+  ByteArray_Destroy(&snapshot);
+  return ok;
+}
+
+static bool WriteDumpFile(const char *dir, const char *name, const void *data, size_t size) {
+  char path[512];
+  snprintf(path, sizeof(path), "%s/%s", dir, name);
+  FILE *f = fopen(path, "wb");
+  if (!f)
+    return false;
+  bool ok = fwrite(data, 1, size, f) == size;
+  return (fclose(f) == 0) && ok;
+}
+
+bool ZeldaWriteDumpExtras(const char *dir) {
+  // Audio: the sound CPU's 64 KB and the DSP's registers and voices.
+  bool ok = WriteDumpFile(dir, "apu-ram.bin", g_zenv.player->ram, 0x10000);
+  Dsp *dsp = g_zenv.player->dsp;
+  ok = WriteDumpFile(dir, "dsp.bin", dsp->ram, sizeof(Dsp) - offsetof(Dsp, ram)) && ok;
+  // The whole PPU: VRAM, CGRAM, OAM (both tables) and its registers as bytes.
+  ok = WriteDumpFile(dir, "ppu-struct.bin", g_zenv.ppu, sizeof(*g_zenv.ppu)) && ok;
+  char path[512];
+  snprintf(path, sizeof(path), "%s/context.txt", dir);
+  FILE *f = fopen(path, "w");
+  if (!f)
+    return false;
+  fprintf(f, "Context schema: 1\n");
+  fprintf(f, "Game language: %s\n", g_config.language ? g_config.language : "en");
+  fprintf(f, "Mods: %s\n", g_config.mods ? g_config.mods : "(none)");
+  fprintf(f, "Randomizer active: %d\n", Rando_IsActive() ? 1 : 0);
+#ifdef __3DS__
+  const char *seed = Platform3DS_RandomizerSeedKey();
+  fprintf(f, "Randomizer seed key: %s\n", seed && seed[0] ? seed : "(none)");
+#endif
+  fprintf(f, "Test scenario active: %d\n", g_test_scenario_active ? 1 : 0);
+  if (g_test_scenario_index >= 0 && g_test_scenario_index < kTestScenarioCount)
+    fprintf(f, "Test scenario: %02d %s\n", g_test_scenario_index + 1,
+            kTestScenarios[g_test_scenario_index].name);
+  fprintf(f, "Features: features0=%08x enhanced0=%08x enhanced1=%08x\n",
+          g_config.features0, (unsigned)enhanced_features0, (unsigned)enhanced_features1);
+  fprintf(f, "Wide: extra=%d edge_mode=%d\n", g_zenv.ppu->extraLeftRight,
+          ZeldaGetWidescreenEdgeMode());
+  fprintf(f, "Module: main=%u sub=%u subsub=%u room=0x%03x area=0x%02x indoors=%u dark=%u\n",
+          main_module_index, submodule_index, subsubmodule_index, dungeon_room_index,
+          overworld_screen_index, player_is_indoors, savegame_is_darkworld);
+  fprintf(f, "Link: x=%u y=%u health=%u/%u magic=%u sword=%u shield=%u armor=%u\n",
+          link_x_coord, link_y_coord, link_health_current, link_health_capacity,
+          link_magic_power, link_sword_type, link_shield_type, link_armor);
+  fprintf(f, "Files: ram.bin (WRAM 128 KB), vram.bin (64 KB), cgram.bin, oam.bin, sram.bin,\n"
+             "apu-ram.bin, dsp.bin, ppu-struct.bin, load-state.bin (everything, loadable),\n"
+             "top/bottom screens (BMP and raw), ppu.txt, info.txt, runtime.log.\n");
+  ok = (fclose(f) == 0) && ok;
+  return ok;
 }
 
 void ZeldaClearAutosave() {
   char path[256];
-#ifdef __3DS__
-  Platform3DS_FormatSavePath("saves/save0.sav", path, sizeof(path));
-#else
-  snprintf(path, sizeof(path), "%s", "saves/save0.sav");
-#endif
+  ZeldaFormatSavePath("saves/save0.sav", path, sizeof(path));
   remove(path);
 }
 
@@ -1947,12 +3097,27 @@ SDL_RWops* SDL_RWFromFileInExternal(const char *filename, const char *mode) {
 #endif  // __ANDROID__
 
 void ZeldaReadSram() {
-  char path[256];
+  int paired = RandoSave_RecoverPairedSave();
+  if (paired) {
+    if (paired < 0) {
+      memset(g_zenv.sram, 0, 8192);
+      fprintf(stderr, "Rando: refusing corrupt paired save bundle\n");
+    }
+    EmuSynchronizeWholeState();
+    Localized_AfterSramLoad();
+    return;
+  }
 #ifdef __3DS__
-  Platform3DS_FormatSavePath("saves/sram.dat", path, sizeof(path));
+  char path[256], backup[256];
+  ZeldaFormatSavePath("saves/sram.dat", path, sizeof(path));
+  ZeldaFormatSavePath("saves/sram.bak", backup, sizeof(backup));
+  if (SramStore_Read(path, backup, g_zenv.sram))
+    EmuSynchronizeWholeState();
+  else
+    Platform3DS_LogRuntime("SRAM: no complete save available; retaining initialized SRAM");
 #else
-  snprintf(path, sizeof(path), "%s", "saves/sram.dat");
-#endif
+  char path[256];
+  ZeldaFormatSavePath("saves/sram.dat", path, sizeof(path));
   SDL_RWops *stream = SDL_RWFromFileInExternal(path, "rb");
   if (stream) {
     size_t bytesRead = SDL_RWread(stream, g_zenv.sram, 1, 8192);
@@ -1962,40 +3127,42 @@ void ZeldaReadSram() {
     SDL_RWclose(stream);
     EmuSynchronizeWholeState();
   }
+#endif
+  Localized_AfterSramLoad();
 }
 
 void ZeldaWriteSram() {
+  // Seed writes are committed with their sidecar by RandoSave_CommitPairedSlot.
+  // Never overwrite a compatibility mirror independently of that transaction.
+  if (RandoSave_SeedStorageActive()) return;
+  // A test scenario runs on the reference save, not the player's.
+  if (g_test_scenario_active) return;
+#ifdef __3DS__
+  char path[256], backup[256];
+  ZeldaFormatSavePath("saves/sram.dat", path, sizeof(path));
+  ZeldaFormatSavePath("saves/sram.bak", backup, sizeof(backup));
+  if (!SramStore_Write(path, backup, g_zenv.sram))
+    Platform3DS_LogRuntime("ERROR SRAM save failed; previous complete save retained");
+#else
+  char path[256], bak_path[256];
+  ZeldaFormatSavePath("saves/sram.dat", path, sizeof(path));
+  ZeldaFormatSavePath("saves/sram.bak", bak_path, sizeof(bak_path));
   // Back up the existing save before overwriting it.
 #ifdef __ANDROID__
   const char* externalPath = SDL_AndroidGetExternalStoragePath();
   if (externalPath) {
-    char oldFilePath[256];
-    char newFilePath[256];
-    snprintf(oldFilePath, sizeof(oldFilePath), "%s/saves/sram.dat", externalPath);
-    snprintf(newFilePath, sizeof(newFilePath), "%s/saves/sram.bak", externalPath);
+    char oldFilePath[512];
+    char newFilePath[512];
+    snprintf(oldFilePath, sizeof(oldFilePath), "%s/%s", externalPath, path);
+    snprintf(newFilePath, sizeof(newFilePath), "%s/%s", externalPath, bak_path);
     rename(oldFilePath, newFilePath);
   } else {
     fprintf(stderr, "External storage path not available.\n");
   }
 #else
-  char old_path[256];
-  char bak_path[256];
-#ifdef __3DS__
-  Platform3DS_FormatSavePath("saves/sram.dat", old_path, sizeof(old_path));
-  Platform3DS_FormatSavePath("saves/sram.bak", bak_path, sizeof(bak_path));
-#else
-  snprintf(old_path, sizeof(old_path), "%s", "saves/sram.dat");
-  snprintf(bak_path, sizeof(bak_path), "%s", "saves/sram.bak");
-#endif
-  rename(old_path, bak_path);
+  rename(path, bak_path);
 #endif
 
-  char path[256];
-#ifdef __3DS__
-  Platform3DS_FormatSavePath("saves/sram.dat", path, sizeof(path));
-#else
-  snprintf(path, sizeof(path), "%s", "saves/sram.dat");
-#endif
   SDL_RWops *stream = SDL_RWFromFileInExternal(path, "wb");
   if (stream) {
     // Fill 'sram' with the data you want to write
@@ -2007,6 +3174,7 @@ void ZeldaWriteSram() {
   } else {
     fprintf(stderr, "Unable to write saves/sram.dat\n");
   }
+#endif
 }
 #ifdef __3DS__
 #include "platform_3ds.h"

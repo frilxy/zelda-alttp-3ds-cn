@@ -1,0 +1,163 @@
+# LightWorld/NorthEast.yaml — Inverted LightWorld North East (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/LightWorld/NorthEast.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `PegasusBoots` → registry-canonical `Boots`.
+#   - PHP `Powder` → `MagicPowder`.
+#   - PHP `canBunnyRevive`/`canOWYBA`/`canSuperBunny`/`canBootsClip`/
+#     `canOneFrameClipOW`/`canWaterWalk`/`canFakeFlipper`/`canSuperSpeed`/
+#     `canDungeonRevive` are Phase B trick/glitch axes — DROPPED.
+#   - PHP `region.cantTakeDamage`/`region.requireBetterBow`/
+#     `region.requireBetterSword` are Phase B region-config axes — branches
+#     gated on them DROP (treated as default false → guard collapses).
+#   - PHP `mode.weapons == 'swordless'` branch DROPPED.
+#   - PHP `goal` checks are Phase B goal-axis dependent — kept as
+#     OP_GOAL_REQUIRES_DUNGEON / OP_GOAL_EQ for the Ganon prize gate.
+#
+# Inverted regional context:
+#   - In Inverted, "Ganon" is fought in LightWorld_NorthEast (php:19, 21-22).
+#     The fight slot is location id 212; in Standard it lives in
+#     DarkWorld_NorthEast (logic_parts/43_darkworld.yaml). In Inverted,
+#     `Inverted/DarkWorld/NorthEast.php:24` removes it from DarkWorld and
+#     `Inverted/LightWorld/NorthEast.php:19` re-adds it here. THIS file is the
+#     SINGLE owner of the id-212 Inverted region/predicate override (fixes the
+#     prior two-file ownership gap where BOTH NE YAMLs dropped Ganon, so the
+#     Standard predicate bound to DarkWorld_NorthEast won by last-wins default
+#     — wrong in Inverted, where DarkWorld_NorthEast is the home world). See
+#     the "Ganon" location entry below.
+#   - `Sahasrahla` (php:65-67): in Inverted-Open, the green pendant grants
+#     are the same predicate as Standard; PHP body is `PendantOfCourage`.
+#     Per our convention this maps to OP_HAS_PRIZE(Prize_GreenPendant).
+#
+# DROPPED locations:
+#   - Waterfall Bottle / Pyramid Bottle fountains: RETIRED from the registry
+#     entirely (ids 140/141 — see location_registry.yaml); ALTTPR never fills
+#     them and the fork's pond runtime grants only Left/Right.
+#
+# Status: translated 2026-05-27; Ganon (212) override added 2026-05-30.
+
+format_version: 1
+
+regions:
+  - id: LightWorld_NorthEast
+    name: "Light World - North East (Inverted)"
+    source: "app/Region/Inverted/LightWorld/NorthEast.php:13-232"
+
+edges:
+  # `can_enter` (php:208-228) in Inverted is the LIGHT-WORLD entry — Link
+  # arrives from DarkWorld. Surviving Phase A disjuncts (after dropping
+  # glitch/canOWYBA branches):
+  #   1. DefeatAgahnim (post-Agahnim, mirror works from castle tower)
+  #   2. MoonPearl AND ((Hammer AND canLiftRocks) OR canLiftDarkRocks)
+  #      — the pyramid-to-mirror return path
+  #   3. canFly AND canLiftDarkRocks
+  #      — flute return with titan's mitt to clear the heavy rock
+  #   4. West Death Mountain reachable AND (MoonPearl OR MagicMirror)
+  #      AND canSuperSpeed/canBootsClip — DROPPED (Phase B glitches)
+  # The DM-bottle/OWYBA disjunct (php:217-220) drops.
+  - from: DarkWorld_NorthEast
+    to: LightWorld_NorthEast
+    predicate: "HAS_ITEM(DefeatAgahnim) OR (HAS_ITEM(MoonPearl) AND ((HAS_ITEM(Hammer) AND CanLiftRocks()) OR CanLiftDarkRocks())) OR (CanFly(world) AND CanLiftDarkRocks())"
+    source: "app/Region/Inverted/LightWorld/NorthEast.php:208-228"
+
+locations:
+  # `Sahasrahla's Hut - Left` (php:32-41): MoonPearl AND canBombThings.
+  # The superbunny+Boots+(MagicMirror|!cantTakeDamage) alt drops.
+  - id: "Sahasrahla's Hut - Left"
+    region: LightWorld_NorthEast
+    can_reach: "HAS_ITEM(MoonPearl) AND CanBombThings()"
+    source: "app/Region/Inverted/LightWorld/NorthEast.php:32-41"
+
+  # `Sahasrahla's Hut - Middle` (php:43-52): same.
+  - id: "Sahasrahla's Hut - Middle"
+    region: LightWorld_NorthEast
+    can_reach: "HAS_ITEM(MoonPearl) AND CanBombThings()"
+    source: "app/Region/Inverted/LightWorld/NorthEast.php:43-52"
+
+  # `Sahasrahla's Hut - Right` (php:54-63): same.
+  - id: "Sahasrahla's Hut - Right"
+    region: LightWorld_NorthEast
+    can_reach: "HAS_ITEM(MoonPearl) AND CanBombThings()"
+    source: "app/Region/Inverted/LightWorld/NorthEast.php:54-63"
+
+  # `Sahasrahla` (php:65-67): PendantOfCourage → OP_HAS_PRIZE(Prize_GreenPendant).
+  - id: "Sahasrahla"
+    region: LightWorld_NorthEast
+    can_reach: "OP_HAS_PRIZE(Prize_GreenPendant)"
+    source: "app/Region/Inverted/LightWorld/NorthEast.php:65-67"
+
+  # `King Zora` (php:69-81): (MoonPearl OR (canOWYBA AND bottle)) AND
+  #   (canLiftRocks OR (canFakeFlipper OR Flippers) OR
+  #    ((canBootsClip OR canWaterWalk) AND PegasusBoots) OR
+  #    (canSuperSpeed AND spin AND EastDM)) OR canOneFrameClipOW
+  # Phase A retained `MoonPearl AND (canLiftRocks OR Flippers)`.
+  # Phase B Slice 4 §7 surfaces: pearl-bypass, fake-flippers,
+  # boots-clip, and the OWG top-level bypass. canSuperSpeed +
+  # canWaterWalk lack macros (Phase B reservation).
+  - id: "King Zora"
+    region: LightWorld_NorthEast
+    can_reach: "CanOneFrameClipOW() OR ((HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND (CanLiftRocks() OR HAS_ITEM(Flippers) OR CanFakeFlippers() OR CanBootsClip()))"
+    source: "app/Region/Inverted/LightWorld/NorthEast.php:69-81"
+
+  # `Potion Shop` (php:83-91): MoonPearl AND Mushroom. The canBunnyRevive
+  # and canOneFrameClipOW branches drop.
+  - id: "Potion Shop"
+    region: LightWorld_NorthEast
+    can_reach: "HAS_ITEM(MoonPearl) AND HAS_ITEM(Mushroom)"
+    source: "app/Region/Inverted/LightWorld/NorthEast.php:83-91"
+
+  # `Zora's Ledge` (php:93-108): MoonPearl AND Flippers. All canWaterWalk/
+  # canFakeFlipper/canBootsClip/canOneFrameClipOW/canSuperSpeed branches
+  # drop.
+  - id: "Zora's Ledge"
+    region: LightWorld_NorthEast
+    can_reach: "HAS_ITEM(MoonPearl) AND HAS_ITEM(Flippers)"
+    source: "app/Region/Inverted/LightWorld/NorthEast.php:93-108"
+
+  # `Waterfall Fairy - Left` (php:110-125): MoonPearl AND Flippers. All
+  # glitch branches (canWaterWalk, canFakeFlipper, canBootsClip+Boots,
+  # canSuperSpeed+canSpinSpeed from EastDM, canOneFrameClipOW) drop.
+  - id: "Waterfall Fairy - Left"
+    region: LightWorld_NorthEast
+    can_reach: "HAS_ITEM(MoonPearl) AND HAS_ITEM(Flippers)"
+    source: "app/Region/Inverted/LightWorld/NorthEast.php:110-125"
+
+  # `Waterfall Fairy - Right` (php:127-142): same as Left.
+  - id: "Waterfall Fairy - Right"
+    region: LightWorld_NorthEast
+    can_reach: "HAS_ITEM(MoonPearl) AND HAS_ITEM(Flippers)"
+    source: "app/Region/Inverted/LightWorld/NorthEast.php:127-142"
+
+  # `Ganon` (php:144-228, the prize_location->setRequirements) — the win
+  # location (location_registry id 212). RE-LOCATED here from DarkWorld_NorthEast
+  # for Inverted: the override's `region:` rebinds id 212 to LightWorld_NorthEast
+  # at runtime when world_state==Inverted (see rando_logic.c effective_region).
+  #
+  # Predicate is byte-for-byte the Standard Ganon body
+  # (logic_parts/43_darkworld.yaml "Ganon"): the ALTTPR Inverted prize body
+  # (php:176-205) is identical to Standard (Standard/DarkWorld/NorthEast.php:225-233)
+  # AFTER the project's standard drops — only the REGION differs between
+  # Standard and Inverted. As in Standard, the goal-conditional guards drop:
+  #   - `(DefeatAgahnim2 || goal==fast_ganon)` (php:186-187) and the
+  #     `crystals.ganon` count gate (php:163-174) are NOT encoded here. There
+  #     is no distinct `DefeatAgahnim2` item in the predicate vocabulary
+  #     (loc 137 Agahnim2 grants `DefeatAgahnim`, same virtual item as Aga1),
+  #     and Goal_IsCompletable (rando_placement.c) enforces crystals.ganon +
+  #     Agahnim2-reachability separately and world-state-agnostically. Encoding
+  #     them in the predicate would diverge Inverted from the tested Standard
+  #     model for no behavioral gain.
+  #   - §4 swordless: the swordless weapon branch (swordless ? Hammer+silvers :
+  #     hasSword2) is now wired, matching the Standard Ganon override
+  #     (43_darkworld.yaml). Inert under randomized so Inverted does not diverge.
+  # CanExtendMagic(world, 1) mirrors the Standard authoring shorthand
+  # (43_darkworld.yaml) rather than php's per-branch canExtendMagic(2/3/4) —
+  # kept identical to Standard so Inverted does not silently diverge.
+  - id: "Ganon"
+    region: LightWorld_NorthEast
+    can_reach: "(HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND ((OP_MODEWEAPONS_EQ(swordless) AND HAS_ITEM(Hammer) AND CanShootSilvers()) OR ((NOT OP_MODEWEAPONS_EQ(swordless)) AND HasSword2())) AND (HAS_ITEM(Lamp) OR (HAS_ITEM(FireRod) AND CanExtendMagic(world, 1)))"
+    source: "app/Region/Inverted/LightWorld/NorthEast.php:144-228 + World.php:269-273"
+
+macros: []

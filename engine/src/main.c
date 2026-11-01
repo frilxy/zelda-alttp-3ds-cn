@@ -24,18 +24,27 @@
 #include "variables.h"
 
 #include "zelda_rtl.h"
+#include "test_scenarios.h"
 #include "zelda_cpu_infra.h"
 
 #include "config.h"
+#include "quality_of_life.h"
+#include "mods.h"
+#include "rando/rando.h"
+#include "rando/chest_map.h"
+#include "third_party/sha256/sha256.h"
 #include "assets.h"
 #include "load_gfx.h"
 #include "util.h"
 #include "audio.h"
+#include "spc_player.h"
 #include "android_logging.h"
 #ifdef __3DS__
 #include "platform_3ds.h"
 #include "updater.h"
+#include "native_menu.h"
 extern bool SecondScreenSDL_UpdateIsOpen(void);
+extern bool SecondScreenSDL_QolSelection(int *selected);
 extern bool SecondScreenSDL_UpdateNotesPage(unsigned *page);
 #include "ppu_gpu.h"
 #endif
@@ -48,6 +57,11 @@ bool SecondScreenSDL_HandleEvent(const SDL_Event *e);
 void SecondScreenSDL_Update(int logic_frames);
 void SecondScreenSDL_SetDiagnostics(int current_fps, int average_fps);
 #ifdef __3DS__
+// SDL reads the 3DS touchscreen once per pump, at the top of the frame. These
+// calls read it again from the middle, so a tap that lands while the frame is
+// still working is not lost. See platform/3ds/source/native_touch.h.
+void SecondScreenSDL_SampleTouch(void);
+void SecondScreenSDL_FlushTouch(void);
 void SecondScreenSDL_BeginFrame(int logic_frames);
 #endif
 void SecondScreenSDL_RequestDump(void);
@@ -525,7 +539,7 @@ static void SdlRenderer_EndDraw() {
                               g_sdl_renderer_rect.w,
                               g_sdl_renderer_rect.h,
                               focus_x,
-                              focus_y);
+                              focus_y, main_module_index);
 #else
 //  uint64 before = SDL_GetPerformanceCounter();
   SDL_UnlockTexture(g_texture);
@@ -569,6 +583,14 @@ void ZeldaSetWidescreen(bool enable) {
   int extra = enable ? (g_snes_height * 5 / 3 - 256) / 2 : 0;
 #else
   int extra = enable ? (g_snes_height * 16 / 9 - 256) / 2 : 0;
+  // As ExtendedAspectRatio does at startup: sprites stay alive across the
+  // WIDE picture and its visual fixes apply (the fixed camera needs them),
+  // except where the ini opted out of them.
+  uint32 ws_features = (kFeatures0_ExtendScreen64 | kFeatures0_WidescreenVisualFixes) &
+                       ~g_config.wide_features_off;
+  g_config.features0 = enable ? (g_config.features0 | ws_features) :
+                                (g_config.features0 & ~ws_features);
+  g_wanted_zelda_features = g_config.features0;
 #endif
   g_config.extended_aspect_ratio = extra;
   g_zenv.ppu->extraLeftRight = UintMin(extra, kPpuExtraLeftRight);
@@ -649,6 +671,10 @@ restart_3ds_runtime:
   Platform3DS_LogRuntime("Configuration loaded: %dx%d, software renderer",
                          g_config.window_width, g_config.window_height);
 #endif
+  Qol_LatchForBoot();
+  g_config.features0=Qol_Features0(g_config.features0);
+  g_config.features1=Qol_Features1(g_config.features1);
+  g_spc_panned_sfx = g_config.panned_sound_effects;
   LoadAssets();
 #ifdef __3DS__
   Platform3DS_LogRuntime("Assets loaded and validated");
@@ -659,6 +685,8 @@ restart_3ds_runtime:
 #ifdef __3DS__
   ZeldaSetWidescreenEdgeMode(Platform3DS_GetWideEdgeMode());
   Platform3DS_LogRuntime("Game engine initialized");
+#else
+  ZeldaSetWidescreenEdgeMode(g_config.wide_edge_mode);
 #endif
   g_zenv.ppu->extraLeftRight = UintMin(g_config.extended_aspect_ratio, kPpuExtraLeftRight);
   g_snes_width = (g_config.extended_aspect_ratio * 2 + 256);
@@ -667,17 +695,48 @@ restart_3ds_runtime:
 
   // Delay actually setting those features in ram until any snapshots finish playing.
   g_wanted_zelda_features = g_config.features0;
+  g_wanted_zelda_features1 = g_config.features1;
 
   g_ppu_render_flags = g_config.new_renderer * kPpuRenderFlags_NewRenderer |
                        g_config.enhanced_mode7 * kPpuRenderFlags_4x4Mode7 |
                        g_config.extend_y * kPpuRenderFlags_Height240 |
-                       g_config.no_sprite_limits * kPpuRenderFlags_NoSpriteLimits;
+                       g_config.no_sprite_limits * kPpuRenderFlags_NoSpriteLimits |
+                       kPpuRenderFlags_FastPaths;
 #ifdef __3DS__
   if (Platform3DS_GetHardwareProfile()->old_ppu)
     g_ppu_render_flags |= kPpuRenderFlags_Old3DS;
 #endif
   ZeldaEnableMsu(g_config.enable_msu);
   ZeldaSetLanguage(g_config.language);
+#ifdef __3DS__
+  // Validate/prepare the selected seed before opening SDL audio and renderers.
+  // A startup failure must restart into the error wizard without tearing down
+  // an audio device that has never run a frame.
+  if (Platform3DS_StartupMenuPending()) {
+    // The title initializes its own tiles and palette from the selected ROM.
+    // Run it offscreen before loading SRAM or opening any renderer/audio worker.
+    static uint32 logo[256*224];
+    ZeldaDrawStartupLogo(logo);
+    int choice=Platform3DS_ShowStartupMenu(logo);
+    if(choice<=0) {
+      ZeldaShutdownSession();
+      if(choice==0 && Platform3DS_TakeResetRequest()) {
+        restart_fresh=true;goto restart_3ds_runtime;
+      }
+      return 0;
+    }
+  }
+  ZeldaReadSram();
+  if (!Platform3DS_ApplyPendingRandomizer()) {
+    ZeldaShutdownSession();
+    if (Platform3DS_TakeResetRequest()) {
+      restart_fresh = true;
+      goto restart_3ds_runtime;
+    }
+    return 1;
+  }
+  g_paused = 0;
+#endif
 
   if (g_config.fullscreen == 1)
     g_win_flags ^= SDL_WINDOW_FULLSCREEN_DESKTOP;
@@ -781,6 +840,7 @@ restart_3ds_runtime:
     g_audio_channels = have.channels;
     g_frames_per_block = (534 * have.freq) / 32000;
     g_audiobuffer = malloc(g_frames_per_block * have.channels * sizeof(int16));
+    g_audiobuffer_cur = g_audiobuffer_end = g_audiobuffer;
 #ifdef __3DS__
     Platform3DS_LogRuntime("Audio initialized: %d Hz, %d channels, %d samples",
                            have.freq, have.channels, have.samples);
@@ -796,19 +856,24 @@ restart_3ds_runtime:
   mkdir("saves", 0755);
 #endif
 
+#ifndef __3DS__
   ZeldaReadSram();
-#ifdef __3DS__
+#else
   Platform3DS_LogRuntime("Entering main loop");
 #endif
 
 #ifdef __3DS__
-  Platform3DS_LogRuntime("Native HID input enabled");
+  Platform3DS_LogRuntime("Native HID input enabled; paused=%u",g_paused);
 #else
   int joystick_count = SDL_NumJoysticks();
   for (int i = 0; i < joystick_count; i++)
     OpenOneGamepad(i);
 #endif
 
+#ifdef __3DS__
+  // Reveal the lower card before advancing the original Nintendo/title intro.
+  Platform3DS_RevealStartupCard();
+#endif
   bool running = true;
   SDL_Event event;
 #ifndef __3DS__
@@ -841,6 +906,13 @@ restart_3ds_runtime:
       running = false;
       break;
     }
+#endif
+#ifdef __3DS__
+    // Hand SDL the point the frame read for itself, so the drain below picks
+    // it up. Without this the sample has no exit: it latches the contact, SDL's
+    // own copy of that same contact is dropped as already reported, and the tap
+    // is lost rather than merely late.
+    SecondScreenSDL_FlushTouch();
 #endif
     // Touch is dispatched from SDL edges here, before paused/update/timing exits.
     while(SDL_PollEvent(&event)) {
@@ -893,21 +965,32 @@ restart_3ds_runtime:
       break;
 
 #ifdef __3DS__
-    if (SecondScreenSDL_UpdateIsOpen()) {
+    // The in-frame sample also runs once per turn of the loop, here, ahead of
+    // the paths below that leave the frame early, so its pressed flag never
+    // outlives a contact that ended while nothing was looking. See
+    // platform/3ds/source/native_touch.h.
+    SecondScreenSDL_SampleTouch();
+    int menu_qol_selected;bool menu_qol=SecondScreenSDL_QolSelection(&menu_qol_selected);
+    if (SecondScreenSDL_UpdateIsOpen()||menu_qol) {
       if (!audiopaused && device) SDL_PauseAudioDevice(device, 1);
       audiopaused = true;
+      Platform3DS_SetMenuAudio(menu_qol&&device!=0);
+      if(menu_qol){bool turbo;int speed;Platform3DS_ReadInput(&turbo,&speed);SecondScreenSDL_QolSelection(&menu_qol_selected);}
       SecondScreenSDL_BeginFrame(1);
       unsigned update_page;
       bool show_notes = SecondScreenSDL_UpdateNotesPage(&update_page);
-      Platform3DS_PresentUpdatePage(show_notes, update_page);
+      if(menu_qol)Platform3DS_PresentQolPage(menu_qol_selected);
+      else Platform3DS_PresentUpdatePage(show_notes, update_page);
       SecondScreenSDL_Update(1);
       Platform3DS_EndFrame();
+      SecondScreenSDL_SampleTouch();
       SDL_Delay(16);
       logic_last_counter = SDL_GetPerformanceCounter();
       logic_accumulator = 0;
       last_render_counter = 0;
       continue;
     }
+    Platform3DS_SetMenuAudio(false);
 #endif
     if (g_paused != audiopaused) {
       audiopaused = g_paused;
@@ -990,6 +1073,7 @@ restart_3ds_runtime:
     bool turbo_held;
     int turbo_multiplier;
     inputs = Platform3DS_ReadInput(&turbo_held, &turbo_multiplier);
+    SecondScreenSDL_SampleTouch();
     SecondScreenSDL_SetDiagnostics(g_3ds_current_fps, g_3ds_average_fps);
     if (Platform3DS_TakeQuickDumpRequest())
       SecondScreenSDL_RequestDump();
@@ -1008,6 +1092,7 @@ restart_3ds_runtime:
       SDL_LockMutex(g_audio_mutex);
       is_replay |= ZeldaRunFrame(inputs);
       SDL_UnlockMutex(g_audio_mutex);
+      SecondScreenSDL_SampleTouch();
       frameCtr++;
     }
     uint64 logic_work_ticks = SDL_GetPerformanceCounter() - frame_work_start;
@@ -1040,12 +1125,16 @@ restart_3ds_runtime:
 #ifdef __3DS__
     uint64 top_draw_ticks = SDL_GetPerformanceCounter() - top_draw_start;
     uint64 top_work_ticks = SDL_GetPerformanceCounter() - frame_work_start;
+    // The top draw is the longest single step of a WIDE frame; sample the
+    // touchscreen on both sides of it.
+    SecondScreenSDL_SampleTouch();
     uint64 bottom_work_start = SDL_GetPerformanceCounter();
 #endif
     SecondScreenSDL_Update(rendered_logic_frames);
 
 #ifdef __3DS__
     Platform3DS_EndFrame();
+    SecondScreenSDL_SampleTouch();
     uint64 bottom_work_ticks =
       SDL_GetPerformanceCounter() - bottom_work_start;
     uint64 total_work_ticks = SDL_GetPerformanceCounter() - frame_work_start;
@@ -1097,7 +1186,18 @@ restart_3ds_runtime:
     }
 #endif
   }
-  if (g_config.autosave) {
+#ifdef __3DS__
+  // A reset or confirmed language change starts at the title. A state from
+  // the previous cartridge language must not be restored on the next boot.
+  Platform3DS_SetMenuAudio(false);
+  bool discard_session = Platform3DS_ResetRequested() || Platform3DS_RomSelectionRequested();
+  if (discard_session) ZeldaClearAutosave();
+  // A test scenario keeps the player's autosave of the session before it.
+  if (g_config.autosave && !discard_session && !g_test_scenario_active &&
+      NativeMenu_CanAutosave(main_module_index)) {
+#else
+  if (g_config.autosave && !g_test_scenario_active) {
+#endif
 #ifdef __3DS__
     if (system_exit_requested && device)
       SDL_PauseAudioDevice(device, 1);
@@ -1112,7 +1212,9 @@ restart_3ds_runtime:
   }
 
   SDL_DestroyMutex(g_audio_mutex);
+  g_audio_mutex = NULL;
   free(g_audiobuffer);
+  g_audiobuffer = g_audiobuffer_cur = g_audiobuffer_end = NULL;
 
   ZeldaShutdownPpuWorker();
   g_renderer_funcs.Destroy();
@@ -1120,8 +1222,9 @@ restart_3ds_runtime:
   SecondScreenSDL_Shutdown();
   SDL_DestroyWindow(window);
   SDL_Quit();
+  ZeldaShutdownSession();
 #ifdef __3DS__
-  if (Platform3DS_TakeRomSelectionRequest()) {
+  if (Platform3DS_TakeResetRequest() || Platform3DS_TakeRomSelectionRequest()) {
     restart_fresh = true;
     goto restart_3ds_runtime;
   }
@@ -1200,11 +1303,11 @@ static void HandleCommand(uint32 j, bool pressed) {
 }
 
 void ZeldaApuLock() {
-  SDL_LockMutex(g_audio_mutex);
+  if (g_audio_mutex) SDL_LockMutex(g_audio_mutex);
 }
 
 void ZeldaApuUnlock() {
-  SDL_UnlockMutex(g_audio_mutex);
+  if (g_audio_mutex) SDL_UnlockMutex(g_audio_mutex);
 }
 
 
@@ -1450,12 +1553,16 @@ void ZeldaApplyDimFlashesPalette(bool enable) {
     orig[1] = kPalette_DungBgMain[0x485];
     orig[2] = kPalette_DungBgMain[0x486];
   }
-  kPalette_DungBgMain[0x484] = enable ? 0x70 : orig[0];
-  kPalette_DungBgMain[0x485] = enable ? 0x95 : orig[1];
-  kPalette_DungBgMain[0x486] = enable ? 0x57 : orig[2];
+  // The Virtual Console changes the low byte of these three colors only, at
+  // $1B:E03C, $1B:E03E and $1B:E040 of the cartridge (less red, and less
+  // green for the third): their blue and the rest of their green stay.
+  kPalette_DungBgMain[0x484] = enable ? (orig[0] & 0xff00) | 0x70 : orig[0];
+  kPalette_DungBgMain[0x485] = enable ? (orig[1] & 0xff00) | 0x95 : orig[1];
+  kPalette_DungBgMain[0x486] = enable ? (orig[2] & 0xff00) | 0x57 : orig[2];
 }
 
 static void LoadAssets() {
+  static uint8 *owned_assets;
   size_t length = 0;
   uint8 *data = ReadWholeFile("zelda3_assets.dat", &length);
   if (!data) {
@@ -1468,6 +1575,7 @@ static void LoadAssets() {
     if (!bps_src)
       Die("Missing file: zelda3.sfc");
     data = ApplyBps(bps_src, bps_src_length, bps, bps_length, &length);
+    free(bps); free(bps_src);
     if (!data)
       Die("Unable to apply zelda3_assets.bps. Please make sure you got the right version of 'zelda3.sfc'");
   }
@@ -1490,6 +1598,25 @@ static void LoadAssets() {
     g_asset_ptrs[i] = data + offset;
     offset += size;
   }
+
+  sha256_buffer(data, length, g_assets_hash);
+  RandoChestMap_Clear();
+
+  // All readers of the preceding session have stopped before re-entry.
+  free(owned_assets); owned_assets = data;
+#ifdef __3DS__
+  extern void SS_CaptureOriginalLinkFace(void);
+  SS_CaptureOriginalLinkFace();
+#endif
+  Mods_SetLanguage(g_config.language);
+  Mods_ApplyAssetOverlays(g_config.mods);
+#ifdef __3DS__
+  uint8 cartridge_chests[504];
+  if (Platform3DS_ReadRandomizerChestTable(cartridge_chests))
+    (void)RandoChestMap_Init(cartridge_chests, sizeof(cartridge_chests),
+                             kDungeonRoomChests, kDungeonRoomChests_SIZE);
+#endif
+
 
   ZeldaApplyDimFlashesPalette((g_config.features0 & kFeatures0_DimFlashes) != 0);
 }

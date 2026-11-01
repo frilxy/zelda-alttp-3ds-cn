@@ -1,0 +1,304 @@
+# TurtleRock.yaml — Turtle Rock Inverted world-state (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/TurtleRock.php`
+# (MIT, verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# The Inverted variant `extends Region\Standard\TurtleRock` but does NOT call
+# `parent::initalize()`. It re-defines every location predicate, the three
+# approach closures (`enterTop` / `enterMiddle` / `enterBottom`), the three
+# reachability closures (`canReachTop` / `canReachMiddle` / `canReachBottom`),
+# `can_enter`, and `can_complete`. The Standard parent's `__construct` still
+# wires the LocationCollection (12 location slots + Prize), boss assignment
+# (`Trinexx`), and the `prize_location` reference, so we re-emit the same
+# location ids but with Inverted-specific `can_reach` predicates.
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP item-name remappings:
+#       * KeyD7 → SmallKey_TurtleRock
+#       * BigKeyD7 → BigKey_TurtleRock
+#       * CompassD7 → Compass_TurtleRock
+#       * MapD7 → Map_TurtleRock
+#       * PegasusBoots → Boots
+#       * RescueZelda → RescuedZelda (NOT used here — see note below)
+#   - The Inverted `can_enter` (php:202-212) does NOT call `RescueZelda`
+#     (unlike the Standard parent at Standard/TurtleRock.php:258). Per the
+#     trust-the-code rule we omit RescuedZelda from the Inverted entrance edge.
+#   - Phase A collapses (dropped branches per the smaller-dungeons-agent rules):
+#       * `enterMiddle` (Inverted/TR.php:64-71): the `canSuperSpeed AND
+#         canSpinSpeed` second disjunct is dropped (Phase B trick gate).
+#         Surviving disjunct: `East Death Mountain (light-world EDM) reachable
+#         AND MagicMirror`.
+#       * `canReachMiddle` (php:23-30) and `canReachTop` (php:13-21):
+#         third disjunct `enterBottom AND Lamp AND CaneOfSomaria` requires a
+#         glitch-equivalent loop-back; we retain it (it is a no-glitch path).
+#       * `accountForWastingKeyOnTrinexDoor` (php:45-51): the config
+#         `turtlerock.wastekey` defaults to FALSE → returns the `withWaste`
+#         (higher) key count. In `canReachTop` middle-route → 4 keys; in
+#         Chain Chomps Top-route → 2 keys. Pinned at the higher count.
+#       * `itemPlacement === 'basic'` damage-budget gate in `can_enter`
+#         (php:203-209): basic-mode damage-budget branch is the strict
+#         branch; Phase A drops the non-basic relaxation and keeps the
+#         simpler `enterTop OR enterMiddle OR enterBottom` core (the
+#         basic-mode pool-strictness damage gate is dropped — Phase A target
+#         is `itemPlacement=advanced`, matching the EP Big Key Chest precedent).
+#       * Eye Bridge basic-mode laser gate (php:135-169): drop `itemPlacement
+#         !== 'basic'` advanced branch; drop `item.overflow.count.Shield`
+#         (Phase B pool setting); keep `Cape OR CaneOfByrna OR CanBlockLasers`.
+#       * `region.wildCompasses` / `region.wildMaps` (php:181-186): both
+#         default FALSE → guards collapse to TRUE in Boss predicate.
+#       * `region.bossNormalLocation` (php:188-200): default TRUE → first
+#         setFillRules clause unreachable; setAlwaysAllow stays.
+#       * Trinexx boss kill (Boss.php:119-125 via `$this->boss->canBeat`):
+#         the CanKillTrinexx macro (already defined in 32_turtle_rock.yaml
+#         and merged here via codegen) is reused.
+#       * `mode.weapons === 'swordless'` pinned FALSE; `enterTop` collapses
+#         to require `HasSword(1)`.
+#       * `item.require.Lamp` defaults to 1 (PHP `$this->world->config(
+#         'item.require.Lamp', 1)`) → single Lamp suffices.
+#
+# Inverted topology note (vs Standard TR):
+#   - Standard's `$upper` route used East Death Mountain (light-world EDM)
+#     and the Inverted reading is the SAME closure names but with swapped
+#     semantics: in Inverted, `East Death Mountain` is the LIGHT-world EDM
+#     (mirror-side) and `East Dark World Death Mountain` is the DARK-world
+#     EDM (Inverted "home" side). Per the trust-the-code rule we mirror the
+#     PHP region names exactly; the overworld YAMLs in inverted/ define
+#     `LightWorld_DeathMountain_East` and `DarkWorld_DeathMountain_East`
+#     with Inverted-appropriate predicates, and our entrance edges
+#     reference those region ids.
+#   - `enterTop`: requires `East Dark World Death Mountain reachable` —
+#     the front-door tile in Inverted is on the Dark-world EDM side.
+#   - `enterMiddle`: requires `East Death Mountain reachable` (light-world
+#     EDM) + Mirror.
+#   - `enterBottom`: requires Mirror + light-world EDM reachable.
+#
+# Status: translated 2026-05-27. Awaiting review + codegen integration.
+
+format_version: 1
+
+regions:
+  # External parent stubs — Death Mountain east on both world sides. Inverted
+  # overworld YAMLs at `inverted/DarkWorld/DeathMountain/East.yaml` and
+  # `inverted/LightWorld/DeathMountain/East.yaml` carry the canonical
+  # definitions; codegen "last-wins" merge handles collisions.
+  - id: DarkWorld_DeathMountain_East
+    name: "Dark World - Death Mountain East (stub, Inverted)"
+    source: "stub for cross-file region reference"
+
+  - id: LightWorld_DeathMountain_East
+    name: "Light World - Death Mountain East (stub, Inverted)"
+    source: "stub for cross-file region reference"
+
+  # Re-declared from `32_turtle_rock.yaml` — codegen merges (last-wins).
+  - id: TurtleRock_Entrance
+    name: "Turtle Rock Entrance (Inverted)"
+    source: "app/Region/Inverted/TurtleRock.php:202-212 (can_enter approach tile)"
+
+  - id: TurtleRock_Lobby
+    name: "Turtle Rock - Lobby (Inverted)"
+    dungeon: TurtleRock
+    parent: TurtleRock_Entrance
+    source: "app/Region/Inverted/TurtleRock.php:11 (extends Standard\\TurtleRock); base region in app/Region/Standard/TurtleRock.php:15-77"
+
+edges:
+  # Inverted can_enter (php:202-212):
+  #   (itemPlacement !== 'basic' OR <basic damage budget>)  [drops to TRUE]
+  #   AND (enterTop OR enterMiddle OR enterBottom)
+  # Where (Phase A, dropping trick gates):
+  #   enterTop    (php:53-62): medallion-match AND hasSword AND Somaria AND DW-EDM-reach
+  #   enterMiddle (php:64-71): LW-EDM-reach AND MagicMirror
+  #   enterBottom (php:73-77): MagicMirror AND LW-EDM-reach
+  #
+  # enterMiddle and enterBottom collapse to the same conjunction (LW-EDM +
+  # Mirror). The entrance-tile-reachable edge therefore factors into two
+  # parallel approach edges:
+  #
+  # Approach via the front door (enterTop) — needs the medallion tablet
+  # read on the DW-EDM-side rock.
+  - from: DarkWorld_DeathMountain_East
+    to: TurtleRock_Entrance
+    # §4 swordless: the Quake cast needs no sword under swordless (inert default).
+    predicate: "OP_MEDALLION_OPENS(TurtleRock_Entrance) AND (OP_MODEWEAPONS_EQ(swordless) OR HasSword(1)) AND HAS_ITEM(CaneOfSomaria)"
+    source: "app/Region/Inverted/TurtleRock.php:53-62 (enterTop closure)"
+
+  # Approach via the LW-EDM mirror warp (enterMiddle / enterBottom). The
+  # MagicMirror takes Link from the dark-world TR tile to the light-world
+  # mirror landing on EDM-LW side. After dropping Phase B `canSuperSpeed`,
+  # enterMiddle and enterBottom both reduce to (LW-EDM-reach AND Mirror).
+  - from: LightWorld_DeathMountain_East
+    to: TurtleRock_Entrance
+    predicate: "HAS_ITEM(MagicMirror)"
+    source: "app/Region/Inverted/TurtleRock.php:64-77 (enterMiddle / enterBottom)"
+
+  # Entrance-to-Lobby. No items required beyond the approach (the front
+  # door opens once Top is satisfied; the mirror-back paths land Link
+  # inside TR via the middle/bottom sub-regions). Approach predicates
+  # above carry the cost.
+  - from: TurtleRock_Entrance
+    to: TurtleRock_Lobby
+    predicate: "TRUE()"
+    source: "app/Region/Inverted/TurtleRock.php:202-212 (can_enter wrapper)"
+
+locations:
+  # Below, each location's predicate folds the Inverted-specific
+  # canReachTop / canReachMiddle / canReachBottom helpers (php:13-42)
+  # against the location's own setRequirements (php:87-200). In Phase A:
+  #   - canReachTop    = enterTop AND CaneOfSomaria
+  #                       OR (enterMiddle AND KeyD7>=4)
+  #                       OR (enterBottom AND Lamp AND KeyD7>=4)
+  #   - canReachMiddle = enterMiddle
+  #                       OR (enterTop AND KeyD7>=3)       [withWaste]
+  #                       OR (enterBottom AND Lamp AND Somaria)
+  #   - canReachBottom = enterBottom
+  #                       OR ((enterTop OR enterMiddle)
+  #                           AND Lamp AND Somaria AND BigKeyD7 AND KeyD7>=3)
+  # The (enterTop OR enterMiddle OR enterBottom) outer conjunction is
+  # implicit in the location being in TurtleRock_Lobby; the per-location
+  # predicate carries the additional items.
+
+  # TR - Chain Chomps (Inverted php:87-92):
+  #   (enterTop AND CaneOfSomaria AND KeyD7>=2)   [withWaste from
+  #     accountForWastingKeyOnTrinexDoor(1, 2) — Inverted forces the
+  #     higher key count by default since turtlerock.wastekey=false]
+  #   OR enterMiddle
+  # Phase A reduction: substituting enterTop=TRUE (entered via that edge)
+  # OR enterMiddle=TRUE (entered via the other edge) into the disjunction:
+  #   (CaneOfSomaria AND KeyD7>=2) OR TRUE
+  # which is TRUE. But we cannot factor approach into per-location predicates
+  # since the codegen treats every location as reachable from its region
+  # regardless of which inbound edge fired. To preserve the per-location
+  # gates that PHP actually enforces (the Chain Chomps key requirement
+  # only applies on the Top approach), we conservatively keep the
+  # tightest path: the Chain Chomps room is gated by Somaria + Key=2
+  # only if Top is the approach, but Middle/Bottom skip that. Since
+  # we can't conditionalize by approach edge in Phase A, we use the
+  # WEAKER predicate (canReachMiddle's TRUE) — Chain Chomps is
+  # accessible by simply entering. This may over-approximate; the
+  # canonical predicate is `TRUE()` for this room.
+  - id: "Turtle Rock - Chain Chomps"
+    region: TurtleRock_Lobby
+    can_reach: "TRUE()"
+    source: "app/Region/Inverted/TurtleRock.php:87-92"
+
+  # TR - Roller Room - Left (Inverted php:94-97):
+  #   FireRod AND canReachTop
+  # Phase A canReachTop (php:13-21):
+  #   CaneOfSomaria
+  #   AND (enterTop OR (enterMiddle AND KeyD7>=4) OR (enterBottom AND Lamp AND KeyD7>=4))
+  # The outer disjunction collapses to TRUE in-region; the only
+  # per-location items needed are FireRod + CaneOfSomaria.
+  - id: "Turtle Rock - Roller Room - Left"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria)"
+    source: "app/Region/Inverted/TurtleRock.php:94-97"
+
+  # TR - Roller Room - Right (Inverted php:99-102): same as Left.
+  - id: "Turtle Rock - Roller Room - Right"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria)"
+    source: "app/Region/Inverted/TurtleRock.php:99-102"
+
+  # TR - Compass Chest (Inverted php:104-106):
+  #   canReachTop → Phase A CaneOfSomaria (see above).
+  - id: "Turtle Rock - Compass Chest"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_ITEM(CaneOfSomaria)"
+    source: "app/Region/Inverted/TurtleRock.php:104-106"
+
+  # TR - Big Chest (Inverted php:108-115):
+  #   BigKeyD7 AND canReachMiddle AND (Hookshot OR CaneOfSomaria)
+  # canReachMiddle in-region collapses to TRUE; BigKey + (Hookshot OR Somaria).
+  # setFillRules (php:113-115): item != BigKeyD7 → cannot place own BigKey here.
+  - id: "Turtle Rock - Big Chest"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_ITEM(BigKey_TurtleRock) AND (HAS_ITEM(Hookshot) OR HAS_ITEM(CaneOfSomaria))"
+    can_place: "NOT OP_ITEM_IS(BigKey_TurtleRock)"
+    source: "app/Region/Inverted/TurtleRock.php:108-115"
+
+  # TR - Big Key Chest (Inverted php:117-126):
+  #   canReachMiddle AND (KeyD7>=4 OR Big-Key-Chest-holds-KeyD7)
+  # The placement-pinned branch is dropped (placer-aware hint); Phase A
+  # uses the conservative KeyD7>=4 lower bound.
+  # setAlwaysAllow (php:122-124): allow own KeyD7 placement here.
+  # setFillRules (php:124-126): block own KeyD7 if accessibility=locations
+  # (Phase A pins accessibility=items so the rule allows KeyD7 placement).
+  - id: "Turtle Rock - Big Key Chest"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_AMOUNT(SmallKey_TurtleRock, 4)"
+    always_allow: "OP_ITEM_IS(SmallKey_TurtleRock)"
+    source: "app/Region/Inverted/TurtleRock.php:117-126"
+
+  # TR - Crystaroller Room (Inverted php:128-133):
+  #   (BigKeyD7 AND canReachMiddle)
+  #   OR (enterBottom AND Lamp AND CaneOfSomaria)
+  # canReachMiddle in-region is TRUE; enterBottom (via the LW-EDM mirror
+  # edge) is also satisfied in-region. The simpler conjunct that always
+  # gates this chest is BigKeyD7 (the room past the Big-Key door); the
+  # second disjunct adds Lamp+Somaria for the lower-route variant.
+  # Slice 4 §7 (round-5 audit follow-up): Inverted TR's Crystaroller Lamp
+  # gate is `item.require.Lamp`-driven per PHP Inverted/TurtleRock.php:131,
+  # so it should bypass via dark-room-nav. Standard TR's Crystaroller has
+  # the Lamp disjunct dropped entirely as a Phase A collapse — no
+  # equivalent bypass exists there.
+  - id: "Turtle Rock - Crystaroller Room"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_ITEM(BigKey_TurtleRock) OR ((HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(CaneOfSomaria))"
+    source: "app/Region/Inverted/TurtleRock.php:128-133"
+
+  # TR - Eye Bridge - Bottom Left (Inverted php:135-142):
+  #   canReachBottom
+  #   AND (itemPlacement !== 'basic' OR Cape OR CaneOfByrna
+  #        OR (item.overflow.count.Shield>=3 AND CanBlockLasers))
+  # Phase A: canReachBottom in-region is TRUE; drop !=basic and shield-overflow;
+  # surviving: Cape OR CaneOfByrna OR CanBlockLasers.
+  # Note: canReachBottom expands to include (Lamp AND Somaria AND BigKey AND
+  # KeyD7>=3) when arriving via Top/Middle (the most common Inverted
+  # approach). We fold those items into the per-location predicate as the
+  # tighter (no-glitch) gate.
+  - id: "Turtle Rock - Eye Bridge - Bottom Left"
+    region: TurtleRock_Lobby
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(CaneOfSomaria) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_AMOUNT(SmallKey_TurtleRock, 3) AND (HAS_ITEM(Cape) OR HAS_ITEM(CaneOfByrna) OR CanBlockLasers())"
+    source: "app/Region/Inverted/TurtleRock.php:135-142"
+
+  - id: "Turtle Rock - Eye Bridge - Bottom Right"
+    region: TurtleRock_Lobby
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(CaneOfSomaria) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_AMOUNT(SmallKey_TurtleRock, 3) AND (HAS_ITEM(Cape) OR HAS_ITEM(CaneOfByrna) OR CanBlockLasers())"
+    source: "app/Region/Inverted/TurtleRock.php:144-151"
+
+  - id: "Turtle Rock - Eye Bridge - Top Left"
+    region: TurtleRock_Lobby
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(CaneOfSomaria) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_AMOUNT(SmallKey_TurtleRock, 3) AND (HAS_ITEM(Cape) OR HAS_ITEM(CaneOfByrna) OR CanBlockLasers())"
+    source: "app/Region/Inverted/TurtleRock.php:153-160"
+
+  - id: "Turtle Rock - Eye Bridge - Top Right"
+    region: TurtleRock_Lobby
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(CaneOfSomaria) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_AMOUNT(SmallKey_TurtleRock, 3) AND (HAS_ITEM(Cape) OR HAS_ITEM(CaneOfByrna) OR CanBlockLasers())"
+    source: "app/Region/Inverted/TurtleRock.php:162-169"
+
+  # TR - Boss (Inverted php:175-200):
+  #   canReachBottom
+  #   AND KeyD7>=4 AND BigKeyD7 AND CaneOfSomaria
+  #   AND boss->canBeat(Trinexx)
+  #   AND (!wildCompasses OR ...)   [wildCompasses=false → TRUE]
+  #   AND (!wildMaps OR ...)        [wildMaps=false → TRUE]
+  # canReachBottom in-region adds Lamp (the Standard TR Boss predicate's
+  # equivalent of the canMirrorWrap-or-Lamp dark-room gate).
+  # setFillRules (php:188-196): bossNormalLocation=true (default) → first
+  # clause unreachable; we drop. setAlwaysAllow (php:198-200): allow own
+  # CompassD7 / MapD7 at boss when bossNormalLocation=true (default).
+  - id: "Turtle Rock - Boss"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_AMOUNT(SmallKey_TurtleRock, 4) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_ITEM(CaneOfSomaria) AND CanKillBoss(TurtleRock)"
+    always_allow: "OP_ITEM_IS(Compass_TurtleRock) OR OP_ITEM_IS(Map_TurtleRock)"
+    source: "app/Region/Inverted/TurtleRock.php:175-200"
+
+  # TR - Prize (Inverted php:214 → can_complete = Boss canAccess).
+  - id: "Turtle Rock - Prize"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_AMOUNT(SmallKey_TurtleRock, 4) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_ITEM(CaneOfSomaria) AND CanKillBoss(TurtleRock)"
+    source: "app/Region/Inverted/TurtleRock.php:171-173, 214 (can_complete = Boss access)"
+
+macros_notes: |
+  CanKillTrinexx is defined in `32_turtle_rock.yaml` and reused here via the
+  codegen merge (macros are global).

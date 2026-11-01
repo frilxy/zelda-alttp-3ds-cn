@@ -1,0 +1,154 @@
+# 11_tower_of_hera.yaml — Tower of Hera dungeon (task 3.3 partial)
+#
+# Mechanically translated from
+# `../alttp_vt_randomizer/app/Region/Standard/TowerOfHera.php` (MIT,
+# verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# Translation discipline (audit.md §0.10.2):
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `KeyP3` / `BigKeyP3` / `CompassP3` / `MapP3` → registry-canonical
+#     `SmallKey_TowerOfHera` / `BigKey_TowerOfHera` / `Compass_TowerOfHera`
+#     / `Map_TowerOfHera`.
+#   - PHP `RescueZelda` → `RescuedZelda`.
+#   - Phase B branches dropped:
+#       * `$main` (php:103-109): the `canBootsClip+PegasusBoots`,
+#         `canSuperSpeed+canSpinSpeed`, `canOneFrameClipOW` disjuncts are
+#         trick-dependent — pinned FALSE in Phase A → `$main` collapses to
+#         `(MagicMirror OR (Hookshot AND Hammer)) AND WestDM->canEnter`.
+#       * `$mire` (php:111-119): gated on `canOneFrameClipUW` — FALSE in
+#         Phase A → `$mire` collapses to FALSE entirely. The Compass / Big
+#         Chest / Boss disjuncts that depend on it drop.
+#       * `region.wildCompasses` / `region.wildMaps` → false → boss-room
+#         guards collapse to TRUE.
+#       * `region.bossNormalLocation` → true → boss-slot dungeon-item
+#         setFillRules ban is unreachable.
+#       * `accessibility !== 'locations'` on Big Key Chest fill rules
+#         (php:123-127) — Phase A pins accessibility=items; the
+#         setAlwaysAllow/setFillRules pair degenerates to a no-op.
+
+format_version: 1
+
+regions:
+  # External parent — ToH sits at the top of West Death Mountain. Stubbed
+  # for cross-file region reference; codegen's "last wins" merge handles
+  # collisions with the eventual full LightWorld/DeathMountain/West.php
+  # translation.
+  - id: LightWorld_DeathMountain_West
+    name: "Light World - Death Mountain West (stub)"
+    source: "stub for cross-file region reference"
+
+  - id: TowerOfHera_Lobby
+    name: "Tower of Hera - Lobby"
+    dungeon: TowerOfHera
+    source: "app/Region/Standard/TowerOfHera.php:15-64"
+
+edges:
+  # ToH `can_enter` (php:164-168): `RescuedZelda AND ($main OR $mire)`.
+  # $mire = FALSE in Phase A; $main = `(boots && canBootsClip) || canSuperSpeed
+  # || canOneFrameClipOW || ((MagicMirror OR (Hookshot AND Hammer)) AND
+  # WestDM->canEnter)`. Modeled as a single edge from WestDM since
+  # WestDM reachability is implied by the source region.
+  # Phase B Slice 4 §7: CanBootsClip + OWG bypass surfaced; canSuperSpeed
+  # lacks a macro (no spin-speed kit in this fork yet) so it's dropped.
+  - from: LightWorld_DeathMountain_West
+    to: TowerOfHera_Lobby
+    predicate: "HAS_ITEM(RescuedZelda) AND (HAS_ITEM(MagicMirror) OR (HAS_ITEM(Hookshot) AND HAS_ITEM(Hammer)) OR CanBootsClip() OR CanOneFrameClipOW() OR (CanSuperSpeed() AND CanSpinSpeed()))"
+    source: "app/Region/Standard/TowerOfHera.php:103-109, 164-168 (can_enter + $main)"
+
+locations:
+  # ToH - Big Key Chest (php:121-127): canLightTorches AND has(KeyP3).
+  - id: "Tower of Hera - Big Key Chest"
+    name: "Tower of Hera - Big Key Chest"
+    region: TowerOfHera_Lobby
+    type: Chest
+    vanilla_item: BigKey_TowerOfHera
+    dungeon_item_class: big_key
+    can_reach: "CanLightTorches() AND HAS_ITEM(SmallKey_TowerOfHera)"
+    # setFillRules + setAlwaysAllow (php:123-127): a Phase B
+    # `accessibility=locations` guard that prevents this slot from holding
+    # KeyP3 (would lock the dungeon). Phase A pins accessibility=items; both
+    # rules degenerate to defaults (can_place=TRUE, always_allow=FALSE).
+    source: "app/Region/Standard/TowerOfHera.php:121-127"
+
+  # ToH - Basement Cage (php:54) — no setRequirements; default TRUE.
+  # Standing\HeraBasement type — non-chest pickup (small-key drop in vanilla).
+  - id: "Tower of Hera - Basement Cage"
+    name: "Tower of Hera - Basement Cage"
+    region: TowerOfHera_Lobby
+    type: Standing
+    vanilla_item: SmallKey_TowerOfHera
+    dungeon_item_class: small_key
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/TowerOfHera.php:54"
+
+  # ToH - Map Chest (php:55) — no setRequirements; default TRUE.
+  - id: "Tower of Hera - Map Chest"
+    name: "Tower of Hera - Map Chest"
+    region: TowerOfHera_Lobby
+    type: Chest
+    vanilla_item: Map_TowerOfHera
+    dungeon_item_class: map
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/TowerOfHera.php:55"
+
+  # ToH - Compass Chest (php:129-132):
+  #   ($main AND has(BigKeyP3)) OR $mire
+  # $main is handled at the entry edge; $mire = FALSE in Phase A.
+  # So predicate reduces to has(BigKeyP3).
+  - id: "Tower of Hera - Compass Chest"
+    name: "Tower of Hera - Compass Chest"
+    region: TowerOfHera_Lobby
+    type: Chest
+    vanilla_item: Compass_TowerOfHera
+    dungeon_item_class: compass
+    can_reach: "HAS_ITEM(BigKey_TowerOfHera)"
+    source: "app/Region/Standard/TowerOfHera.php:129-132"
+
+  # ToH - Big Chest (php:134-137):
+  #   ($main AND has(BigKeyP3)) OR ($mire AND (has(BigKeyP3) OR has(BigKeyD6)))
+  # $mire = FALSE in Phase A → reduces to has(BigKeyP3).
+  - id: "Tower of Hera - Big Chest"
+    name: "Tower of Hera - Big Chest"
+    region: TowerOfHera_Lobby
+    type: BigChest
+    vanilla_item: MirrorShield
+    can_reach: "HAS_ITEM(BigKey_TowerOfHera)"
+    source: "app/Region/Standard/TowerOfHera.php:134-137"
+
+  # ToH - Boss (php:143-148):
+  #   $main
+  #   && boss->canBeat   -- Moldorm: HasSword(1) OR Hammer
+  #   && (has(BigKeyP3) || ($mire && has(BigKeyD6)))
+  #   && (!wildCompasses || ...)    -- collapses to TRUE (wildCompasses=false)
+  #   && (!wildMaps || ...)         -- collapses to TRUE (wildMaps=false)
+  # $main on entry edge; $mire = FALSE → BigKey check reduces to BigKeyP3.
+  - id: "Tower of Hera - Boss"
+    name: "Tower of Hera - Boss"
+    region: TowerOfHera_Lobby
+    type: Drop
+    vanilla_item: BossHeartContainer
+    can_reach: "CanKillBoss(TowerOfHera) AND HAS_ITEM(BigKey_TowerOfHera)"
+    # setFillRules (php:149-158): `bossNormalLocation=true` makes the
+    # dungeon-item ban unreachable; default TRUE.
+    # setAlwaysAllow (php:159-162): when bossNormalLocation=true (default),
+    # ToH's own compass/map are allowed at the boss slot.
+    always_allow: "OP_ITEM_IS(Compass_TowerOfHera) OR OP_ITEM_IS(Map_TowerOfHera)"
+    source: "app/Region/Standard/TowerOfHera.php:143-162"
+
+  # ToH - Prize (php:60, 170): can_complete = Boss canAccess.
+  - id: "Tower of Hera - Prize"
+    name: "Tower of Hera - Prize"
+    region: TowerOfHera_Lobby
+    type: Prize_Pendant
+    vanilla_item: Prize_BluePendant
+    can_reach: "CanKillBoss(TowerOfHera) AND HAS_ITEM(BigKey_TowerOfHera)"
+    source: "app/Region/Standard/TowerOfHera.php:60, 139-141, 170 (can_complete = Boss access)"
+
+macros:
+  # CanKillMoldorm — ToH boss kill predicate.
+  # PHP (Boss.php:80-82):
+  #   hasSword() || Hammer
+  - name: CanKillMoldorm
+    parameters: []
+    body: "(HasSword(1) OR HAS_ITEM(Hammer)) AND NeedsBossSoul(Soul_Moldorm)"
+    source: "app/Boss.php:80-82 (Boss::canBeat for Moldorm)"

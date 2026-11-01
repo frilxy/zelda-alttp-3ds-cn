@@ -19,12 +19,16 @@ typedef int s32;
 static void *ss_old_display_pixels;
 static bool ss_is_new_3ds,ss_scene_redraw_pending,ss_worker_interactive,ss_touch_redraw_pending;
 static bool ss_worker_door_transition;
+// A tap whose redraw the game thread draws itself, rather than waiting for
+// the worker to be scheduled. See SecondScreenSDL_BeginFrame.
+static bool ss_touch_sync_redraw;
 static bool ss_worker_busy,ss_worker_sidebar_patch,ss_worker_map_patch,ss_worker_running;
 static bool ss_enabled=true,ss_frame_ready,ss_present_retry,done_ready,art_ready=true;
 static bool update_mode;
 typedef struct {unsigned revision;} UpdateStatus;
 static void Updater_GetStatus(UpdateStatus *s){s->revision=0;}
 static int ss_worker_thread=1,ss_worker_interactive_priority=0x2f,ss_worker_scene_priority=0x30,ss_worker_idle_priority=0x31;
+static int ss_gpu_source_buffer=-1;
 static int ss_front_buffer=0,ss_worker_buffer,ss_win=1,ss_worker_start,ss_worker_done,ss_worker_logic_frames;
 static int priority=0x31,tab,module=9,area,drawn_health,signals,waits,load_result,load_flash_until;
 static uint32_t ss_redraw_requests;
@@ -75,6 +79,8 @@ typedef void SDL_Renderer;
 code+='#include "'+str(r/'engine/src/platform/linux/bottom_hearts.h')+'"\n'
 code+=r'''
 static BottomHearts ss_worker_hearts[2],ss_display_hearts;
+static bool ss_worker_cinema[2],ss_worker_usable[2]={true,true};
+static void Platform3DS_SetBottomCinema(bool cinema){}
 static uint8_t display[512*256*2],worker0[512*256*2],worker1[512*256*2];
 static uint8_t *ss_present_pixels[2]={worker0,worker1};
 static bool ss_old_display_valid;
@@ -88,6 +94,14 @@ code+=r'''
 static void RunWorker(void){waits=0;ss_worker_running=true;second_screen_worker_main(NULL);assert(done_ready);}
 static void Present(void){SecondScreenSDL_BeginFrame(1);assert(ss_frame_ready);ss_frame_ready=false;}
 int main(void) {
+ // An incomplete art frame must preserve the explicit startup-card reveal,
+ // even if the art worker has become ready since this buffer was drawn.
+ for(int model=0;model<2;model++) {
+  ss_is_new_3ds=model;ss_worker_usable[0]=false;ss_frame_ready=true;int n=presents;
+  SecondScreenSDL_Update(0);assert(presents==n);
+  ss_worker_usable[0]=true;SecondScreenSDL_Update(0);assert(presents==n+1);
+ }
+ ss_is_new_3ds=false;
  live[0x6c]=24;live[0x6d]=24;request_bottom_redraw_on_state_change();
  // Damage while a full map redraw is busy: it must not remain starved at0x31.
  ss_worker_busy=true;live[0x6d]=16;SecondScreenSDL_BeginFrame(1);
@@ -137,7 +151,7 @@ int main(void) {
  ss_display_hearts=(BottomHearts){.valid=true,.count=3,.size=16,.capacity=24,.health=8};
  for(int i=0;i<3;i++)ss_display_hearts.rect[i]=(SDL_Rect){224+i*20,140,16,16};
  ss_old_display_valid=true;
- for(int i=0;i<64;i++){bottom_heart_glyphs[0][i]=0;bottom_heart_glyphs[1][i]=0xffff0000;bottom_heart_glyphs[2][i]=0xffff0000;}
+ native_heart_ink[0]=0xffffffff;native_heart_ink[1]=0xff000000;native_heart_ink[2]=0xffff0000;
  int old_signals=signals;
  for(int health=24;health>=0;health-=4){
    int old_presents=presents;live[0x6d]=health;SecondScreenSDL_BeginFrame(1);
@@ -167,6 +181,7 @@ int main(void) {
  gpu_active=true;SecondScreenSDL_Update(1);assert(!ss_frame_ready);
  // The first Old bottom frame is ready before a worker can starve at idle.
  ss_is_new_3ds=false;ss_worker_thread=0;ss_worker_busy=false;ss_front_buffer=-1;
+ ss_gpu_source_buffer=-1; // nothing presented yet, so no upload is in flight
  ss_frame_ready=false;art_ready=true;priority=0x30;SecondScreenSDL_BeginFrame(1);
  assert(ss_front_buffer==0 && ss_frame_ready && ss_worker_thread==0);
  // Completion during top rendering is consumed by Update in the SAME frame.
@@ -181,6 +196,20 @@ int main(void) {
   SecondScreenSDL_Update(1);assert(ss_worker_busy&&presents==old_presents);
   assert(signals==old_signals&&waits==old_waits);
  }
+ // New presents worker buffers directly. A job harvested at BeginFrame must
+ // not start drawing into the buffer uploaded last frame before this frame's
+ // C3D_FrameBegin; it is deferred one frame with its request kept.
+ ss_is_new_3ds=true;ss_worker_thread=1;ss_worker_busy=false;ss_front_buffer=0;
+ ss_frame_ready=true;gpu_active=true;old_presents=presents;SecondScreenSDL_Update(1);
+ assert(presents==old_presents+1 && ss_gpu_source_buffer==0);
+ ss_worker_buffer=1;ss_worker_busy=true;done_ready=true;
+ ss_redraw_requests=kBottomRedrawFull;int guard_signals=signals;
+ SecondScreenSDL_BeginFrame(1);
+ assert(ss_front_buffer==1 && !ss_worker_busy && signals==guard_signals);
+ assert(ss_redraw_requests&kBottomRedrawFull);
+ SecondScreenSDL_BeginFrame(1);
+ assert(ss_worker_busy && ss_worker_buffer==0 && signals==guard_signals+1);
+ puts("PASS in-flight New upload buffer is never redrawn before the next GPU frame begins");
  puts("PASS same-frame completion on both models with zero extra jobs/waits; startup and dropped-frame retry on both models; retained hearts while worker busy: no job/priority changes, immediate latest health, no unchanged-glyph upload, worker buffers untouched, completed-map reconciliation, capacity/half-magic/hidden-tab guards; fallback damage/healing invalidation, queued latest health, HUD-before-map dispatch, busy-map fairness, scene/touch priority, New unchanged and idle restoration");
 }
 '''

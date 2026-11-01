@@ -3,7 +3,8 @@
 Desktop lifecycle test; it does not emulate NDSP or prove console startup.
 """
 from pathlib import Path
-import os, subprocess, tempfile
+import os, shlex, subprocess, sys, tempfile
+from host_test_support import sdl_flags
 root=Path(__file__).resolve().parents[3]
 source=(root/'engine/src/main.c').read_text()
 def function(name):
@@ -22,8 +23,10 @@ program=r'''
 #include <stdlib.h>
 static volatile int callbacks;
 static int ppu_stopped, bottom_stopped, presenter_stopped;
+static int updater_stopped;
+static void Updater_Shutdown(void) { updater_stopped=1; }
 static void callback(void *p, Uint8 *out, int n) { (void)p; SDL_memset(out,0,n); callbacks++; }
-static void ZeldaShutdownPpuWorker(void) { assert(!SDL_WasInit(SDL_INIT_AUDIO)); ppu_stopped=1; }
+static void ZeldaShutdownPpuWorker(void) { assert(updater_stopped); assert(!SDL_WasInit(SDL_INIT_AUDIO)); ppu_stopped=1; }
 static void SecondScreenSDL_Shutdown(void) { assert(ppu_stopped); bottom_stopped=1; }
 static void presenter(void) { assert(bottom_stopped);presenter_stopped=1; }
 static struct { void (*Destroy)(void); } g_renderer_funcs;
@@ -47,8 +50,7 @@ int main(int argc,char **argv) {
   exit(17);
 }
 '''.replace('HANDLER',handler)
-config=os.environ.get('SDL2_CONFIG','/tmp/lttp-e7-sdl-host/bin/sdl2-config')
-flags=subprocess.check_output([config,'--cflags','--static-libs'],text=True).split()
+flags=sdl_flags()
 with tempfile.TemporaryDirectory(prefix='lttp-exit-test-') as td:
     p=Path(td);(p/'test.c').write_text(program)
     subprocess.run(['cc','-O1','-fsanitize=address,undefined',str(p/'test.c'),*flags,'-o',str(p/'test')],check=True)

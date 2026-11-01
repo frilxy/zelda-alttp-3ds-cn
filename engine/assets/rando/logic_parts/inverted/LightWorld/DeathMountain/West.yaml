@@ -1,0 +1,59 @@
+# LightWorld/DeathMountain/West.yaml — Inverted LightWorld Death Mountain West (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/LightWorld/DeathMountain/West.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `PegasusBoots` → registry-canonical `Boots`.
+#   - PHP `canOWYBA`/`canBootsClip`/`canOneFrameClipOW` are Phase B
+#     trick/glitch axes — DROPPED.
+#   - PHP `item.require.Lamp` defaults to 1 → `HAS_ITEM(Lamp)`.
+#
+# Inverted regional context:
+#   - In Inverted, `West` (php:24-25) REMOVES Ether Tablet and Spectacle
+#     Rock — these get re-added to DM East in Inverted (see East.yaml).
+#   - Inverited West retains `Old Man` and the inherited `Spectacle Rock
+#     Cave` (no override).
+#   - Entry into Inverted LW-DM-West is the canonical climb: flute (canFly)
+#     OR (canLiftRocks AND Lamp). All glitch alternatives drop.
+#
+# Status: translated 2026-05-27. Awaiting review + codegen integration.
+
+format_version: 1
+
+regions:
+  - id: LightWorld_DeathMountain_West
+    name: "Light World - Death Mountain West (Inverted)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/West.php:11-52"
+
+edges:
+  # `can_enter` (php:40-48):
+  #   canFly OR (canLiftRocks AND Lamp) OR canBootsClip+Boots OR
+  #   canOneFrameClipOW OR (canOWYBA AND hasABottle)
+  # All glitch/OWYBA alternatives drop. Surviving:
+  #   - canFly (flute return from DW; default instant_flute seeds activate on
+  #     pickup, while instant_flute=false keeps the ALTTPR activation gate)
+  #   - canLiftRocks AND Lamp (rock-climb entrance)
+  # Entry from LW-NE — the broader LW connectivity already requires the
+  # inverted mirror entry (modeled in LightWorld/NorthEast.yaml).
+  - from: LightWorld_NorthEast
+    to: LightWorld_DeathMountain_West
+    predicate: "CanFly(world) OR (CanLiftRocks() AND HAS_ITEM(Lamp))"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/West.php:40-48"
+
+locations:
+  # `Old Man` (php:36-38): Lamp.
+  - id: "Old Man"
+    region: LightWorld_DeathMountain_West
+    can_reach: "HAS_ITEM(Lamp)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/West.php:36-38"
+
+  # `Spectacle Rock Cave` (inherited from Standard parent; no override in
+  # Inverted/West) — Phase A inherits default TRUE().
+  - id: "Spectacle Rock Cave"
+    region: LightWorld_DeathMountain_West
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/West.php:31 (inherited, no override in Inverted)"
+
+macros: []

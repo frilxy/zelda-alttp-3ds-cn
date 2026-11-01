@@ -1,0 +1,839 @@
+{
+ "format_version": 1,
+ "predicates": [
+  "(HAS_ITEM(Lamp) OR HAS_ITEM(FireRod))",
+  "(HAS_ITEM(Lamp) OR CanDarkRoomNav())",
+  "CanShootArrowsL1()",
+  "HAS_ITEM(Hookshot)",
+  "CanBombThings()",
+  "(HAS_ITEM(Boots) AND CanBombThings())",
+  "HAS_ITEM(Hammer)",
+  "((CanBombThings() OR CanShootArrowsL1() OR HAS_ITEM(BlueBoomerang) OR HAS_ITEM(RedBoomerang) OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod) OR HAS_ITEM(CaneOfSomaria)) OR (HasSword(1) OR HAS_ITEM(Hammer)) OR HAS_ITEM(CaneOfByrna))",
+  "(CanBombThings() OR HAS_ITEM(CaneOfSomaria))",
+  "(CanBombThings() OR CanShootArrowsL1() OR HasSword(1) OR HAS_ITEM(Hammer) OR HAS_ITEM(BlueBoomerang) OR HAS_ITEM(RedBoomerang) OR HAS_ITEM(Hookshot) OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod) OR HAS_ITEM(CaneOfSomaria) OR HAS_ITEM(CaneOfByrna))",
+  "(CanBombThings() OR HAS_ITEM(CaneOfSomaria) OR HAS_ITEM(RedBoomerang))",
+  "(CanBombThings() OR HAS_ITEM(Boots))",
+  "HAS_ITEM(Boots)",
+  "(HAS_ITEM(Hookshot) OR HAS_ITEM(Boots))",
+  "(CanBombThings() OR HAS_ITEM(BlueBoomerang) OR HAS_ITEM(RedBoomerang))",
+  "(CanBombThings() OR HAS_ITEM(BlueBoomerang) OR HAS_ITEM(RedBoomerang) OR HAS_ITEM(CaneOfSomaria))",
+  "HAS_ITEM(CaneOfSomaria)",
+  "CanKillArmosKnights()",
+  "CanKillLanmolas(world)",
+  "(HAS_ITEM(Hookshot) AND CanKillMoldorm())",
+  "(HasSword(1) OR HasSword2() OR HasSword3() OR HasSword(4) OR HAS_ITEM(Hammer) OR (CanShootArrowsL1() AND CanShootSilvers()) OR HAS_ITEM(CaneOfSomaria) OR (HAS_ITEM(CaneOfByrna) AND CanExtendMagic(world, 3)))",
+  "HAS_ITEM(FireRod)",
+  "(CanBombThings() OR HAS_ITEM(CaneOfSomaria) OR HAS_ITEM(RedBoomerang) OR HAS_ITEM(BlueBoomerang) OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod))",
+  "(HasSword(1) OR HasSword2() OR HasSword3() OR HasSword(4) OR HAS_ITEM(Hammer) OR CanShootArrowsL1() OR HAS_ITEM(CaneOfSomaria) OR HAS_ITEM(CaneOfByrna) OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod))",
+  "(CanShootArrowsL1() OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod) OR HAS_ITEM(CaneOfSomaria))",
+  "(HasSword(1) OR HasSword2() OR HasSword3() OR HasSword(4) OR HAS_ITEM(Hammer) OR (CanShootArrowsL1() AND CanShootSilvers()) OR HAS_ITEM(CaneOfSomaria) OR (HAS_ITEM(CaneOfByrna) AND CanExtendMagic(world, 7)))",
+  "(CanBombThings() OR CanShootArrowsL1() OR HAS_ITEM(BlueBoomerang) OR HAS_ITEM(RedBoomerang) OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod) OR HAS_ITEM(CaneOfSomaria))",
+  "(CanBombThings() OR CanShootArrowsL1() OR HAS_ITEM(RedBoomerang) OR HAS_ITEM(BlueBoomerang) OR HAS_ITEM(CaneOfSomaria) OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod))",
+  "(CanLiftRocks() AND HAS_ITEM(Hammer))",
+  "CanMeltThings(world)",
+  "(HasSword(1) OR HasSword2() OR HasSword3() OR HasSword(4) OR HAS_ITEM(Hammer) OR CanShootArrowsL1() OR HAS_ITEM(CaneOfSomaria) OR (HAS_ITEM(CaneOfByrna) AND CanExtendMagic(world, 2)) OR (HAS_ITEM(FireRod) AND CanExtendMagic(world, 1)))",
+  "(HAS_ITEM(MagicPowder) AND (HasSword(1) OR HasSword2() OR HasSword3() OR HasSword(4) OR HAS_ITEM(Hammer) OR CanShootArrowsL1() OR (HAS_ITEM(MagicPowder) AND (HasSword(1) OR HasSword2() OR HasSword3() OR HasSword(4) OR HAS_ITEM(Hammer) OR HAS_ITEM(Hookshot))) OR HAS_ITEM(CaneOfSomaria) OR (HAS_ITEM(CaneOfByrna) AND CanExtendMagic(world, 3)) OR HAS_ITEM(FireRod)))",
+  "((HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND CanBombThings())",
+  "(HAS_ITEM(CaneOfSomaria) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()))",
+  "(HAS_ITEM(Boots) OR HAS_ITEM(Hookshot))",
+  "(CanShootArrowsL1() OR HAS_ITEM(RedBoomerang) OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod) OR HAS_ITEM(CaneOfSomaria))",
+  "(HAS_ITEM(CaneOfSomaria) OR CanBombThings() OR CanShootArrowsL1() OR HAS_ITEM(RedBoomerang) OR HAS_ITEM(IceRod) OR HAS_ITEM(FireRod))",
+  "(HAS_ITEM(Hammer) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()))",
+  "((CanShootArrowsL1() OR HAS_ITEM(RedBoomerang) OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod) OR HAS_ITEM(CaneOfSomaria)) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()))",
+  "HAS_ITEM(RedBoomerang)",
+  "HAS_ITEM(IceRod)",
+  "HAS_ITEM(BlueBoomerang)",
+  "HasSword(1)",
+  "HasSword2()",
+  "HAS_ITEM(Flippers)",
+  "HAS_ITEM(MagicMirror)",
+  "(HAS_ITEM(Flippers) AND CanBombThings())",
+  "(HAS_ITEM(CaneOfSomaria) OR HAS_ITEM(Boots))",
+  "(HAS_ITEM(CaneOfSomaria) OR HAS_ITEM(Hookshot))",
+  "(CanBombThings() OR CanShootArrowsL1() OR HAS_ITEM(RedBoomerang) OR HAS_ITEM(BlueBoomerang) OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod) OR HAS_ITEM(CaneOfSomaria))",
+  "(CanBombThings() OR HAS_ITEM(BlueBoomerang))",
+  "(HAS_ITEM(CaneOfSomaria) AND HAS_ITEM(FireRod))",
+  "(HasSword(1) OR HasSword2() OR HasSword3() OR HasSword(4) OR HAS_ITEM(Hammer) OR CanShootArrowsL1() OR HAS_ITEM(CaneOfSomaria) OR (HAS_ITEM(CaneOfByrna) AND CanExtendMagic(world, 5)) OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod))",
+  "CanLiftRocks()",
+  "CanKillBoss(DesertPalace)",
+  "CanKillBoss(EasternPalace)",
+  "CanKillBoss(GanonsTower)",
+  "HAS_ITEM(MagicPowder)",
+  "CanKillBoss(TowerOfHera)",
+  "HAS_AMOUNT(SmallKey_HyruleCastleEscape, 1)",
+  "CanKillBoss(IcePalace)",
+  "CanKillBoss(MiseryMire)",
+  "CanKillBoss(PalaceOfDarkness)",
+  "CanKillBoss(SkullWoods)",
+  "CanKillBoss(SwampPalace)",
+  "CanKillBoss(TurtleRock)",
+  "(CanBlockLasers() OR HAS_ITEM(Cape) OR HAS_ITEM(CaneOfByrna))",
+  "CanKillBoss(ThievesTown)",
+  "(HasSword(1) OR (OP_MODEWEAPONS_EQ(swordless) AND (HAS_ITEM(Hammer) OR HAS_ITEM(BugCatchingNet))))"
+ ],
+ "locations": [
+  {
+   "fork_id": 0,
+   "dungeon": 0
+  },
+  {
+   "fork_id": 1,
+   "dungeon": 0
+  },
+  {
+   "fork_id": 2,
+   "dungeon": 0
+  },
+  {
+   "fork_id": 3,
+   "dungeon": 0
+  },
+  {
+   "fork_id": 4,
+   "dungeon": 0
+  },
+  {
+   "fork_id": 5,
+   "dungeon": 0
+  },
+  {
+   "fork_id": 6,
+   "dungeon": 0
+  },
+  {
+   "fork_id": 7,
+   "dungeon": 0
+  },
+  {
+   "fork_id": 11,
+   "dungeon": 1
+  },
+  {
+   "fork_id": 12,
+   "dungeon": 1
+  },
+  {
+   "fork_id": 13,
+   "dungeon": 1
+  },
+  {
+   "fork_id": 14,
+   "dungeon": 1
+  },
+  {
+   "fork_id": 15,
+   "dungeon": 1
+  },
+  {
+   "fork_id": 16,
+   "dungeon": 1
+  },
+  {
+   "fork_id": 17,
+   "dungeon": 1
+  },
+  {
+   "fork_id": 18,
+   "dungeon": 2
+  },
+  {
+   "fork_id": 19,
+   "dungeon": 2
+  },
+  {
+   "fork_id": 20,
+   "dungeon": 2
+  },
+  {
+   "fork_id": 21,
+   "dungeon": 2
+  },
+  {
+   "fork_id": 22,
+   "dungeon": 2
+  },
+  {
+   "fork_id": 23,
+   "dungeon": 2
+  },
+  {
+   "fork_id": 24,
+   "dungeon": 2
+  },
+  {
+   "fork_id": 25,
+   "dungeon": 3
+  },
+  {
+   "fork_id": 26,
+   "dungeon": 3
+  },
+  {
+   "fork_id": 27,
+   "dungeon": 3
+  },
+  {
+   "fork_id": 28,
+   "dungeon": 3
+  },
+  {
+   "fork_id": 29,
+   "dungeon": 3
+  },
+  {
+   "fork_id": 30,
+   "dungeon": 3
+  },
+  {
+   "fork_id": 31,
+   "dungeon": 3
+  },
+  {
+   "fork_id": 32,
+   "dungeon": 4
+  },
+  {
+   "fork_id": 33,
+   "dungeon": 4
+  },
+  {
+   "fork_id": 35,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 36,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 37,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 38,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 39,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 40,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 41,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 42,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 43,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 44,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 45,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 46,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 47,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 48,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 49,
+   "dungeon": 5
+  },
+  {
+   "fork_id": 50,
+   "dungeon": 6
+  },
+  {
+   "fork_id": 51,
+   "dungeon": 6
+  },
+  {
+   "fork_id": 52,
+   "dungeon": 6
+  },
+  {
+   "fork_id": 53,
+   "dungeon": 6
+  },
+  {
+   "fork_id": 54,
+   "dungeon": 6
+  },
+  {
+   "fork_id": 55,
+   "dungeon": 6
+  },
+  {
+   "fork_id": 56,
+   "dungeon": 6
+  },
+  {
+   "fork_id": 57,
+   "dungeon": 6
+  },
+  {
+   "fork_id": 58,
+   "dungeon": 6
+  },
+  {
+   "fork_id": 59,
+   "dungeon": 6
+  },
+  {
+   "fork_id": 60,
+   "dungeon": 6
+  },
+  {
+   "fork_id": 61,
+   "dungeon": 7
+  },
+  {
+   "fork_id": 62,
+   "dungeon": 7
+  },
+  {
+   "fork_id": 63,
+   "dungeon": 7
+  },
+  {
+   "fork_id": 64,
+   "dungeon": 7
+  },
+  {
+   "fork_id": 65,
+   "dungeon": 7
+  },
+  {
+   "fork_id": 66,
+   "dungeon": 7
+  },
+  {
+   "fork_id": 67,
+   "dungeon": 7
+  },
+  {
+   "fork_id": 68,
+   "dungeon": 7
+  },
+  {
+   "fork_id": 69,
+   "dungeon": 7
+  },
+  {
+   "fork_id": 70,
+   "dungeon": 8
+  },
+  {
+   "fork_id": 71,
+   "dungeon": 8
+  },
+  {
+   "fork_id": 72,
+   "dungeon": 8
+  },
+  {
+   "fork_id": 73,
+   "dungeon": 8
+  },
+  {
+   "fork_id": 74,
+   "dungeon": 8
+  },
+  {
+   "fork_id": 75,
+   "dungeon": 8
+  },
+  {
+   "fork_id": 76,
+   "dungeon": 8
+  },
+  {
+   "fork_id": 77,
+   "dungeon": 8
+  },
+  {
+   "fork_id": 78,
+   "dungeon": 8
+  },
+  {
+   "fork_id": 79,
+   "dungeon": 9
+  },
+  {
+   "fork_id": 80,
+   "dungeon": 9
+  },
+  {
+   "fork_id": 81,
+   "dungeon": 9
+  },
+  {
+   "fork_id": 82,
+   "dungeon": 9
+  },
+  {
+   "fork_id": 83,
+   "dungeon": 9
+  },
+  {
+   "fork_id": 84,
+   "dungeon": 9
+  },
+  {
+   "fork_id": 85,
+   "dungeon": 9
+  },
+  {
+   "fork_id": 86,
+   "dungeon": 9
+  },
+  {
+   "fork_id": 87,
+   "dungeon": 9
+  },
+  {
+   "fork_id": 88,
+   "dungeon": 10
+  },
+  {
+   "fork_id": 89,
+   "dungeon": 10
+  },
+  {
+   "fork_id": 90,
+   "dungeon": 10
+  },
+  {
+   "fork_id": 91,
+   "dungeon": 10
+  },
+  {
+   "fork_id": 92,
+   "dungeon": 10
+  },
+  {
+   "fork_id": 93,
+   "dungeon": 10
+  },
+  {
+   "fork_id": 94,
+   "dungeon": 10
+  },
+  {
+   "fork_id": 95,
+   "dungeon": 10
+  },
+  {
+   "fork_id": 96,
+   "dungeon": 10
+  },
+  {
+   "fork_id": 97,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 98,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 99,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 100,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 101,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 102,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 103,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 104,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 105,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 106,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 107,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 108,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 109,
+   "dungeon": 11
+  },
+  {
+   "fork_id": 110,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 111,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 112,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 113,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 114,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 115,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 116,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 117,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 118,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 119,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 120,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 121,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 122,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 123,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 124,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 125,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 126,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 127,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 128,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 129,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 130,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 131,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 132,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 133,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 134,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 135,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 136,
+   "dungeon": 12
+  },
+  {
+   "fork_id": 137,
+   "dungeon": 12
+  }
+ ],
+ "portals": [
+  {
+   "name": "Hyrule Castle Lobby",
+   "dungeon": 0,
+   "door_region": 5,
+   "is_drop": 0
+  },
+  {
+   "name": "Hyrule Castle West Lobby",
+   "dungeon": 0,
+   "door_region": 9,
+   "is_drop": 0
+  },
+  {
+   "name": "Hyrule Castle East Lobby",
+   "dungeon": 0,
+   "door_region": 3,
+   "is_drop": 0
+  },
+  {
+   "name": "Sewers Rat Path",
+   "dungeon": 0,
+   "door_region": 30,
+   "is_drop": 0
+  },
+  {
+   "name": "Sanctuary",
+   "dungeon": 0,
+   "door_region": 23,
+   "is_drop": 0
+  },
+  {
+   "name": "Eastern Lobby",
+   "dungeon": 1,
+   "door_region": 54,
+   "is_drop": 0
+  },
+  {
+   "name": "Desert Back Lobby",
+   "dungeon": 2,
+   "door_region": 68,
+   "is_drop": 0
+  },
+  {
+   "name": "Desert Main Lobby",
+   "dungeon": 2,
+   "door_region": 85,
+   "is_drop": 0
+  },
+  {
+   "name": "Desert West Lobby",
+   "dungeon": 2,
+   "door_region": 95,
+   "is_drop": 0
+  },
+  {
+   "name": "Desert East Lobby",
+   "dungeon": 2,
+   "door_region": 79,
+   "is_drop": 0
+  },
+  {
+   "name": "Hera Lobby",
+   "dungeon": 3,
+   "door_region": 113,
+   "is_drop": 0
+  },
+  {
+   "name": "Tower Lobby",
+   "dungeon": 4,
+   "door_region": 137,
+   "is_drop": 0
+  },
+  {
+   "name": "PoD Lobby",
+   "dungeon": 5,
+   "door_region": 183,
+   "is_drop": 0
+  },
+  {
+   "name": "Swamp Lobby",
+   "dungeon": 6,
+   "door_region": 225,
+   "is_drop": 0
+  },
+  {
+   "name": "Skull 1 Lobby",
+   "dungeon": 7,
+   "door_region": 249,
+   "is_drop": 0
+  },
+  {
+   "name": "Skull Pinball",
+   "dungeon": 7,
+   "door_region": 268,
+   "is_drop": 0
+  },
+  {
+   "name": "Skull Left Drop",
+   "dungeon": 7,
+   "door_region": 265,
+   "is_drop": 0
+  },
+  {
+   "name": "Skull Pot Circle",
+   "dungeon": 7,
+   "door_region": 269,
+   "is_drop": 0
+  },
+  {
+   "name": "Skull 2 East Lobby",
+   "dungeon": 7,
+   "door_region": 251,
+   "is_drop": 0
+  },
+  {
+   "name": "Skull 2 West Lobby",
+   "dungeon": 7,
+   "door_region": 253,
+   "is_drop": 0
+  },
+  {
+   "name": "Skull Back Drop",
+   "dungeon": 7,
+   "door_region": 258,
+   "is_drop": 0
+  },
+  {
+   "name": "Skull 3 Lobby",
+   "dungeon": 7,
+   "door_region": 256,
+   "is_drop": 0
+  },
+  {
+   "name": "Thieves Lobby",
+   "dungeon": 8,
+   "door_region": 302,
+   "is_drop": 0
+  },
+  {
+   "name": "Ice Lobby",
+   "dungeon": 9,
+   "door_region": 346,
+   "is_drop": 0
+  },
+  {
+   "name": "Mire Lobby",
+   "dungeon": 10,
+   "door_region": 401,
+   "is_drop": 0
+  },
+  {
+   "name": "TR Main Lobby",
+   "dungeon": 11,
+   "door_region": 462,
+   "is_drop": 0
+  },
+  {
+   "name": "TR Eye Bridge",
+   "dungeon": 11,
+   "door_region": 451,
+   "is_drop": 0
+  },
+  {
+   "name": "TR Big Chest Entrance",
+   "dungeon": 11,
+   "door_region": 425,
+   "is_drop": 0
+  },
+  {
+   "name": "TR Lazy Eyes",
+   "dungeon": 11,
+   "door_region": 460,
+   "is_drop": 0
+  },
+  {
+   "name": "GT Lobby",
+   "dungeon": 12,
+   "door_region": 542,
+   "is_drop": 0
+  },
+  {
+   "name": "Sewers Rat Path",
+   "dungeon": 0,
+   "door_region": 30,
+   "is_drop": 1
+  },
+  {
+   "name": "Skull Pinball",
+   "dungeon": 7,
+   "door_region": 268,
+   "is_drop": 1
+  },
+  {
+   "name": "Skull Left Drop",
+   "dungeon": 7,
+   "door_region": 265,
+   "is_drop": 1
+  },
+  {
+   "name": "Skull Pot Circle",
+   "dungeon": 7,
+   "door_region": 269,
+   "is_drop": 1
+  },
+  {
+   "name": "Skull Back Drop",
+   "dungeon": 7,
+   "door_region": 258,
+   "is_drop": 1
+  }
+ ],
+ "dungeons": [
+  "HyruleCastle",
+  "EasternPalace",
+  "DesertPalace",
+  "TowerOfHera",
+  "CastleTower",
+  "PalaceOfDarkness",
+  "SwampPalace",
+  "SkullWoods",
+  "ThievesTown",
+  "IcePalace",
+  "MiseryMire",
+  "TurtleRock",
+  "GanonsTower"
+ ]
+}

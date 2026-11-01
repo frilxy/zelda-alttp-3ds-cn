@@ -1,0 +1,229 @@
+# SwampPalace.yaml — Swamp Palace Inverted world-state (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/SwampPalace.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# The Inverted variant `extends Region\Standard\SwampPalace` and calls
+# `parent::initalize()` (php:21), then overrides every location predicate
+# plus `can_enter`. The Standard parent's "Swamp Palace - Prize" predicate
+# is inherited (it tracks the Boss predicate as can_complete) — re-emitted
+# here for clarity because the Boss override changes the underlying logic.
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP item-name remappings (used in this file):
+#       * KeyD2       → SmallKey_SwampPalace
+#       * BigKeyD2    → BigKey_SwampPalace
+#       * CompassD2   → Compass_SwampPalace
+#       * MapD2       → Map_SwampPalace
+#       * KeyD6 / BigKeyD6 → SmallKey_MiseryMire / BigKey_MiseryMire
+#         (inside the `$mire` lambda — lambda collapses to FALSE)
+#       * BigKeyP3 / KeyP3 → BigKey_TowerOfHera / SmallKey_TowerOfHera
+#         (inside the `$hera` lambda and can_enter trick disjunct — both drop)
+#       * PegasusBoots → Boots (inside dropped can_enter trick branches)
+#       * RescueZelda  → RescuedZelda (NOT referenced in this Inverted override
+#         — Inverted can_enter does not require Zelda rescue per the PHP)
+#   - Dropped branches (all gated on Phase B trick / config flags that
+#     evaluate FALSE under Phase A axis pins):
+#       * `$mire` lambda (php:23-31): gated on canOneFrameClipUW → FALSE.
+#       * `$hera` lambda (php:33-38): gated on canOneFrameClipUW → FALSE.
+#         Both lambdas evaluate FALSE; all `(KeyD2 || $mire)` reduce to KeyD2,
+#         all `(Hammer || $mire || $hera)` reduce to Hammer, all big-key
+#         disjuncts reduce to BigKeyD2.
+#       * Entrance setFillRules (php:40-43): the trick-or-wild disjunct
+#         collapses, leaving `item == KeyD2`. Modeled as can_place restriction.
+#       * Big Chest setAlwaysAllow / setFillRules (php:52-56) gate on
+#         `accessibility !== 'locations'`; Phase A pins accessibility=items
+#         → both degenerate to defaults.
+#       * `region.wildCompasses` / `region.wildMaps` (php:108-112) → false →
+#         Boss guards collapse to TRUE.
+#       * `region.bossNormalLocation` (php:113-126) → true → boss-slot
+#         dungeon-item ban (setFillRules) is unreachable; setAlwaysAllow
+#         allows SP's own compass/map.
+#       * can_enter (php:132-155) trick disjuncts:
+#           - `itemPlacement !== 'basic' || (swordless|hasSword AND hasHealth(7)
+#             AND hasBottle)` (php:134-138): itemPlacement!='basic' is the
+#             Phase A pinned branch → collapses to TRUE.
+#           - canOWYBA / canBunnyRevive / canSuperBunny + MirrorMagic disjuncts
+#             (php:139-145) collapse so only the MoonPearl branch survives.
+#           - canOneFrameClipUW MagicMirror-alternative path (php:147-153) →
+#             FALSE. So `(MagicMirror || <clip path>)` reduces to MagicMirror.
+#       * Surviving can_enter (Phase A collapse):
+#           Flippers AND MoonPearl AND MagicMirror AND South-LW->canEnter
+#
+# Status: translated 2026-05-27. Awaiting review + codegen integration.
+
+format_version: 1
+
+regions:
+  # External parent stub — in Inverted, SP's overworld parent is the
+  # "South Light World" region (php:154). Stubbed for cross-file region
+  # reference; codegen "last-wins" merge resolves with the eventual full
+  # inverted/LightWorld/South.yaml translation.
+  - id: LightWorld_South
+    name: "Light World - South (stub)"
+    source: "stub for cross-file region reference"
+
+  # Re-declared from `21_swamp_palace.yaml` — codegen merges (last-wins).
+  - id: SwampPalace
+    name: "Swamp Palace"
+    dungeon: SwampPalace
+    world_state_filter: [Inverted]
+    source: "app/Region/Inverted/SwampPalace.php:11 (extends Standard\\SwampPalace); base region in app/Region/Standard/SwampPalace.php"
+
+edges:
+  # Inverted `can_enter` (php:132-155):
+  #   Flippers
+  #   AND (itemPlacement!='basic' || <damage-budget>)              [TRUE]
+  #   AND (MoonPearl || canOWYBA+bottle || canBunnyRevive || canSuperBunny+MagicMirror)
+  #                                                                 [→ MoonPearl]
+  #   AND (MagicMirror || <canOneFrameClipUW trick chain>)         [→ MagicMirror]
+  #   AND South-LW->canEnter                                       [→ source region]
+  # Phase A surviving: Flippers AND MoonPearl AND MagicMirror.
+  # Slice 4 §7 surfaces the PHP bunny-state OR triplet on the MoonPearl
+  # gate. canSuperBunny+Mirror and canOneFrameClipUW alt-mirror remain
+  # dropped (no macros for canSuperBunny / alt-mirror-clip composition).
+  - from: LightWorld_South
+    to: SwampPalace
+    predicate: "HAS_ITEM(Flippers) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass()) AND HAS_ITEM(MagicMirror)"
+    source: "app/Region/Inverted/SwampPalace.php:132-155 (can_enter closure)"
+
+locations:
+  # ===========================================================================
+  # Swamp Palace — predicates from Inverted/SwampPalace.php:40-126
+  # ===========================================================================
+
+  # Entrance (php:40-43). Standard parent provides setRequirements (default
+  # TRUE via parent's php:50 chest with no per-location override there for
+  # entrance gating beyond a default). The Inverted override only adds
+  # setFillRules:
+  #   wildKeys || item == KeyD2 || $mire
+  # wildKeys=false, $mire=FALSE → only KeyD2 allowed. Modeled as can_place.
+  - id: "Swamp Palace - Entrance"
+    name: "Swamp Palace - Entrance"
+    region: SwampPalace
+    type: Chest
+    vanilla_item: SmallKey_SwampPalace
+    dungeon_item_class: small_key
+    can_reach: "TRUE()"
+    can_place: "OP_ITEM_IS(SmallKey_SwampPalace)"
+    source: "app/Region/Inverted/SwampPalace.php:40-43"
+
+  # Big Chest (php:45-56):
+  #   (KeyD2 || $mire) AND (Hammer || $mire || $hera)
+  #   AND (BigKeyD2 || ($mire AND BigKeyD6) || ($hera AND BigKeyP3))
+  # $mire = $hera = FALSE → SmallKey AND Hammer AND BigKey.
+  # AlwaysAllow/FillRules on accessibility!='locations' degenerate.
+  - id: "Swamp Palace - Big Chest"
+    name: "Swamp Palace - Big Chest"
+    region: SwampPalace
+    type: BigChest
+    vanilla_item: Hookshot
+    can_reach: "HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer) AND HAS_ITEM(BigKey_SwampPalace)"
+    source: "app/Region/Inverted/SwampPalace.php:45-56"
+
+  # Big Key Chest (php:58-62):
+  #   (KeyD2 || $mire) AND (Hammer || $mire || $hera)
+  # → SmallKey AND Hammer.
+  - id: "Swamp Palace - Big Key Chest"
+    name: "Swamp Palace - Big Key Chest"
+    region: SwampPalace
+    type: Chest
+    vanilla_item: BigKey_SwampPalace
+    dungeon_item_class: big_key
+    can_reach: "HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer)"
+    source: "app/Region/Inverted/SwampPalace.php:58-62"
+
+  # Map Chest (php:64-67):
+  #   canBombThings AND (KeyD2 || $mire)
+  # canBombThings = TRUE, $mire = FALSE → SmallKey.
+  - id: "Swamp Palace - Map Chest"
+    name: "Swamp Palace - Map Chest"
+    region: SwampPalace
+    type: Chest
+    vanilla_item: Map_SwampPalace
+    dungeon_item_class: map
+    can_reach: "HAS_ITEM(SmallKey_SwampPalace)"
+    source: "app/Region/Inverted/SwampPalace.php:64-67"
+
+  # West Chest (php:69-73): identical body to Big Key Chest.
+  - id: "Swamp Palace - West Chest"
+    name: "Swamp Palace - West Chest"
+    region: SwampPalace
+    type: Chest
+    vanilla_item: Rupee100
+    can_reach: "HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer)"
+    source: "app/Region/Inverted/SwampPalace.php:69-73"
+
+  # Compass Chest (php:75-79): identical body to Big Key Chest.
+  - id: "Swamp Palace - Compass Chest"
+    name: "Swamp Palace - Compass Chest"
+    region: SwampPalace
+    type: Chest
+    vanilla_item: Compass_SwampPalace
+    dungeon_item_class: compass
+    can_reach: "HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer)"
+    source: "app/Region/Inverted/SwampPalace.php:75-79"
+
+  # Flooded Room - Left (php:81-86):
+  #   Hookshot AND (KeyD2 || $mire) AND (Hammer || $mire || $hera)
+  # → Hookshot AND SmallKey AND Hammer.
+  - id: "Swamp Palace - Flooded Room - Left"
+    name: "Swamp Palace - Flooded Room - Left"
+    region: SwampPalace
+    type: Chest
+    vanilla_item: Rupee100
+    can_reach: "HAS_ITEM(Hookshot) AND HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer)"
+    source: "app/Region/Inverted/SwampPalace.php:81-86"
+
+  # Flooded Room - Right (php:88-93): identical body.
+  - id: "Swamp Palace - Flooded Room - Right"
+    name: "Swamp Palace - Flooded Room - Right"
+    region: SwampPalace
+    type: Chest
+    vanilla_item: Rupee100
+    can_reach: "HAS_ITEM(Hookshot) AND HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer)"
+    source: "app/Region/Inverted/SwampPalace.php:88-93"
+
+  # Waterfall Room (php:95-100): identical body.
+  - id: "Swamp Palace - Waterfall Room"
+    name: "Swamp Palace - Waterfall Room"
+    region: SwampPalace
+    type: Chest
+    vanilla_item: Rupee100
+    can_reach: "HAS_ITEM(Hookshot) AND HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer)"
+    source: "app/Region/Inverted/SwampPalace.php:95-100"
+
+  # Boss (php:102-126):
+  #   Hookshot AND (KeyD2 || $mire) AND (Hammer || $mire || $hera)
+  #   AND boss->canBeat                              -- Arrghus
+  #   AND (!wildCompasses || ...)                    -- TRUE
+  #   AND (!wildMaps || ...)                         -- TRUE
+  # → Hookshot AND SmallKey AND Hammer AND Arrghus.
+  - id: "Swamp Palace - Boss"
+    name: "Swamp Palace - Boss"
+    region: SwampPalace
+    type: Drop
+    vanilla_item: BossHeartContainer
+    can_reach: "HAS_ITEM(Hookshot) AND HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer) AND CanKillBoss(SwampPalace)"
+    # setFillRules (php:113-122): bossNormalLocation=true makes the
+    # dungeon-item ban unreachable; default TRUE.
+    # setAlwaysAllow (php:123-126): when bossNormalLocation=true (default),
+    # SP's own compass/map are allowed at the boss slot.
+    always_allow: "OP_ITEM_IS(Compass_SwampPalace) OR OP_ITEM_IS(Map_SwampPalace)"
+    source: "app/Region/Inverted/SwampPalace.php:102-126"
+
+  # Prize — not overridden in the Inverted file; the Standard parent sets it
+  # via `can_complete = Boss canAccess`. Re-emitted here matching the Boss
+  # predicate above (since the Boss predicate is itself overridden in the
+  # Inverted file, the inherited can_complete tracks the override).
+  - id: "Swamp Palace - Prize"
+    name: "Swamp Palace - Prize"
+    region: SwampPalace
+    type: Prize_Crystal
+    vanilla_item: Prize_Crystal2
+    can_reach: "HAS_ITEM(Hookshot) AND HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer) AND CanKillBoss(SwampPalace)"
+    source: "app/Region/Inverted/SwampPalace.php:102-126 (inherited can_complete = Boss access)"
+
+# Note on macros: CanKillArrghus is defined in `21_swamp_palace.yaml`; codegen
+# pulls it from the merged macro table.

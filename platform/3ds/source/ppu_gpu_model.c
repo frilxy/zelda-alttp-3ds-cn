@@ -1,4 +1,5 @@
 #include "ppu_gpu_model.h"
+#include "snes/ppu_ui.h"
 #include <string.h>
 #include <assert.h>
 
@@ -86,8 +87,8 @@ void PicaCaptureLine(PicaLine *out,const Ppu *p,unsigned y) {
   memcpy(out->bytes,p,PICA_LINE_BYTES);
   // Prefix access through a suitably aligned full scratch happens later.
   int wy=(int)y-p->renderObjYOffset;
-  int16_t left=p->windowExtLeft?(wy>=0?p->windowExtLeft[wy]:0):p->windowExtLeftCur;
-  int16_t right=p->windowExtRight?(wy>=0?p->windowExtRight[wy]:-1):p->windowExtRightCur;
+  int16_t left=p->windowExtLeft?(wy>=0&&wy<240?p->windowExtLeft[wy]:0):p->windowExtLeftCur;
+  int16_t right=p->windowExtRight?(wy>=0&&wy<240?p->windowExtRight[wy]:-1):p->windowExtRightCur;
   memcpy(out->bytes+offsetof(Ppu,windowExtLeftCur),&left,sizeof(left));
   memcpy(out->bytes+offsetof(Ppu,windowExtRightCur),&right,sizeof(right));
 }
@@ -153,7 +154,7 @@ static bool Backgrounds(PicaFrame *f,unsigned sub) {
     Ppu *p=Line(f,y); BgLayer *bg=&p->bgLayer[layer];
     unsigned wy=(y+1+bg->vScroll)&(bg->tilemapHigher?511:255);
     unsigned h=Band(f,y,8-(wy&7));
-    if(p->forcedBlank || y>=224u+p->extraBottomCur || !(p->screenEnabled[sub]&(1u<<layer)) || (sub && !p->addSubscreen)) {y+=h;continue;}
+    if((layer==2 && PpuUiActiveLine(p,y+1)) || p->forcedBlank || y>=224u+p->extraBottomCur || !(p->screenEnabled[sub]&(1u<<layer)) || (sub && !p->addSubscreen)) {y+=h;continue;}
     if(y+h>224u+p->extraBottomCur) h=224u+p->extraBottomCur-y;
     PpuWindowSpans win;
     PpuGetWindowSpans(p,layer,!f->sharedWindow && (p->screenWindowed[sub]&(1u<<layer))!=0,&win);
@@ -178,6 +179,28 @@ static bool Backgrounds(PicaFrame *f,unsigned sub) {
     }
     y+=h;
    }
+  }
+  return true;
+}
+// Draw the native interface after world composition, including into black
+// side margins of small rooms. Eligibility excludes BG3 windows/color math.
+static bool WideUi(PicaFrame *f) {
+  SelectBands(f,1,2,0);
+  for (unsigned y=0; y<f->height;) {
+    Ppu *p=Line(f,y);
+    unsigned wy=PpuUiWorldY(p,y+1), h=Band(f,y,8-(wy&7));
+    if (PpuUiActiveLine(p,y+1)) {
+      if (y+h>224u+p->extraBottomCur) h=224u+p->extraBottomCur-y;
+      for (unsigned x=0;x<400;x+=8) {
+        uint16_t tile; unsigned sx,sy;
+        if (!PpuUiSample(p,f->memory->vram,y+1,x,&tile,&sx,&sy)) continue;
+        int slot=Tile(f,(p->bgLayer[2].tileAdr+(tile&1023)*8)&0x7fff,(tile&0x1c00)>>8,2);
+        if (slot==-1) return false;
+        if (slot>=0 && !TileQuad(f,PICA_UI_GROUP,slot,x,y,8,h,sx,sy,
+            tile&0x4000,tile&0x8000,1,255)) return false;
+      }
+    }
+    y+=h;
   }
   return true;
 }
@@ -206,8 +229,8 @@ static bool Objects(PicaFrame *f,unsigned sub) {
       unsigned high=f->memory->oam[0x100+(index>>4)]>>(index&15);
       unsigned size=sizes[p->objSize][(high>>1)&1];
       if(row>=size) continue;
-      int x=(f->memory->oam[index]&255)+(high&1)*256;
-      x-=(x>=256+p->extraLeftRight)*512; x+=p->renderObjXOffset;
+      int x=(f->memory->oam[index]&255)+(high&1)*256+p->renderObjXOffset;
+      x=((x+256-p->extraLeftRight)&511)-256+p->extraLeftRight;  // around the drawn picture
       if(x<=-(int)(size+p->extraLeftRight)) continue;
       if(--sprites==0) break;
       for(unsigned col=0;col<size;col+=8) {
@@ -234,8 +257,8 @@ static bool Objects(PicaFrame *f,unsigned sub) {
     if(vf)row=size-1-row;
     unsigned h=Band(f,y,vf?1+(row&7):8-(row&7));
     for(unsigned dy=1;dy<h;dy++)if(columns[index/2][y+dy]!=mask){h=dy;break;}
-    int x=(f->memory->oam[index]&255)+(high&1)*256;
-    x-=(x>=256+p->extraLeftRight)*512;x+=p->renderObjXOffset;
+    int x=(f->memory->oam[index]&255)+(high&1)*256+p->renderObjXOffset;
+    x=((x+256-p->extraLeftRight)&511)-256+p->extraLeftRight;
     unsigned base=(attr&0x100)?p->objTileAdr2:p->objTileAdr1;
     unsigned palette=128+((attr>>9)&7)*16;
     unsigned z=((((attr>>12)&3)*4+2)*16+4+((attr&0x800)?0:2))<<8;
@@ -260,6 +283,20 @@ static bool Objects(PicaFrame *f,unsigned sub) {
   }
   return true;
 }
+// Repeat the composed source columns [lo,hi), which lie in the 16 pixels next
+// to a WIDE margin, across that margin: copy j lands 16*(j+1) pixels further
+// out (dir -1 left, +1 right), clipped to [first,last).
+static bool EmitMargin(PicaFrame *f,unsigned cfg,unsigned y,unsigned h,
+                       int lo,int hi,int dir,int first,int last) {
+  for(int shift=dir*16;;shift+=dir*16) {
+    int x0=lo+shift,x1=hi+shift;
+    if(dir<0 ? x1<=first : x0>=last) return true;
+    if(x0<first) x0=first;
+    if(x1>last) x1=last;
+    PicaQuad q={x0,y,x1,y+h,(x0-shift)*8,4096-(int)y*16,(x1-shift)*8,4096-(int)(y+h)*16,1,255,255,255,255};
+    if(!Emit(f,4+cfg,q)) return false;
+  }
+}
 static bool Compose(PicaFrame *f) {
   SelectBands(f,3,0,0);
   for(unsigned cfg=0;cfg<16;cfg++) for(unsigned y=0;y<f->height;) {
@@ -275,6 +312,17 @@ static bool Compose(PicaFrame *f) {
       int l=win.edges[i]+p->extraLeftRight,r=win.edges[i+1]+p->extraLeftRight;
       PicaQuad q={l,y,r,y+h,l*8,4096-(int)y*16,r*8,4096-(int)(y+h)*16,1,255,255,255,255};
       if(!Emit(f,4+cfg,q)) return false;
+      // Same as PpuDrawBackgrounds: repeat the outer 16 composed pixels of a
+      // room across its WIDE margins, using the flags of the edge span.
+      if(p->wideMarginRepeat && !p->forcedBlank) {
+        // Each window span repeats its own part of the edge strip, with its
+        // own composition flags, exactly as the CPU copies final pixels.
+        int left=win.edges[0]+p->extraLeftRight,right=win.edges[win.nr]+p->extraLeftRight;
+        int lo=IntMax(l,left),hi=IntMin(r,left+16);
+        if(left>0 && lo<hi && !EmitMargin(f,cfg,y,h,lo,hi,-1,0,left)) return false;
+        lo=IntMax(l,right-16);hi=IntMin(r,right);
+        if(right<(int)f->width && lo<hi && !EmitMargin(f,cfg,y,h,lo,hi,1,right,(int)f->width)) return false;
+      }
     }
     y+=h;
   }
@@ -331,7 +379,7 @@ bool PicaBuildFrame(PicaFrame *f) {
     if(p->mosaicEnabled && p->mosaicSize>1) {f->failure="mosaic";return false;}
     if(p->objSize>7 || p->extraLeftRight*2u+256u!=f->width) {f->failure="register-range";return false;}
   }
-  return Backgrounds(f,0) && Objects(f,0) && Backgrounds(f,1) && Objects(f,1) && Compose(f);
+  return Backgrounds(f,0) && Objects(f,0) && Backgrounds(f,1) && Objects(f,1) && Compose(f) && WideUi(f);
 }
 uint16_t PicaComposeRgb5(uint16_t main,uint16_t sub,bool eligible,bool sub_pixel,unsigned flags) {
   uint16_t out=0;

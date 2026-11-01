@@ -1,0 +1,565 @@
+# location_registry.yaml — Phase A location ID registry
+#
+# Per `randomizer-logic / Location and region model with stable IDs` and
+# tasks.md §3.1. Source-of-truth for `#define LOC_<Name> <numeric_id>` in
+# the generated `src/rando/location_ids.h`.
+#
+# Discipline:
+# - IDs are append-only. Removed locations keep their slot with `deprecated: true`.
+# - Renaming a location does not change its numeric ID.
+# - The ID is the source of truth for placements, spoilers, and embedded
+#   save tables — embedded placement tables in saves reference these IDs.
+# - Changing any ID is a `kGeneratorVersion` bump trigger (tasks.md §13.6).
+# - Each entry cites its ALTTPR PHP source per audit §0.10.1 attribution
+#   discipline.
+#
+# Enumeration follows audit §0.3.5 catalog (216 entries total).
+#
+# Notes on world_state_filter:
+# - Omit field for locations present in all four world-states (the common case).
+# - Inverted-only locations: `world_state_filter: [inverted]`.
+# - Conditional locations (Pyramid Fairy Left/Right, etc.): documented in
+#   notes; Phase A treats as always-present per audit §0.3.5.
+
+format_version: 1
+phase: A
+
+locations:
+  # ===========================================================================
+  # Hyrule Castle Escape (IDs 0..10)
+  # ===========================================================================
+  - { id: 0,  name: "Sanctuary",                              region: HyruleCastleEscape, type: Chest, vanilla_item: BossHeartContainer, source: "app/Region/Standard/HyruleCastleEscape.php:41" }
+  - { id: 1,  name: "Sewers - Secret Room - Left",            region: HyruleCastleEscape, type: Chest, vanilla_item: Rupee100,        source: "app/Region/Standard/HyruleCastleEscape.php:42" }
+  - { id: 2,  name: "Sewers - Secret Room - Middle",          region: HyruleCastleEscape, type: Chest, vanilla_item: Rupee100,        source: "app/Region/Standard/HyruleCastleEscape.php:43" }
+  - { id: 3,  name: "Sewers - Secret Room - Right",           region: HyruleCastleEscape, type: Chest, vanilla_item: Rupee100,        source: "app/Region/Standard/HyruleCastleEscape.php:44" }
+  - { id: 4,  name: "Sewers - Dark Cross",                    region: HyruleCastleEscape, type: Chest, vanilla_item: SmallKey_HyruleCastleEscape, source: "app/Region/Standard/HyruleCastleEscape.php:45" }
+  - { id: 5,  name: "Hyrule Castle - Boomerang Chest",        region: HyruleCastleEscape, type: Chest, vanilla_item: BlueBoomerang,   source: "app/Region/Standard/HyruleCastleEscape.php:46" }
+  - { id: 6,  name: "Hyrule Castle - Map Chest",              region: HyruleCastleEscape, type: Chest, vanilla_item: Map_HyruleCastleEscape, source: "app/Region/Standard/HyruleCastleEscape.php:47", notes: "ALTTPR vanilla is map; this codebase has no Map_HCE id — placeholder reservation, may be replaced with Rupee or other vanilla-fallback when 3.3 logic.yaml authors confirm." }
+  - { id: 7,  name: "Hyrule Castle - Zelda's Cell",           region: HyruleCastleEscape, type: Chest, vanilla_item: Rupee20,         source: "app/Region/Standard/HyruleCastleEscape.php:48" }
+  - { id: 8,  name: "Link's Uncle",                           region: LinksHouse,         type: Npc,   vanilla_item: L1Sword,         source: "app/Region/Standard/HyruleCastleEscape.php:49" }
+  - { id: 9,  name: "Secret Passage",                         region: HyruleCastleEscape, type: Chest, vanilla_item: Rupee100,        source: "app/Region/Standard/HyruleCastleEscape.php:50" }
+  - { id: 10, name: "Zelda",                                  region: HyruleCastleEscape, type: Prize_Event, vanilla_item: RescuedZelda, source: "app/Region/Standard/HyruleCastleEscape.php:51", notes: "Prize event — virtual item RescuedZelda granted on sanctuary escort completion." }
+
+  # ===========================================================================
+  # Eastern Palace (IDs 11..17)
+  # ===========================================================================
+  - { id: 11, name: "Eastern Palace - Compass Chest",         region: EasternPalace, type: Chest,        vanilla_item: Compass_EasternPalace, source: "app/Region/Standard/EasternPalace.php:51" }
+  - { id: 12, name: "Eastern Palace - Big Chest",             region: EasternPalace, type: BigChest,     vanilla_item: Bow,                    source: "app/Region/Standard/EasternPalace.php:52" }
+  - { id: 13, name: "Eastern Palace - Cannonball Chest",      region: EasternPalace, type: Chest,        vanilla_item: Rupee100,              source: "app/Region/Standard/EasternPalace.php:53" }
+  - { id: 14, name: "Eastern Palace - Big Key Chest",         region: EasternPalace, type: Chest,        vanilla_item: BigKey_EasternPalace,  source: "app/Region/Standard/EasternPalace.php:54" }
+  - { id: 15, name: "Eastern Palace - Map Chest",             region: EasternPalace, type: Chest,        vanilla_item: Map_EasternPalace,     source: "app/Region/Standard/EasternPalace.php:55" }
+  - { id: 16, name: "Eastern Palace - Boss",                  region: EasternPalace, type: Drop,         vanilla_item: BossHeartContainer,    source: "app/Region/Standard/EasternPalace.php:56" }
+  - { id: 17, name: "Eastern Palace - Prize",                 region: EasternPalace, type: Prize_Pendant, vanilla_item: Prize_GreenPendant,   source: "app/Region/Standard/EasternPalace.php:58" }
+
+  # ===========================================================================
+  # Desert Palace (IDs 18..24)
+  # ===========================================================================
+  - { id: 18, name: "Desert Palace - Big Chest",              region: DesertPalace, type: BigChest, vanilla_item: PowerGlove,            source: "app/Region/Standard/DesertPalace.php:55" }
+  - { id: 19, name: "Desert Palace - Map Chest",              region: DesertPalace, type: Chest,    vanilla_item: Map_DesertPalace,      source: "app/Region/Standard/DesertPalace.php:56" }
+  - { id: 20, name: "Desert Palace - Torch",                  region: DesertPalace, type: Dash,     vanilla_item: SmallKey_DesertPalace, source: "app/Region/Standard/DesertPalace.php:57" }
+  - { id: 21, name: "Desert Palace - Big Key Chest",          region: DesertPalace, type: Chest,    vanilla_item: BigKey_DesertPalace,   source: "app/Region/Standard/DesertPalace.php:58" }
+  - { id: 22, name: "Desert Palace - Compass Chest",          region: DesertPalace, type: Chest,    vanilla_item: Compass_DesertPalace,  source: "app/Region/Standard/DesertPalace.php:59" }
+  - { id: 23, name: "Desert Palace - Boss",                   region: DesertPalace, type: Drop,     vanilla_item: BossHeartContainer,    source: "app/Region/Standard/DesertPalace.php:60" }
+  - { id: 24, name: "Desert Palace - Prize",                  region: DesertPalace, type: Prize_Pendant, vanilla_item: Prize_RedPendant, source: "app/Region/Standard/DesertPalace.php:62" }
+
+  # ===========================================================================
+  # Tower of Hera (IDs 25..31)
+  # ===========================================================================
+  - { id: 25, name: "Tower of Hera - Big Key Chest",          region: TowerOfHera, type: Chest,    vanilla_item: BigKey_TowerOfHera,    source: "app/Region/Standard/TowerOfHera.php:53" }
+  - { id: 26, name: "Tower of Hera - Basement Cage",          region: TowerOfHera, type: Standing, vanilla_item: SmallKey_TowerOfHera,  source: "app/Region/Standard/TowerOfHera.php:54", notes: "Standing\\HeraBasement type — non-chest pickup; new §6 instrumentation required." }
+  - { id: 27, name: "Tower of Hera - Map Chest",              region: TowerOfHera, type: Chest,    vanilla_item: Map_TowerOfHera,       source: "app/Region/Standard/TowerOfHera.php:55" }
+  - { id: 28, name: "Tower of Hera - Compass Chest",          region: TowerOfHera, type: Chest,    vanilla_item: Compass_TowerOfHera,   source: "app/Region/Standard/TowerOfHera.php:56" }
+  - { id: 29, name: "Tower of Hera - Big Chest",              region: TowerOfHera, type: BigChest, vanilla_item: MoonPearl,             source: "app/Region/Standard/TowerOfHera.php:57" }
+  - { id: 30, name: "Tower of Hera - Boss",                   region: TowerOfHera, type: Drop,     vanilla_item: BossHeartContainer,    source: "app/Region/Standard/TowerOfHera.php:58" }
+  - { id: 31, name: "Tower of Hera - Prize",                  region: TowerOfHera, type: Prize_Pendant, vanilla_item: Prize_BluePendant, source: "app/Region/Standard/TowerOfHera.php:60" }
+
+  # ===========================================================================
+  # Hyrule Castle Tower (IDs 32..34)
+  # ===========================================================================
+  - { id: 32, name: "Castle Tower - Room 03",                 region: HyruleCastleTower, type: Chest,       vanilla_item: SmallKey_HyruleCastleTower, source: "app/Region/Standard/HyruleCastleTower.php:41" }
+  - { id: 33, name: "Castle Tower - Dark Maze",               region: HyruleCastleTower, type: Chest,       vanilla_item: SmallKey_HyruleCastleTower, source: "app/Region/Standard/HyruleCastleTower.php:42" }
+  - { id: 34, name: "Agahnim",                                region: HyruleCastleTower, type: Prize_Event, vanilla_item: DefeatAgahnim,             source: "app/Region/Standard/HyruleCastleTower.php:43", notes: "Prize event — virtual item DefeatAgahnim granted on KillAghanim_Func12 (misc.c:313)." }
+
+  # ===========================================================================
+  # Palace of Darkness (IDs 35..49)
+  # ===========================================================================
+  - { id: 35, name: "Palace of Darkness - Shooter Room",      region: PalaceOfDarkness, type: Chest,    vanilla_item: Arrow10,                source: "app/Region/Standard/PalaceOfDarkness.php:50" }
+  - { id: 36, name: "Palace of Darkness - Big Key Chest",     region: PalaceOfDarkness, type: Chest,    vanilla_item: BigKey_PalaceOfDarkness, source: "app/Region/Standard/PalaceOfDarkness.php:51" }
+  - { id: 37, name: "Palace of Darkness - The Arena - Ledge", region: PalaceOfDarkness, type: Chest,    vanilla_item: SmallKey_PalaceOfDarkness, source: "app/Region/Standard/PalaceOfDarkness.php:52" }
+  - { id: 38, name: "Palace of Darkness - The Arena - Bridge", region: PalaceOfDarkness, type: Chest,   vanilla_item: SmallKey_PalaceOfDarkness, source: "app/Region/Standard/PalaceOfDarkness.php:53" }
+  - { id: 39, name: "Palace of Darkness - Stalfos Basement",  region: PalaceOfDarkness, type: Chest,    vanilla_item: SmallKey_PalaceOfDarkness, source: "app/Region/Standard/PalaceOfDarkness.php:54" }
+  - { id: 40, name: "Palace of Darkness - Map Chest",         region: PalaceOfDarkness, type: Chest,    vanilla_item: Map_PalaceOfDarkness,   source: "app/Region/Standard/PalaceOfDarkness.php:55" }
+  - { id: 41, name: "Palace of Darkness - Big Chest",         region: PalaceOfDarkness, type: BigChest, vanilla_item: Hammer,                 source: "app/Region/Standard/PalaceOfDarkness.php:56" }
+  - { id: 42, name: "Palace of Darkness - Compass Chest",     region: PalaceOfDarkness, type: Chest,    vanilla_item: Compass_PalaceOfDarkness, source: "app/Region/Standard/PalaceOfDarkness.php:57" }
+  - { id: 43, name: "Palace of Darkness - Harmless Hellway",  region: PalaceOfDarkness, type: Chest,    vanilla_item: Rupee100,               source: "app/Region/Standard/PalaceOfDarkness.php:58" }
+  - { id: 44, name: "Palace of Darkness - Dark Basement - Left",  region: PalaceOfDarkness, type: Chest, vanilla_item: SmallKey_PalaceOfDarkness, source: "app/Region/Standard/PalaceOfDarkness.php:59" }
+  - { id: 45, name: "Palace of Darkness - Dark Basement - Right", region: PalaceOfDarkness, type: Chest, vanilla_item: SmallKey_PalaceOfDarkness, source: "app/Region/Standard/PalaceOfDarkness.php:60" }
+  - { id: 46, name: "Palace of Darkness - Dark Maze - Top",   region: PalaceOfDarkness, type: Chest,    vanilla_item: SmallKey_PalaceOfDarkness, source: "app/Region/Standard/PalaceOfDarkness.php:61" }
+  - { id: 47, name: "Palace of Darkness - Dark Maze - Bottom", region: PalaceOfDarkness, type: Chest,   vanilla_item: Rupee100,               source: "app/Region/Standard/PalaceOfDarkness.php:62" }
+  - { id: 48, name: "Palace of Darkness - Boss",              region: PalaceOfDarkness, type: Drop,     vanilla_item: BossHeartContainer,     source: "app/Region/Standard/PalaceOfDarkness.php:63" }
+  - { id: 49, name: "Palace of Darkness - Prize",             region: PalaceOfDarkness, type: Prize_Crystal, vanilla_item: Prize_Crystal1,    source: "app/Region/Standard/PalaceOfDarkness.php:65", notes: "Vanilla = Crystal 1 per ALTTPR; prize-shuffle reassigns." }
+
+  # ===========================================================================
+  # Swamp Palace (IDs 50..60)
+  # ===========================================================================
+  - { id: 50, name: "Swamp Palace - Entrance",                region: SwampPalace, type: Chest,        vanilla_item: SmallKey_SwampPalace, source: "app/Region/Standard/SwampPalace.php:50" }
+  - { id: 51, name: "Swamp Palace - Big Chest",               region: SwampPalace, type: BigChest,     vanilla_item: Hookshot,             source: "app/Region/Standard/SwampPalace.php:51" }
+  - { id: 52, name: "Swamp Palace - Big Key Chest",           region: SwampPalace, type: Chest,        vanilla_item: BigKey_SwampPalace,   source: "app/Region/Standard/SwampPalace.php:52" }
+  - { id: 53, name: "Swamp Palace - Map Chest",               region: SwampPalace, type: Chest,        vanilla_item: Map_SwampPalace,      source: "app/Region/Standard/SwampPalace.php:53" }
+  - { id: 54, name: "Swamp Palace - West Chest",              region: SwampPalace, type: Chest,        vanilla_item: Rupee100,             source: "app/Region/Standard/SwampPalace.php:54" }
+  - { id: 55, name: "Swamp Palace - Compass Chest",           region: SwampPalace, type: Chest,        vanilla_item: Compass_SwampPalace,  source: "app/Region/Standard/SwampPalace.php:55" }
+  - { id: 56, name: "Swamp Palace - Flooded Room - Left",     region: SwampPalace, type: Chest,        vanilla_item: Rupee100,             source: "app/Region/Standard/SwampPalace.php:56" }
+  - { id: 57, name: "Swamp Palace - Flooded Room - Right",    region: SwampPalace, type: Chest,        vanilla_item: Rupee100,             source: "app/Region/Standard/SwampPalace.php:57" }
+  - { id: 58, name: "Swamp Palace - Waterfall Room",          region: SwampPalace, type: Chest,        vanilla_item: Rupee100,             source: "app/Region/Standard/SwampPalace.php:58" }
+  - { id: 59, name: "Swamp Palace - Boss",                    region: SwampPalace, type: Drop,         vanilla_item: BossHeartContainer,   source: "app/Region/Standard/SwampPalace.php:59" }
+  - { id: 60, name: "Swamp Palace - Prize",                   region: SwampPalace, type: Prize_Crystal, vanilla_item: Prize_Crystal2,      source: "app/Region/Standard/SwampPalace.php:61" }
+
+  # ===========================================================================
+  # Skull Woods (IDs 61..69)
+  # ===========================================================================
+  - { id: 61, name: "Skull Woods - Big Chest",                region: SkullWoods, type: BigChest,     vanilla_item: FireRod,             source: "app/Region/Standard/SkullWoods.php:57" }
+  - { id: 62, name: "Skull Woods - Big Key Chest",            region: SkullWoods, type: Chest,        vanilla_item: BigKey_SkullWoods,   source: "app/Region/Standard/SkullWoods.php:58" }
+  - { id: 63, name: "Skull Woods - Compass Chest",            region: SkullWoods, type: Chest,        vanilla_item: Compass_SkullWoods,  source: "app/Region/Standard/SkullWoods.php:59" }
+  - { id: 64, name: "Skull Woods - Map Chest",                region: SkullWoods, type: Chest,        vanilla_item: Map_SkullWoods,      source: "app/Region/Standard/SkullWoods.php:60" }
+  - { id: 65, name: "Skull Woods - Bridge Room",              region: SkullWoods, type: Chest,        vanilla_item: SmallKey_SkullWoods, source: "app/Region/Standard/SkullWoods.php:61" }
+  - { id: 66, name: "Skull Woods - Pot Prison",               region: SkullWoods, type: Chest,        vanilla_item: SmallKey_SkullWoods, source: "app/Region/Standard/SkullWoods.php:62" }
+  - { id: 67, name: "Skull Woods - Pinball Room",             region: SkullWoods, type: Chest,        vanilla_item: SmallKey_SkullWoods, source: "app/Region/Standard/SkullWoods.php:63" }
+  - { id: 68, name: "Skull Woods - Boss",                     region: SkullWoods, type: Drop,         vanilla_item: BossHeartContainer,  source: "app/Region/Standard/SkullWoods.php:64" }
+  - { id: 69, name: "Skull Woods - Prize",                    region: SkullWoods, type: Prize_Crystal, vanilla_item: Prize_Crystal3,     source: "app/Region/Standard/SkullWoods.php:66" }
+
+  # ===========================================================================
+  # Thieves' Town (IDs 70..78)
+  # ===========================================================================
+  - { id: 70, name: "Thieves' Town - Attic",                  region: ThievesTown, type: Chest,        vanilla_item: Rupee100,            source: "app/Region/Standard/ThievesTown.php:50" }
+  - { id: 71, name: "Thieves' Town - Big Key Chest",          region: ThievesTown, type: Chest,        vanilla_item: BigKey_ThievesTown,  source: "app/Region/Standard/ThievesTown.php:51" }
+  - { id: 72, name: "Thieves' Town - Map Chest",              region: ThievesTown, type: Chest,        vanilla_item: Map_ThievesTown,     source: "app/Region/Standard/ThievesTown.php:52" }
+  - { id: 73, name: "Thieves' Town - Compass Chest",          region: ThievesTown, type: Chest,        vanilla_item: Compass_ThievesTown, source: "app/Region/Standard/ThievesTown.php:53" }
+  - { id: 74, name: "Thieves' Town - Ambush Chest",           region: ThievesTown, type: Chest,        vanilla_item: Rupee100,            source: "app/Region/Standard/ThievesTown.php:54" }
+  - { id: 75, name: "Thieves' Town - Big Chest",              region: ThievesTown, type: BigChest,     vanilla_item: TitanMitt,           source: "app/Region/Standard/ThievesTown.php:55" }
+  - { id: 76, name: "Thieves' Town - Blind's Cell",           region: ThievesTown, type: Chest,        vanilla_item: SmallKey_ThievesTown, source: "app/Region/Standard/ThievesTown.php:56" }
+  - { id: 77, name: "Thieves' Town - Boss",                   region: ThievesTown, type: Drop,         vanilla_item: BossHeartContainer,  source: "app/Region/Standard/ThievesTown.php:57" }
+  - { id: 78, name: "Thieves' Town - Prize",                  region: ThievesTown, type: Prize_Crystal, vanilla_item: Prize_Crystal4,     source: "app/Region/Standard/ThievesTown.php:59" }
+
+  # ===========================================================================
+  # Ice Palace (IDs 79..87)
+  # ===========================================================================
+  - { id: 79, name: "Ice Palace - Big Key Chest",             region: IcePalace, type: Chest,        vanilla_item: BigKey_IcePalace,  source: "app/Region/Standard/IcePalace.php:50" }
+  - { id: 80, name: "Ice Palace - Compass Chest",             region: IcePalace, type: Chest,        vanilla_item: Compass_IcePalace, source: "app/Region/Standard/IcePalace.php:51" }
+  - { id: 81, name: "Ice Palace - Map Chest",                 region: IcePalace, type: Chest,        vanilla_item: Map_IcePalace,     source: "app/Region/Standard/IcePalace.php:52" }
+  - { id: 82, name: "Ice Palace - Spike Room",                region: IcePalace, type: Chest,        vanilla_item: Rupee100,          source: "app/Region/Standard/IcePalace.php:53" }
+  - { id: 83, name: "Ice Palace - Freezor Chest",             region: IcePalace, type: Chest,        vanilla_item: Rupee100,          source: "app/Region/Standard/IcePalace.php:54" }
+  - { id: 84, name: "Ice Palace - Iced T Room",               region: IcePalace, type: Chest,        vanilla_item: SmallKey_IcePalace, source: "app/Region/Standard/IcePalace.php:55" }
+  - { id: 85, name: "Ice Palace - Big Chest",                 region: IcePalace, type: BigChest,     vanilla_item: BlueMail,          source: "app/Region/Standard/IcePalace.php:56" }
+  - { id: 86, name: "Ice Palace - Boss",                      region: IcePalace, type: Drop,         vanilla_item: BossHeartContainer, source: "app/Region/Standard/IcePalace.php:57" }
+  - { id: 87, name: "Ice Palace - Prize",                     region: IcePalace, type: Prize_Crystal, vanilla_item: Prize_Crystal5,   source: "app/Region/Standard/IcePalace.php:59" }
+
+  # ===========================================================================
+  # Misery Mire (IDs 88..96)
+  # ===========================================================================
+  - { id: 88, name: "Misery Mire - Big Chest",                region: MiseryMire, type: BigChest, vanilla_item: CaneOfSomaria,        source: "app/Region/Standard/MiseryMire.php:50" }
+  - { id: 89, name: "Misery Mire - Main Lobby",               region: MiseryMire, type: Chest,    vanilla_item: SmallKey_MiseryMire,  source: "app/Region/Standard/MiseryMire.php:51" }
+  - { id: 90, name: "Misery Mire - Big Key Chest",            region: MiseryMire, type: Chest,    vanilla_item: BigKey_MiseryMire,    source: "app/Region/Standard/MiseryMire.php:52" }
+  - { id: 91, name: "Misery Mire - Compass Chest",            region: MiseryMire, type: Chest,    vanilla_item: Compass_MiseryMire,   source: "app/Region/Standard/MiseryMire.php:53" }
+  - { id: 92, name: "Misery Mire - Bridge Chest",             region: MiseryMire, type: Chest,    vanilla_item: SmallKey_MiseryMire,  source: "app/Region/Standard/MiseryMire.php:54" }
+  - { id: 93, name: "Misery Mire - Map Chest",                region: MiseryMire, type: Chest,    vanilla_item: Map_MiseryMire,       source: "app/Region/Standard/MiseryMire.php:55" }
+  - { id: 94, name: "Misery Mire - Spike Chest",              region: MiseryMire, type: Chest,    vanilla_item: SmallKey_MiseryMire,  source: "app/Region/Standard/MiseryMire.php:56" }
+  - { id: 95, name: "Misery Mire - Boss",                     region: MiseryMire, type: Drop,     vanilla_item: BossHeartContainer,   source: "app/Region/Standard/MiseryMire.php:57" }
+  - { id: 96, name: "Misery Mire - Prize",                    region: MiseryMire, type: Prize_Crystal, vanilla_item: Prize_Crystal6,  source: "app/Region/Standard/MiseryMire.php:59" }
+
+  # ===========================================================================
+  # Turtle Rock (IDs 97..109)
+  # ===========================================================================
+  - { id: 97,  name: "Turtle Rock - Chain Chomps",            region: TurtleRock, type: Chest,    vanilla_item: SmallKey_TurtleRock, source: "app/Region/Standard/TurtleRock.php:60" }
+  - { id: 98,  name: "Turtle Rock - Compass Chest",           region: TurtleRock, type: Chest,    vanilla_item: Compass_TurtleRock,  source: "app/Region/Standard/TurtleRock.php:61" }
+  - { id: 99,  name: "Turtle Rock - Roller Room - Left",      region: TurtleRock, type: Chest,    vanilla_item: Rupee100,            source: "app/Region/Standard/TurtleRock.php:62" }
+  - { id: 100, name: "Turtle Rock - Roller Room - Right",     region: TurtleRock, type: Chest,    vanilla_item: Rupee100,            source: "app/Region/Standard/TurtleRock.php:63" }
+  - { id: 101, name: "Turtle Rock - Big Chest",               region: TurtleRock, type: BigChest, vanilla_item: MirrorShield,        source: "app/Region/Standard/TurtleRock.php:64" }
+  - { id: 102, name: "Turtle Rock - Big Key Chest",           region: TurtleRock, type: Chest,    vanilla_item: BigKey_TurtleRock,   source: "app/Region/Standard/TurtleRock.php:65" }
+  - { id: 103, name: "Turtle Rock - Crystaroller Room",       region: TurtleRock, type: Chest,    vanilla_item: SmallKey_TurtleRock, source: "app/Region/Standard/TurtleRock.php:66" }
+  - { id: 104, name: "Turtle Rock - Eye Bridge - Bottom Left",  region: TurtleRock, type: Chest, vanilla_item: Rupee100,            source: "app/Region/Standard/TurtleRock.php:67" }
+  - { id: 105, name: "Turtle Rock - Eye Bridge - Bottom Right", region: TurtleRock, type: Chest, vanilla_item: Rupee100,            source: "app/Region/Standard/TurtleRock.php:68" }
+  - { id: 106, name: "Turtle Rock - Eye Bridge - Top Left",   region: TurtleRock, type: Chest,    vanilla_item: SmallKey_TurtleRock, source: "app/Region/Standard/TurtleRock.php:69" }
+  - { id: 107, name: "Turtle Rock - Eye Bridge - Top Right",  region: TurtleRock, type: Chest,    vanilla_item: SmallKey_TurtleRock, source: "app/Region/Standard/TurtleRock.php:70" }
+  - { id: 108, name: "Turtle Rock - Boss",                    region: TurtleRock, type: Drop,     vanilla_item: BossHeartContainer,  source: "app/Region/Standard/TurtleRock.php:71" }
+  - { id: 109, name: "Turtle Rock - Prize",                   region: TurtleRock, type: Prize_Crystal, vanilla_item: Prize_Crystal7, source: "app/Region/Standard/TurtleRock.php:73" }
+
+  # ===========================================================================
+  # Ganon's Tower (IDs 110..137)
+  # ===========================================================================
+  - { id: 110, name: "Ganon's Tower - Bob's Torch",                       region: GanonsTower, type: Dash,    vanilla_item: SmallKey_GanonsTower, source: "app/Region/Standard/GanonsTower.php:53" }
+  - { id: 111, name: "Ganon's Tower - DMs Room - Top Left",               region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:54" }
+  - { id: 112, name: "Ganon's Tower - DMs Room - Top Right",              region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:55" }
+  - { id: 113, name: "Ganon's Tower - DMs Room - Bottom Left",            region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:56" }
+  - { id: 114, name: "Ganon's Tower - DMs Room - Bottom Right",           region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:57" }
+  - { id: 115, name: "Ganon's Tower - Randomizer Room - Top Left",        region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:58" }
+  - { id: 116, name: "Ganon's Tower - Randomizer Room - Top Right",       region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:59" }
+  - { id: 117, name: "Ganon's Tower - Randomizer Room - Bottom Left",     region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:60" }
+  - { id: 118, name: "Ganon's Tower - Randomizer Room - Bottom Right",    region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:61" }
+  - { id: 119, name: "Ganon's Tower - Firesnake Room",                    region: GanonsTower, type: Chest,   vanilla_item: SmallKey_GanonsTower, source: "app/Region/Standard/GanonsTower.php:62" }
+  - { id: 120, name: "Ganon's Tower - Map Chest",                         region: GanonsTower, type: Chest,   vanilla_item: Map_GanonsTower,      source: "app/Region/Standard/GanonsTower.php:63" }
+  - { id: 121, name: "Ganon's Tower - Big Chest",                         region: GanonsTower, type: BigChest, vanilla_item: RedMail,              source: "app/Region/Standard/GanonsTower.php:64" }
+  - { id: 122, name: "Ganon's Tower - Hope Room - Left",                  region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:65" }
+  - { id: 123, name: "Ganon's Tower - Hope Room - Right",                 region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:66" }
+  - { id: 124, name: "Ganon's Tower - Bob's Chest",                       region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:67" }
+  - { id: 125, name: "Ganon's Tower - Tile Room",                         region: GanonsTower, type: Chest,   vanilla_item: SmallKey_GanonsTower, source: "app/Region/Standard/GanonsTower.php:68" }
+  - { id: 126, name: "Ganon's Tower - Compass Room - Top Left",           region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:69" }
+  - { id: 127, name: "Ganon's Tower - Compass Room - Top Right",          region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:70" }
+  - { id: 128, name: "Ganon's Tower - Compass Room - Bottom Left",        region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:71" }
+  - { id: 129, name: "Ganon's Tower - Compass Room - Bottom Right",       region: GanonsTower, type: Chest,   vanilla_item: Compass_GanonsTower,  source: "app/Region/Standard/GanonsTower.php:72" }
+  - { id: 130, name: "Ganon's Tower - Big Key Chest",                     region: GanonsTower, type: Chest,   vanilla_item: BigKey_GanonsTower,   source: "app/Region/Standard/GanonsTower.php:73" }
+  - { id: 131, name: "Ganon's Tower - Big Key Room - Left",               region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:74" }
+  - { id: 132, name: "Ganon's Tower - Big Key Room - Right",              region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:75" }
+  - { id: 133, name: "Ganon's Tower - Mini Helmasaur Room - Left",        region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:76" }
+  - { id: 134, name: "Ganon's Tower - Mini Helmasaur Room - Right",       region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:77" }
+  - { id: 135, name: "Ganon's Tower - Pre-Moldorm Chest",                 region: GanonsTower, type: Chest,   vanilla_item: SmallKey_GanonsTower, source: "app/Region/Standard/GanonsTower.php:78" }
+  - { id: 136, name: "Ganon's Tower - Moldorm Chest",                     region: GanonsTower, type: Chest,   vanilla_item: Rupee100,             source: "app/Region/Standard/GanonsTower.php:79" }
+  - { id: 137, name: "Agahnim 2",                                         region: GanonsTower, type: Prize_Event, vanilla_item: DefeatAgahnim,    source: "app/Region/Standard/GanonsTower.php:80", notes: "Prize event — virtual item; transition into Module19_TriforceRoom is the trigger (no dedicated flag bit; see audit §0.4a Aga 2 entry)." }
+
+  # ===========================================================================
+  # Medallion-set slots (IDs 138..139) — not item placements, configuration
+  # ===========================================================================
+  - { id: 138, name: "Turtle Rock Medallion",                 region: MedallionConfig, type: Medallion, vanilla_item: Quake,  source: "app/Region/Standard/Medallions.php:30", notes: "Logic-affecting medallion setting; written by medallion-shuffle module at generation time, not by a §6 grant site." }
+  - { id: 139, name: "Misery Mire Medallion",                 region: MedallionConfig, type: Medallion, vanilla_item: Ether,  source: "app/Region/Standard/Medallions.php:31" }
+
+  # ===========================================================================
+  # Fountains (IDs 140..141) — RETIRED
+  # ===========================================================================
+  # ids 140\141 (Waterfall Bottle\Pyramid Bottle Fountain slots) RETIRED: ALTTPR
+  # EXCLUDES Fountain locations from the main fill (app/World.php:518,536) and
+  # pins a random bottle there via Randomizer::setFountains — they are the
+  # bottle-toss refill, not shuffle slots. The fork's pond runtime
+  # (Sprite_WishPond3, see change add-rando-fairy-chest-model) grants exactly
+  # TWO checks per fairy (Left/Right) on contact and has no toss, so these two
+  # slots had NO runtime grant site — anything placed there was uncollectable
+  # (unbeatable-seed risk). Each fairy pond keeps its two real checks:
+  # Waterfall Fairy - Left/Right (149/150), Pyramid Fairy - Left/Right (213/214).
+  # The id gap is harmless (ids are id-keyed).
+
+  # ===========================================================================
+  # Light World — North East (IDs 142..150)
+  # ===========================================================================
+  - { id: 142, name: "Sahasrahla's Hut - Left",               region: LightWorld_NorthEast, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/NorthEast.php:32" }
+  - { id: 143, name: "Sahasrahla's Hut - Middle",             region: LightWorld_NorthEast, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/NorthEast.php:33" }
+  - { id: 144, name: "Sahasrahla's Hut - Right",              region: LightWorld_NorthEast, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/NorthEast.php:34" }
+  - { id: 145, name: "Sahasrahla",                            region: LightWorld_NorthEast, type: Npc,      vanilla_item: Boots,       source: "app/Region/Standard/LightWorld/NorthEast.php:35" }
+  - { id: 146, name: "King Zora",                             region: LightWorld_NorthEast, type: Npc,      vanilla_item: Flippers,    source: "app/Region/Standard/LightWorld/NorthEast.php:36" }
+  - { id: 147, name: "Potion Shop",                           region: LightWorld_NorthEast, type: Npc,      vanilla_item: MagicPowder, source: "app/Region/Standard/LightWorld/NorthEast.php:37" }
+  - { id: 148, name: "Zora's Ledge",                          region: LightWorld_NorthEast, type: Standing, vanilla_item: Flippers,    source: "app/Region/Standard/LightWorld/NorthEast.php:38" }
+  - { id: 149, name: "Waterfall Fairy - Left",                region: LightWorld_NorthEast, type: Chest,    vanilla_item: RedShield,   source: "app/Region/Standard/LightWorld/NorthEast.php:39" }
+  - { id: 150, name: "Waterfall Fairy - Right",               region: LightWorld_NorthEast, type: Chest,    vanilla_item: BottleEmpty, source: "app/Region/Standard/LightWorld/NorthEast.php:40" }
+
+  # ===========================================================================
+  # Light World — North West (IDs 151..172)
+  # ===========================================================================
+  - { id: 151, name: "Master Sword Pedestal",                 region: LightWorld_NorthWest, type: Pedestal, vanilla_item: L2Sword,     source: "app/Region/Standard/LightWorld/NorthWest.php:32" }
+  - { id: 152, name: "King's Tomb",                           region: LightWorld_NorthWest, type: Chest,    vanilla_item: Cape,        source: "app/Region/Standard/LightWorld/NorthWest.php:33" }
+  - { id: 153, name: "Kakariko Tavern",                       region: LightWorld_NorthWest, type: Chest,    vanilla_item: Bombs3,      source: "app/Region/Standard/LightWorld/NorthWest.php:34" }
+  - { id: 154, name: "Chicken House",                         region: LightWorld_NorthWest, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/NorthWest.php:35" }
+  - { id: 155, name: "Kakariko Well - Top",                   region: LightWorld_NorthWest, type: Chest,    vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/NorthWest.php:36" }
+  - { id: 156, name: "Kakariko Well - Left",                  region: LightWorld_NorthWest, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/NorthWest.php:37" }
+  - { id: 157, name: "Kakariko Well - Middle",                region: LightWorld_NorthWest, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/NorthWest.php:38" }
+  - { id: 158, name: "Kakariko Well - Right",                 region: LightWorld_NorthWest, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/NorthWest.php:39" }
+  - { id: 159, name: "Kakariko Well - Bottom",                region: LightWorld_NorthWest, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/NorthWest.php:40" }
+  - { id: 160, name: "Blind's Hideout - Top",                 region: LightWorld_NorthWest, type: Chest,    vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/NorthWest.php:41" }
+  - { id: 161, name: "Blind's Hideout - Left",                region: LightWorld_NorthWest, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/NorthWest.php:42" }
+  - { id: 162, name: "Blind's Hideout - Right",               region: LightWorld_NorthWest, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/NorthWest.php:43" }
+  - { id: 163, name: "Blind's Hideout - Far Left",            region: LightWorld_NorthWest, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/NorthWest.php:44" }
+  - { id: 164, name: "Blind's Hideout - Far Right",           region: LightWorld_NorthWest, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/NorthWest.php:45" }
+  - { id: 165, name: "Pegasus Rocks",                         region: LightWorld_NorthWest, type: Chest,    vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/NorthWest.php:46", notes: "Marked Chest type by ALTTPR but the actual interaction is a dash-rock pickup; verify vanilla item during §6.5." }
+  - { id: 166, name: "Bottle Merchant",                       region: LightWorld_NorthWest, type: Npc,      vanilla_item: BottleEmpty, source: "app/Region/Standard/LightWorld/NorthWest.php:47" }
+  - { id: 167, name: "Magic Bat",                             region: LightWorld_NorthWest, type: Npc,      vanilla_item: HalfMagic, source: "app/Region/Standard/LightWorld/NorthWest.php:48", notes: "Magic Bat grants HalfMagic via direct write to link_magic_consumption at sprite_main.c (Sprite_F0_MagicBat case 3 'DoublePlayerMagicPower'); requires MagicPowder thrown at it to activate. Audit NEW-3 fix: prior 'MagicPowder' was the requirement, not the grant — MagicPowder itself is at the Witch's Hut shop." }
+  - { id: 168, name: "Sick Kid",                              region: LightWorld_NorthWest, type: Npc,      vanilla_item: BugCatchingNet, source: "app/Region/Standard/LightWorld/NorthWest.php:49" }
+  - { id: 169, name: "Lost Woods Hideout",                    region: LightWorld_NorthWest, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/NorthWest.php:50" }
+  - { id: 170, name: "Lumberjack Tree",                       region: LightWorld_NorthWest, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/NorthWest.php:51" }
+  - { id: 171, name: "Graveyard Ledge",                       region: LightWorld_NorthWest, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/NorthWest.php:52" }
+  - { id: 172, name: "Mushroom",                              region: LightWorld_NorthWest, type: Standing, vanilla_item: Mushroom,    source: "app/Region/Standard/LightWorld/NorthWest.php:53" }
+
+  # ===========================================================================
+  # Light World — South (IDs 173..191)
+  # ===========================================================================
+  - { id: 173, name: "Floodgate Chest",                       region: LightWorld_South, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/South.php:32" }
+  - { id: 174, name: "Link's House",                          region: LightWorld_South, type: Chest,    vanilla_item: Bombs3,      source: "app/Region/Standard/LightWorld/South.php:33", notes: "In Inverted, re-located to DarkWorld/South.php:31 — handled by world_state_filter on the region." }
+  - { id: 175, name: "Aginah's Cave",                         region: LightWorld_South, type: Chest,    vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/South.php:34" }
+  - { id: 176, name: "Mini Moldorm Cave - Far Left",          region: LightWorld_South, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/South.php:35" }
+  - { id: 177, name: "Mini Moldorm Cave - Left",              region: LightWorld_South, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/South.php:36" }
+  - { id: 178, name: "Mini Moldorm Cave - Right",             region: LightWorld_South, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/South.php:37" }
+  - { id: 179, name: "Mini Moldorm Cave - Far Right",         region: LightWorld_South, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/LightWorld/South.php:38" }
+  - { id: 180, name: "Ice Rod Cave",                          region: LightWorld_South, type: Chest,    vanilla_item: IceRod,      source: "app/Region/Standard/LightWorld/South.php:39" }
+  - { id: 181, name: "Hobo",                                  region: LightWorld_South, type: Npc,      vanilla_item: BottleEmpty, source: "app/Region/Standard/LightWorld/South.php:40" }
+  - { id: 182, name: "Bombos Tablet",                         region: LightWorld_South, type: Drop,     vanilla_item: Bombos,      source: "app/Region/Standard/LightWorld/South.php:41" }
+  - { id: 183, name: "Cave 45",                               region: LightWorld_South, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/South.php:42" }
+  - { id: 184, name: "Checkerboard Cave",                     region: LightWorld_South, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/South.php:43" }
+  - { id: 185, name: "Mini Moldorm Cave - NPC",               region: LightWorld_South, type: Npc,      vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/South.php:44" }
+  - { id: 186, name: "Library",                               region: LightWorld_South, type: Dash,     vanilla_item: BookOfMudora, source: "app/Region/Standard/LightWorld/South.php:45" }
+  - { id: 187, name: "Maze Race",                             region: LightWorld_South, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/South.php:46" }
+  - { id: 188, name: "Desert Ledge",                          region: LightWorld_South, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/South.php:47" }
+  - { id: 189, name: "Lake Hylia Island",                     region: LightWorld_South, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/South.php:48" }
+  - { id: 190, name: "Sunken Treasure",                       region: LightWorld_South, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/South.php:49" }
+  - { id: 191, name: "Flute Spot",                            region: LightWorld_South, type: Dig,      vanilla_item: OcarinaInactive, source: "app/Region/Standard/LightWorld/South.php:50" }
+
+  # ===========================================================================
+  # Light World — Death Mountain West (IDs 192..195)
+  # ===========================================================================
+  - { id: 192, name: "Old Man",                               region: LightWorld_DeathMountain_West, type: Npc,      vanilla_item: MagicMirror, source: "app/Region/Standard/LightWorld/DeathMountain/West.php:30" }
+  - { id: 193, name: "Spectacle Rock Cave",                   region: LightWorld_DeathMountain_West, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/DeathMountain/West.php:31" }
+  - { id: 194, name: "Ether Tablet",                          region: LightWorld_DeathMountain_West, type: Drop,     vanilla_item: Ether,        source: "app/Region/Standard/LightWorld/DeathMountain/West.php:32", notes: "Inverted re-adds at LightWorld/DeathMountain/East.php:25 (same ID — world_state_filter on region handles routing)." }
+  - { id: 195, name: "Spectacle Rock",                        region: LightWorld_DeathMountain_West, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/DeathMountain/West.php:33" }
+
+  # ===========================================================================
+  # Light World — Death Mountain East (IDs 196..205)
+  # ===========================================================================
+  - { id: 196, name: "Spiral Cave",                           region: LightWorld_DeathMountain_East, type: Chest,    vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/DeathMountain/East.php:32" }
+  - { id: 197, name: "Mimic Cave",                            region: LightWorld_DeathMountain_East, type: Chest,    vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/DeathMountain/East.php:33" }
+  - { id: 198, name: "Paradox Cave Lower - Far Left",         region: LightWorld_DeathMountain_East, type: Chest,    vanilla_item: Rupee100,     source: "app/Region/Standard/LightWorld/DeathMountain/East.php:34" }
+  - { id: 199, name: "Paradox Cave Lower - Left",             region: LightWorld_DeathMountain_East, type: Chest,    vanilla_item: Rupee100,     source: "app/Region/Standard/LightWorld/DeathMountain/East.php:35" }
+  - { id: 200, name: "Paradox Cave Lower - Right",            region: LightWorld_DeathMountain_East, type: Chest,    vanilla_item: Rupee100,     source: "app/Region/Standard/LightWorld/DeathMountain/East.php:36" }
+  - { id: 201, name: "Paradox Cave Lower - Far Right",        region: LightWorld_DeathMountain_East, type: Chest,    vanilla_item: Rupee100,     source: "app/Region/Standard/LightWorld/DeathMountain/East.php:37" }
+  - { id: 202, name: "Paradox Cave Lower - Middle",           region: LightWorld_DeathMountain_East, type: Chest,    vanilla_item: Rupee100,     source: "app/Region/Standard/LightWorld/DeathMountain/East.php:38" }
+  - { id: 203, name: "Paradox Cave Upper - Left",             region: LightWorld_DeathMountain_East, type: Chest,    vanilla_item: Rupee100,     source: "app/Region/Standard/LightWorld/DeathMountain/East.php:39" }
+  - { id: 204, name: "Paradox Cave Upper - Right",            region: LightWorld_DeathMountain_East, type: Chest,    vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/DeathMountain/East.php:40" }
+  - { id: 205, name: "Floating Island",                       region: LightWorld_DeathMountain_East, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/LightWorld/DeathMountain/East.php:41" }
+
+  # ===========================================================================
+  # Dark World — Mire (IDs 206..207)
+  # ===========================================================================
+  - { id: 206, name: "Mire Shed - Left",                      region: DarkWorld_Mire, type: Chest, vanilla_item: Rupee100,    source: "app/Region/Standard/DarkWorld/Mire.php:32" }
+  - { id: 207, name: "Mire Shed - Right",                     region: DarkWorld_Mire, type: Chest, vanilla_item: PieceOfHeart, source: "app/Region/Standard/DarkWorld/Mire.php:33" }
+
+  # ===========================================================================
+  # Dark World — North East (IDs 208..214) — Pyramid + Pyramid Fairy
+  # ===========================================================================
+  - { id: 208, name: "Catfish",                               region: DarkWorld_NorthEast, type: Standing, vanilla_item: Quake,        source: "app/Region/Standard/DarkWorld/NorthEast.php:32" }
+  - { id: 209, name: "Pyramid",                               region: DarkWorld_NorthEast, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/DarkWorld/NorthEast.php:33" }
+  # ids 210/211 (Pyramid Fairy - Sword/Bow Trade slots) RETIRED: ALTTPR delivers
+  # this pond as TWO chests (Left/Right), not a throw-in upgrade. The runtime
+  # (Sprite_WishPond3) now grants Left/Right directly on contact; the Trade slots
+  # were a vanilla-toss artifact and are dropped from the pool. The id gap is
+  # harmless (ids are id-keyed). See change add-rando-fairy-chest-model.
+  - { id: 212, name: "Ganon",                                 region: DarkWorld_NorthEast, type: Prize_Event, vanilla_item: DefeatAgahnim, source: "app/Region/Standard/DarkWorld/NorthEast.php:36", notes: "Re-located to LightWorld/NorthEast.php:19 in Inverted. Game-end signal is Module19_TriforceRoom entry; no dedicated flag bit." }
+  - { id: 213, name: "Pyramid Fairy - Left",                  region: DarkWorld_NorthEast, type: Chest,    vanilla_item: SilverArrowUpgrade, source: "app/Region/Standard/DarkWorld/NorthEast.php:40", notes: "Conditional in ALTTPR; Phase A treats as always-present per audit §0.3.5." }
+  - { id: 214, name: "Pyramid Fairy - Right",                 region: DarkWorld_NorthEast, type: Chest,    vanilla_item: BottleEmpty,  source: "app/Region/Standard/DarkWorld/NorthEast.php:41", notes: "Conditional in ALTTPR; Phase A treats as always-present." }
+
+  # ===========================================================================
+  # Dark World — North West (IDs 215..221)
+  # ===========================================================================
+  - { id: 215, name: "Brewery",                               region: DarkWorld_NorthWest, type: Chest,    vanilla_item: Rupee100,     source: "app/Region/Standard/DarkWorld/NorthWest.php:32" }
+  - { id: 216, name: "C-Shaped House",                        region: DarkWorld_NorthWest, type: Chest,    vanilla_item: Rupee100,     source: "app/Region/Standard/DarkWorld/NorthWest.php:33" }
+  - { id: 217, name: "Chest Game",                            region: DarkWorld_NorthWest, type: Chest,    vanilla_item: PieceOfHeart, source: "app/Region/Standard/DarkWorld/NorthWest.php:34" }
+  - { id: 218, name: "Hammer Pegs",                           region: DarkWorld_NorthWest, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/DarkWorld/NorthWest.php:35" }
+  - { id: 219, name: "Bumper Cave",                           region: DarkWorld_NorthWest, type: Standing, vanilla_item: PieceOfHeart, source: "app/Region/Standard/DarkWorld/NorthWest.php:36" }
+  - { id: 220, name: "Blacksmith",                            region: DarkWorld_NorthWest, type: Npc,      vanilla_item: L3Sword,      source: "app/Region/Standard/DarkWorld/NorthWest.php:37" }
+  - { id: 221, name: "Purple Chest",                          region: DarkWorld_NorthWest, type: Npc,      vanilla_item: BottleEmpty,  source: "app/Region/Standard/DarkWorld/NorthWest.php:38" }
+
+  # ===========================================================================
+  # Dark World — South (IDs 222..228)
+  # ===========================================================================
+  - { id: 222, name: "Hype Cave - Top",                       region: DarkWorld_South, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/DarkWorld/South.php:32" }
+  - { id: 223, name: "Hype Cave - Middle Right",              region: DarkWorld_South, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/DarkWorld/South.php:33" }
+  - { id: 224, name: "Hype Cave - Middle Left",               region: DarkWorld_South, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/DarkWorld/South.php:34" }
+  - { id: 225, name: "Hype Cave - Bottom",                    region: DarkWorld_South, type: Chest,    vanilla_item: Rupee100,    source: "app/Region/Standard/DarkWorld/South.php:35" }
+  - { id: 226, name: "Stumpy",                                region: DarkWorld_South, type: Npc,      vanilla_item: Shovel,      source: "app/Region/Standard/DarkWorld/South.php:36" }
+  - { id: 227, name: "Hype Cave - NPC",                       region: DarkWorld_South, type: Npc,      vanilla_item: Rupee100,    source: "app/Region/Standard/DarkWorld/South.php:37" }
+  - { id: 228, name: "Digging Game",                          region: DarkWorld_South, type: Dig,      vanilla_item: PieceOfHeart, source: "app/Region/Standard/DarkWorld/South.php:38" }
+
+  # ===========================================================================
+  # Dark World — Death Mountain West (ID 229)
+  # ===========================================================================
+  - { id: 229, name: "Spike Cave",                            region: DarkWorld_DeathMountain_West, type: Chest, vanilla_item: CaneOfByrna, source: "app/Region/Standard/DarkWorld/DeathMountain/West.php:32" }
+
+  # ===========================================================================
+  # Dark World — Death Mountain East (IDs 230..235)
+  # ===========================================================================
+  - { id: 230, name: "Superbunny Cave - Top",                 region: DarkWorld_DeathMountain_East, type: Chest, vanilla_item: Rupee100,     source: "app/Region/Standard/DarkWorld/DeathMountain/East.php:32" }
+  - { id: 231, name: "Superbunny Cave - Bottom",              region: DarkWorld_DeathMountain_East, type: Chest, vanilla_item: Rupee100,     source: "app/Region/Standard/DarkWorld/DeathMountain/East.php:33" }
+  - { id: 232, name: "Hookshot Cave - Top Right",             region: DarkWorld_DeathMountain_East, type: Chest, vanilla_item: Rupee100,     source: "app/Region/Standard/DarkWorld/DeathMountain/East.php:34" }
+  - { id: 233, name: "Hookshot Cave - Top Left",              region: DarkWorld_DeathMountain_East, type: Chest, vanilla_item: Rupee100,     source: "app/Region/Standard/DarkWorld/DeathMountain/East.php:35" }
+  - { id: 234, name: "Hookshot Cave - Bottom Left",           region: DarkWorld_DeathMountain_East, type: Chest, vanilla_item: Rupee100,     source: "app/Region/Standard/DarkWorld/DeathMountain/East.php:36" }
+  - { id: 235, name: "Hookshot Cave - Bottom Right",          region: DarkWorld_DeathMountain_East, type: Chest, vanilla_item: PieceOfHeart, source: "app/Region/Standard/DarkWorld/DeathMountain/East.php:37" }
+
+  # ===========================================================================
+  # Inverted-only additions (ID 236)
+  # ===========================================================================
+  - { id: 236, name: "Bomb Merchant",                         region: DarkWorld_South, type: Prize_Event, vanilla_item: Bombs10, world_state_filter: [inverted], source: "app/Region/Inverted/LightWorld/South.php:27", notes: "Inverted-only Prize\\Event slot per audit §0.3.5; not a placement, a logic-affecting event." }
+
+  # ===========================================================================
+  # Phase B Slice 3a — Retro shop-purchase locations (IDs 237..265)
+  #
+  # Per `openspec/changes/add-rando-retro-world-state/design.md` §1a.
+  # World-state-filtered to Retro-only — these locations enter the
+  # placement pool ONLY when `settings.world_state == Retro`. Default
+  # Open/Standard/Inverted seeds ignore them, so the existing 52-corpus
+  # digests stay stable.
+  #
+  # Capacity Upgrade slots (264, 265) are identity-placed in 3a per
+  # proposal.md:41 — registry entry exists so the shop dispatcher routes
+  # the grant through the uniform Rando_DispatchVanillaGrant call shape,
+  # but the placer pins the upgrade to its vanilla item.
+  #
+  # The 22 TakeAny shops + per-seed random extras defer to Slice 3b per
+  # design.md §5; not enumerated here.
+  # ===========================================================================
+
+  # Dark World Potion Shop (DarkWorld_NorthEast — south of Pyramid)
+  - { id: 237, name: "Dark World Potion Shop - 0", region: DarkWorld_NorthEast, type: Shop, vanilla_item: RedPotion,      world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthEast.php:53" }
+  - { id: 238, name: "Dark World Potion Shop - 1", region: DarkWorld_NorthEast, type: Shop, vanilla_item: FighterShield,  world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthEast.php:54", notes: "BlueShield in ALTTPR == FighterShield in zelda3-fork (ROM byte 0x04)." }
+  - { id: 239, name: "Dark World Potion Shop - 2", region: DarkWorld_NorthEast, type: Shop, vanilla_item: Bombs10,        world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthEast.php:55", notes: "ALTTPR TenBombs == zelda3-fork Bombs10." }
+
+  # Dark World Forest Shop (DarkWorld_NorthWest)
+  - { id: 240, name: "Dark World Forest Shop - 0", region: DarkWorld_NorthWest, type: Shop, vanilla_item: RedShield,    world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:51" }
+  - { id: 241, name: "Dark World Forest Shop - 1", region: DarkWorld_NorthWest, type: Shop, vanilla_item: BeeContents,  world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:52", notes: "Unbottled Bee (ROM 0x0E); distinct from BottleWithBee." }
+  - { id: 242, name: "Dark World Forest Shop - 2", region: DarkWorld_NorthWest, type: Shop, vanilla_item: Arrow10,      world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:53" }
+
+  # Dark World Lumberjack Hut (DarkWorld_NorthWest)
+  - { id: 243, name: "Dark World Lumberjack Hut - 0", region: DarkWorld_NorthWest, type: Shop, vanilla_item: RedPotion,     world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:55" }
+  - { id: 244, name: "Dark World Lumberjack Hut - 1", region: DarkWorld_NorthWest, type: Shop, vanilla_item: FighterShield, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:56" }
+  - { id: 245, name: "Dark World Lumberjack Hut - 2", region: DarkWorld_NorthWest, type: Shop, vanilla_item: Bombs10,       world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:57" }
+
+  # Dark World Village of Outcasts (DarkWorld_NorthWest)
+  - { id: 246, name: "Dark World Village of Outcasts - 0", region: DarkWorld_NorthWest, type: Shop, vanilla_item: RedPotion,     world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:59" }
+  - { id: 247, name: "Dark World Village of Outcasts - 1", region: DarkWorld_NorthWest, type: Shop, vanilla_item: FighterShield, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:60" }
+  - { id: 248, name: "Dark World Village of Outcasts - 2", region: DarkWorld_NorthWest, type: Shop, vanilla_item: Bombs10,       world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:61" }
+
+  # Dark World Lake Hylia Shop (DarkWorld_South)
+  - { id: 249, name: "Dark World Lake Hylia Shop - 0", region: DarkWorld_South, type: Shop, vanilla_item: RedPotion,     world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:52" }
+  - { id: 250, name: "Dark World Lake Hylia Shop - 1", region: DarkWorld_South, type: Shop, vanilla_item: FighterShield, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:53" }
+  - { id: 251, name: "Dark World Lake Hylia Shop - 2", region: DarkWorld_South, type: Shop, vanilla_item: Bombs10,       world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:54" }
+
+  # Dark World Death Mountain Shop (DarkWorld_DeathMountain_East)
+  - { id: 252, name: "Dark World Death Mountain Shop - 0", region: DarkWorld_DeathMountain_East, type: Shop, vanilla_item: RedPotion,   world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/DeathMountain/East.php:45" }
+  - { id: 253, name: "Dark World Death Mountain Shop - 1", region: DarkWorld_DeathMountain_East, type: Shop, vanilla_item: HeartRefill, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/DeathMountain/East.php:46" }
+  - { id: 254, name: "Dark World Death Mountain Shop - 2", region: DarkWorld_DeathMountain_East, type: Shop, vanilla_item: Bombs10,     world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/DeathMountain/East.php:47" }
+
+  # Light World Death Mountain Shop (LightWorld_DeathMountain_East)
+  - { id: 255, name: "Light World Death Mountain Shop - 0", region: LightWorld_DeathMountain_East, type: Shop, vanilla_item: RedPotion,   world_state_filter: [retro], source: "app/Region/Standard/LightWorld/DeathMountain/East.php:51" }
+  - { id: 256, name: "Light World Death Mountain Shop - 1", region: LightWorld_DeathMountain_East, type: Shop, vanilla_item: HeartRefill, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/DeathMountain/East.php:52" }
+  - { id: 257, name: "Light World Death Mountain Shop - 2", region: LightWorld_DeathMountain_East, type: Shop, vanilla_item: Bombs10,     world_state_filter: [retro], source: "app/Region/Standard/LightWorld/DeathMountain/East.php:53" }
+
+  # Light World Kakariko Shop (LightWorld_NorthWest)
+  - { id: 258, name: "Light World Kakariko Shop - 0", region: LightWorld_NorthWest, type: Shop, vanilla_item: RedPotion,   world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:69" }
+  - { id: 259, name: "Light World Kakariko Shop - 1", region: LightWorld_NorthWest, type: Shop, vanilla_item: HeartRefill, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:70" }
+  - { id: 260, name: "Light World Kakariko Shop - 2", region: LightWorld_NorthWest, type: Shop, vanilla_item: Bombs10,     world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:71" }
+
+  # Light World Lake Hylia Shop (LightWorld_South)
+  - { id: 261, name: "Light World Lake Hylia Shop - 0", region: LightWorld_South, type: Shop, vanilla_item: RedPotion,   world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:73" }
+  - { id: 262, name: "Light World Lake Hylia Shop - 1", region: LightWorld_South, type: Shop, vanilla_item: HeartRefill, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:74" }
+  - { id: 263, name: "Light World Lake Hylia Shop - 2", region: LightWorld_South, type: Shop, vanilla_item: Bombs10,     world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:75" }
+
+  # Capacity Upgrade — identity-placed in 3a per proposal.md:41. Note: pin
+  # is enforced by `type: ShopUpgrade` in the placer, not by any YAML field.
+  # An `identity_placed: true` flag that used to live on these two entries
+  # was unused — only the type matters — and was removed per cluster-audit
+  # 2026-05-27 M2 to prevent future maintainers from believing the flag
+  # could be toggled.
+  - { id: 264, name: "Capacity Upgrade - Bomb",  region: LightWorld_South, type: ShopUpgrade, vanilla_item: BombUpgrade5,  world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:69" }
+  - { id: 265, name: "Capacity Upgrade - Arrow", region: LightWorld_South, type: ShopUpgrade, vanilla_item: ArrowUpgrade5, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:70" }
+
+  # ===========================================================================
+  # Phase B Slice 3b — Retro TakeAny cave locations (IDs 266..327)
+  #
+  # Per `openspec/changes/add-rando-retro-takeany/design.md`. ALTTPR declares
+  # 31 `Shop\TakeAny` (app/Region/Standard/**; Inverted declares 0). Each cave
+  # has TWO inventory slots (slot 0, slot 1) — modelled as two LOC ids per cave
+  # so the runtime `(room, door, pos)->loc_base+pos` dispatch works exactly like
+  # the 3a regular shops. Cave index = (id - 266) / 2; slot = (id - 266) % 2.
+  #
+  # PER-SEED ACTIVE SUBSET (Option B, design §D4): of the 31 caves, the placer
+  # selects 5 active per seed (Randomizer.php:716-735): 4 "potion" caves give
+  # BluePotion@slot0 + BossHeartContainer@slot1, and 1 "weapon" cave gives
+  # ProgressiveSword (or Rupee300 when mode.weapons in {swordless,vanilla})
+  # @slot0 only. So exactly 9 LOC ids emit per seed (4*2 + 1); the other 53 are
+  # NOT in the placement table. Selection is deterministic (Rando_TakeAnySelect,
+  # rng = seed ^ salt) — see src/rando/rando_placement.c.
+  #
+  # `vanilla_item` here is a NOMINAL fallback only: the placer assigns the real
+  # reward per role (BluePotion/BossHeart/sword/rupee) and pins it. Inactive
+  # caves never emit, active caves are always pinned, and these are retro-only,
+  # so the fallback is never reached at runtime.
+  #
+  # `region:` is descriptive only (codegen takes region binding from logic.yaml;
+  # TakeAny is REGION_OPTIONAL like Shop — gated by world_state_filter + the
+  # per-seed active gate, not by a region predicate).
+  #
+  # `door_id` (ALTTPR 5th ctor arg) is recorded in NOTES per cave; the runtime
+  # keys redirect/dispatch on it (door_id = overworld row-index lx + 1). The
+  # ROM-patch dest byte 0x58/0x60/0x46 -> host room 0x112/0x10F/0x11F.
+  # ===========================================================================
+
+  # Dark World Mire
+  - { id: 266, name: "Dark Desert Fairy - 0",                region: DarkWorld_Mire, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/Mire.php:37", notes: "door_id 0x56; dest 0x58/room 0x112" }
+  - { id: 267, name: "Dark Desert Fairy - 1",                region: DarkWorld_Mire, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/Mire.php:37", notes: "door_id 0x56" }
+  - { id: 268, name: "Dark Desert Hint - 0",                 region: DarkWorld_Mire, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/Mire.php:38", notes: "door_id 0x62; dest 0x58/room 0x112" }
+  - { id: 269, name: "Dark Desert Hint - 1",                 region: DarkWorld_Mire, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/Mire.php:38", notes: "door_id 0x62" }
+
+  # Dark World NorthEast
+  - { id: 270, name: "Dark Lake Hylia Fairy - 0",            region: DarkWorld_NorthEast, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthEast.php:47", notes: "door_id 0x6D; dest 0x58/room 0x112" }
+  - { id: 271, name: "Dark Lake Hylia Fairy - 1",            region: DarkWorld_NorthEast, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthEast.php:47", notes: "door_id 0x6D" }
+  - { id: 272, name: "East Dark World Hint - 0",             region: DarkWorld_NorthEast, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthEast.php:48", notes: "door_id 0x69; dest 0x58/room 0x112" }
+  - { id: 273, name: "East Dark World Hint - 1",             region: DarkWorld_NorthEast, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthEast.php:48", notes: "door_id 0x69" }
+  - { id: 274, name: "Palace of Darkness Hint - 0",          region: DarkWorld_NorthEast, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthEast.php:49", notes: "door_id 0x68; dest 0x60/room 0x10F" }
+  - { id: 275, name: "Palace of Darkness Hint - 1",          region: DarkWorld_NorthEast, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthEast.php:49", notes: "door_id 0x68" }
+
+  # Dark World NorthWest
+  - { id: 276, name: "Dark Sanctuary Hint - 0",              region: DarkWorld_NorthWest, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:46", notes: "door_id 0x5A; dest 0x58/room 0x112" }
+  - { id: 277, name: "Dark Sanctuary Hint - 1",              region: DarkWorld_NorthWest, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:46", notes: "door_id 0x5A" }
+  - { id: 278, name: "Fortune Teller (Dark) - 0",            region: DarkWorld_NorthWest, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:47", notes: "door_id 0x66; dest 0x60/room 0x10F" }
+  - { id: 279, name: "Fortune Teller (Dark) - 1",            region: DarkWorld_NorthWest, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/NorthWest.php:47", notes: "door_id 0x66" }
+
+  # Dark World South
+  - { id: 280, name: "Archery Game (Take-Any) - 0",          region: DarkWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:44", notes: "door_id 0x59; dest 0x60/room 0x10F" }
+  - { id: 281, name: "Archery Game (Take-Any) - 1",          region: DarkWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:44", notes: "door_id 0x59" }
+  - { id: 282, name: "Bonk Fairy (Dark) - 0",                region: DarkWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:45", notes: "door_id 0x78; dest 0x58/room 0x112" }
+  - { id: 283, name: "Bonk Fairy (Dark) - 1",                region: DarkWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:45", notes: "door_id 0x78" }
+  - { id: 284, name: "Dark Lake Hylia Ledge Fairy - 0",      region: DarkWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:46", notes: "door_id 0x81; dest 0x58/room 0x112" }
+  - { id: 285, name: "Dark Lake Hylia Ledge Fairy - 1",      region: DarkWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:46", notes: "door_id 0x81" }
+  - { id: 286, name: "Dark Lake Hylia Ledge Hint - 0",       region: DarkWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:47", notes: "door_id 0x6A; dest 0x58/room 0x112" }
+  - { id: 287, name: "Dark Lake Hylia Ledge Hint - 1",       region: DarkWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:47", notes: "door_id 0x6A" }
+  - { id: 288, name: "Dark Lake Hylia Ledge Spike Cave - 0", region: DarkWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:48", notes: "door_id 0x7C; dest 0x58/room 0x112" }
+  - { id: 289, name: "Dark Lake Hylia Ledge Spike Cave - 1", region: DarkWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/South.php:48", notes: "door_id 0x7C" }
+
+  # Dark World Death Mountain West
+  - { id: 290, name: "Dark Death Mountain Fairy - 0",        region: DarkWorld_DeathMountain_West, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/DeathMountain/West.php:36", notes: "door_id 0x70; dest 0x58/room 0x112" }
+  - { id: 291, name: "Dark Death Mountain Fairy - 1",        region: DarkWorld_DeathMountain_West, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/DarkWorld/DeathMountain/West.php:36", notes: "door_id 0x70" }
+
+  # Light World South
+  - { id: 292, name: "20 Rupee Cave - 0",                    region: LightWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:57", notes: "door_id 0x7B; dest 0x58/room 0x112" }
+  - { id: 293, name: "20 Rupee Cave - 1",                    region: LightWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:57", notes: "door_id 0x7B" }
+  - { id: 294, name: "50 Rupee Cave - 0",                    region: LightWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:58", notes: "door_id 0x79; dest 0x58/room 0x112" }
+  - { id: 295, name: "50 Rupee Cave - 1",                    region: LightWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:58", notes: "door_id 0x79" }
+  - { id: 296, name: "Bonk Fairy (Light) - 0",               region: LightWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:59", notes: "door_id 0x77; dest 0x58/room 0x112" }
+  - { id: 297, name: "Bonk Fairy (Light) - 1",               region: LightWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:59", notes: "door_id 0x77" }
+  - { id: 298, name: "Desert Fairy - 0",                     region: LightWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:60", notes: "door_id 0x72; dest 0x58/room 0x112" }
+  - { id: 299, name: "Desert Fairy - 1",                     region: LightWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:60", notes: "door_id 0x72" }
+  - { id: 300, name: "Good Bee Cave (Take-Any) - 0",         region: LightWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:61", notes: "door_id 0x6B; dest 0x58/room 0x112" }
+  - { id: 301, name: "Good Bee Cave (Take-Any) - 1",         region: LightWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:61", notes: "door_id 0x6B" }
+  - { id: 302, name: "Lake Hylia Fortune Teller - 0",        region: LightWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:62", notes: "door_id 0x73; dest 0x46/room 0x11F" }
+  - { id: 303, name: "Lake Hylia Fortune Teller - 1",        region: LightWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:62", notes: "door_id 0x73" }
+  - { id: 304, name: "Light Hype Fairy - 0",                 region: LightWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:63", notes: "door_id 0x6C; dest 0x58/room 0x112" }
+  - { id: 305, name: "Light Hype Fairy - 1",                 region: LightWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:63", notes: "door_id 0x6C" }
+  - { id: 306, name: "Kakariko Gamble Game - 0",             region: LightWorld_South, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:64", notes: "door_id 0x67; dest 0x46/room 0x11F" }
+  - { id: 307, name: "Kakariko Gamble Game - 1",             region: LightWorld_South, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/South.php:64", notes: "door_id 0x67" }
+
+  # Light World NorthEast
+  - { id: 308, name: "Long Fairy Cave - 0",                  region: LightWorld_NorthEast, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthEast.php:44", notes: "door_id 0x55; dest 0x58/room 0x112" }
+  - { id: 309, name: "Long Fairy Cave - 1",                  region: LightWorld_NorthEast, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthEast.php:44", notes: "door_id 0x55" }
+  - { id: 310, name: "Lake Hylia Fairy - 0",                 region: LightWorld_NorthEast, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthEast.php:45", notes: "door_id 0x5E; dest 0x58/room 0x112" }
+  - { id: 311, name: "Lake Hylia Fairy - 1",                 region: LightWorld_NorthEast, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthEast.php:45", notes: "door_id 0x5E" }
+
+  # Light World NorthWest
+  - { id: 312, name: "Fortune Teller (Light) - 0",           region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:59", notes: "door_id 0x65; dest 0x46/room 0x11F" }
+  - { id: 313, name: "Fortune Teller (Light) - 1",           region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:59", notes: "door_id 0x65" }
+  - { id: 314, name: "Bush Covered House - 0",               region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:60", notes: "door_id 0x44; dest 0x46/room 0x11F" }
+  - { id: 315, name: "Bush Covered House - 1",               region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:60", notes: "door_id 0x44" }
+  - { id: 316, name: "Lost Woods Gamble - 0",                region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:61", notes: "door_id 0x3C; dest 0x58/room 0x112" }
+  - { id: 317, name: "Lost Woods Gamble - 1",                region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:61", notes: "door_id 0x3C" }
+  - { id: 318, name: "Lumberjack House - 0",                 region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:62", notes: "door_id 0x76; dest 0x46/room 0x11F" }
+  - { id: 319, name: "Lumberjack House - 1",                 region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:62", notes: "door_id 0x76" }
+  - { id: 320, name: "Snitch Lady East - 0",                 region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:63", notes: "door_id 0x3E; dest 0x46/room 0x11F" }
+  - { id: 321, name: "Snitch Lady East - 1",                 region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:63", notes: "door_id 0x3E" }
+  - { id: 322, name: "Snitch Lady West - 0",                 region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:64", notes: "door_id 0x3F; dest 0x46/room 0x11F" }
+  - { id: 323, name: "Snitch Lady West - 1",                 region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:64", notes: "door_id 0x3F" }
+  - { id: 324, name: "Bomb Hut - 0",                         region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:65", notes: "door_id 0x4A; dest 0x46/room 0x11F" }
+  - { id: 325, name: "Bomb Hut - 1",                         region: LightWorld_NorthWest, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/NorthWest.php:65", notes: "door_id 0x4A" }
+
+  # Light World Death Mountain East
+  - { id: 326, name: "Hookshot Fairy (Take-Any) - 0",        region: LightWorld_DeathMountain_East, type: TakeAny, vanilla_item: BluePotion,         world_state_filter: [retro], source: "app/Region/Standard/LightWorld/DeathMountain/East.php:47", notes: "door_id 0x50; dest 0x58/room 0x112" }
+  - { id: 327, name: "Hookshot Fairy (Take-Any) - 1",        region: LightWorld_DeathMountain_East, type: TakeAny, vanilla_item: BossHeartContainer, world_state_filter: [retro], source: "app/Region/Standard/LightWorld/DeathMountain/East.php:47", notes: "door_id 0x50" }

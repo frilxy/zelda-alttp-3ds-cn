@@ -1,4 +1,7 @@
 #include "zelda_rtl.h"
+#include "localized.h"
+#include "language_cart.h"
+#include "mods.h"
 #include "snes/snes_regs.h"
 #include "variables.h"
 #include "load_gfx.h"
@@ -14,6 +17,16 @@
 #include "ancilla.h"
 #include "hud.h"
 #include "assets.h"
+#include "features.h"
+
+static bool CutsceneFastForwardEnabled(void) {
+  return (enhanced_features0 & kFeatures0_CutsceneFastForward) &&
+         !ZeldaIsEmulatorAttached();
+}
+
+static uint8 CutsceneClampTimer8(uint8 value, uint8 cap) {
+  return CutsceneFastForwardEnabled() && value > cap ? cap : value;
+}
 
 static const uint16 kPolyhedralPalette[8] = { 0, 0x14d, 0x1b0, 0x1f3, 0x256, 0x279, 0x2fd, 0x35f };
 
@@ -295,6 +308,7 @@ void Module18_GanonEmerges() {  // 829edc
     break;
   case 2:  // FadeOutDungeonScreen
     Dungeon_HandleLayerEffect();
+    INIDISP_copy = CutsceneClampTimer8(INIDISP_copy, 1);
     if (--INIDISP_copy)
       break;
     EnableForceBlank();
@@ -314,6 +328,8 @@ void Module18_GanonEmerges() {  // 829edc
     subsubmodule_index = 0;
     break;
   case 5:  // BrightenScreenThenSpawnBat
+    if (CutsceneFastForwardEnabled() && INIDISP_copy < 14)
+      INIDISP_copy = 14;
     if (++INIDISP_copy == 15) {
       dung_savegame_state_bits = 0;
       flag_unk1 = 0;
@@ -322,13 +338,14 @@ void Module18_GanonEmerges() {  // 829edc
       saved_module_for_menu = 9;
       player_is_indoors = 0;
       overworld_map_state++;
-      subsubmodule_index = 128;
+      subsubmodule_index = CutsceneFastForwardEnabled() ? 24 : 128;
       BYTE(cur_palace_index_x2) = 255;
     }
     break;
   case 6:  // DelayForBatSmashIntoPyramid
     break;
   case 7:  // DelayPlayerDropOff
+    subsubmodule_index = CutsceneClampTimer8(subsubmodule_index, 24);
     if (!--subsubmodule_index)
       overworld_map_state++;
     break;
@@ -489,7 +506,13 @@ void Intro_InitializeBackgroundSettings() {  // 82c500
   MOSAIC_copy = 0;
   zelda_ppu_write(BG1SC, 0x13);
   zelda_ppu_write(BG2SC, 3);
-  zelda_ppu_write(BG3SC, 0x63);
+  if (g_loc_rom) {
+    // BG3 tilemap at $7800, 64x32, through its mirror ($82:C593).
+    BG3SC_copy = 0x79;
+    zelda_ppu_write(BG3SC, BG3SC_copy);
+  } else {
+    zelda_ppu_write(BG3SC, 0x63);
+  }
   CGADSUB_copy = 32;
   COLDATA_copy0 = 32;
   COLDATA_copy1 = 64;
@@ -504,7 +527,9 @@ void Polyhedral_InitializeThread() {  // 89f7de
 }
 
 void Module00_Intro() {  // 8cc120
-  uint8 skip_at = enhanced_features0 & kFeatures0_SkipIntroOnKeypress ? 4 : 8;
+  // The French Canadian cartridge lets the title be skipped from step 4 on,
+  // as the feature does ($8E:8002).
+  uint8 skip_at = (enhanced_features0 & kFeatures0_SkipIntroOnKeypress) || g_loc_rom ? 4 : 8;
 
   if (submodule_index >= skip_at && ((filtered_joypad_L & 0xc0 | filtered_joypad_H) & 0xd0)) {
     FadeMusicAndResetSRAMMirror();
@@ -626,6 +651,10 @@ void Intro_SwordComingDown() {  // 8cc2ae
   Intro_PeriodicSwordAndIntroFlash();
   if (!--subsubmodule_index) {
     submodule_index++;
+    // The French Canadian cartridge waits 128 frames after the fade in,
+    // where the USA one lets the counter wrap to 256 ($8E:80F7).
+    if (g_loc_rom)
+      subsubmodule_index = 0x80;
     CGWSEL_copy = 2;
     CGADSUB_copy = 0x22;
     palette_filter_countdown = 31;
@@ -640,7 +669,8 @@ void Intro_WaitPlayer() {  // 8cc2d4
   Intro_PeriodicSwordAndIntroFlash();
   if (!--subsubmodule_index) {
     submodule_index++;
-    main_module_index = 20;
+    // A quest can go to the file select instead of the story ($8C:C2E8).
+    main_module_index = Mods_RomByte(0x8cc2e8, 20);
     submodule_index = 0;
     BYTE(link_x_coord) = 0;
   }
@@ -1050,7 +1080,13 @@ void TriforceRoom_HandlePoly() {  // 8ccabc
   case 1:
     if (subsubmodule_index >= 10) {
       intro_step_index++;
-      intro_y_vel[1] = 5;
+      if (g_loc_rom) {
+        // The French Canadian cartridge sets all three ($8E:8941).
+        intro_y_vel[1] = 3;
+        intro_y_vel[0] = intro_y_vel[2] = 0xf9;
+      } else {
+        intro_y_vel[1] = 5;
+      }
     }
     poly_b += 2, poly_a += 1;
     break;
@@ -1276,12 +1312,27 @@ void Intro_PeriodicSwordAndIntroFlash() {  // 8cfe56
   }
 }
 
+// Where the ROM keeps each of kEndSequence_Funcs ($8E:9820 lists them): a
+// quest can list them in another order, a handler found by its address.
+static const uint16 kEndSequence_Addrs[39] = {
+  0x9889, 0x9958, 0x9891, 0x99c5, 0x9889, 0x9958, 0x9889, 0x9958, 0x9889, 0x9958, 0x9889, 0x9958, 0x9889,
+  0x9958, 0x9889, 0x9958, 0x9889, 0x9958, 0x9889, 0x9958, 0x9891, 0x99c5, 0x9891, 0x99c5, 0x9889, 0x9958,
+  0x9889, 0x9958, 0x9889, 0x9958, 0x9889, 0x9958, 0xbc6d, 0xc37c, 0xbd8b, 0xc391, 0xc3b8, 0xc3d5, 0xc41a,
+};
+
 void Module1A_Credits() {  // 8e986e
   oam_region_base[0] = 0x30;
   oam_region_base[1] = 0x1d0;
   oam_region_base[2] = 0x0;
 
-  kEndSequence_Funcs[submodule_index]();
+  int j = submodule_index;
+  uint16 a = MODS_U16(kEndSequence_Addrs, 0x8e9820)[j];
+  if (a != kEndSequence_Addrs[j]) {
+    for (int i = 0; i < 39; i++)
+      if (kEndSequence_Addrs[i] == a)
+        j = i;
+  }
+  kEndSequence_Funcs[j]();
 }
 
 void Credits_LoadNextScene_Overworld() {  // 8e9889
@@ -2435,7 +2486,7 @@ void EndSequence_32() {  // 8ebc6d
   death_var2 = sum;
   death_save_counter = 0;
   link_health_current = kHealthAfterDeath[link_health_capacity >> 3];
-  savegame_is_darkworld = 0x40;
+  savegame_is_darkworld = Mods_RomByte(0x8ebcd4, 0x40);  // a quest can keep the light world
   SaveGameFile();
   aux_palette_buffer[38] = 0;
   main_palette_buffer[38] = 0;
@@ -2443,9 +2494,13 @@ void EndSequence_32() {  // 8ebc6d
   main_palette_buffer[0] = 0;
   TM_copy = 0x16;
   TS_copy = 0;
-  R16 = 0x6800;
+  // The credits are written from $7C00 in the French Canadian cartridge,
+  // which also sets one more color for them ($8E:E9E1).
+  R16 = g_loc_rom ? 0x7c00 : 0x6800;
   R18 = 0;
   ending_which_dung = 0;
+  if (g_loc_rom)
+    main_palette_buffer[0x1d] = 0x3084;
   BG2VOFS_copy2 = -0x48;
   BG2HOFS_copy2 = 0x90;
   BG3VOFS_copy2 = 0;
@@ -2514,27 +2569,118 @@ void Credits_FadeColorAndBeginAnimating() {  // 8ebd8b
   BG1VOFS_copy = BG1VOFS_copy2;
 }
 
-void Credits_AddNextAttribution() {  // 8ebe24
+// The French Canadian credits are tile words already, not characters to map,
+// 394 lines at $0E:D799 by the offsets at $0E:E624, over BG3 at $7800. Their
+// digits are other tiles, with a narrower one ($8E:EB12, $8E:EC2B).
+static uint16 Credits_LocDigit(uint16 t) {
+  return t == 0x3c65 ? 0x3ce3 : t == 0x3c75 ? 0x3cf3 : t;
+}
+
+static void Credits_AddNextAttribution_Loc() {
   static const uint8 kEnding_Func9_Tab2[14] = { 1, 0, 2, 3, 10, 6, 5, 8, 11, 9, 7, 12, 13, 15 };
   static const uint16 kEnding_Digits_ScrollY[14] = { 0x290, 0x298, 0x2a0, 0x2a8, 0x2b0, 0x2ba, 0x2c2, 0x2ca, 0x2d2, 0x2da, 0x2e2, 0x2ea, 0x2f2, 0x310 };
-  static const uint16 kEnding_Credits_DigitChar[2] = { 0x3ce6, 0x3cf6 };
+  static const uint16 kEnding_Credits_DigitChar[2] = { 0x3c64, 0x3c74 };
 
   uint16 *dst = vram_upload_data + (vram_upload_offset >> 1);
 
   dst[0] = swap16(R16);
   dst[1] = 0x3e40;
-  dst[2] = kEnding_MapData[159];
+  dst[2] = 0x3ca9;
   dst += 3;
 
   if (R18 < 394) {
-    const uint8 *src = &kEnding_Credits_Text[kEnding_Credits_Offs[R18]];
+    uint16 offs;
+    Loc_Words(&offs, 0x8ee624 + R18 * 2, 1);
+    const uint8 *src = Loc_Rom(0x8ed799 + offs);
+    if (src[0] != 0xff) {
+      *dst++ = swap16(R16 + src[0]);
+      int n = src[1];
+      *dst++ = swap16(n);
+      n = (n + 1) >> 1;
+      for (int i = 0; i < n; i++)
+        *dst++ = src[2 + i * 2] | src[3 + i * 2] << 8;
+    }
+
+    if ((ending_which_dung & 1) || R18 * 2 == kEnding_Digits_ScrollY[ending_which_dung >> 1]) {
+      int t = kEnding_Credits_DigitChar[ending_which_dung & 1];
+      WORD(g_ram[0xce]) = t;
+
+      dst[0] = swap16(R16 + 0x19);
+      dst[1] = 0x500;
+
+      uint16 deaths = deaths_per_palace[kEnding_Func9_Tab2[ending_which_dung >> 1]];
+      if (deaths >= 1000)
+        deaths = 999;
+
+      dst[4] = Credits_LocDigit(t + deaths % 10), deaths /= 10;
+      dst[3] = Credits_LocDigit(t + deaths % 10), deaths /= 10;
+      dst[2] = Credits_LocDigit(t + deaths);
+      dst += 5;
+      ending_which_dung++;
+    }
+  }
+
+  uint16 next = R16 + 0x20;
+  if (!(next & 0x3ff))
+    next = (R16 & 0x7c00) ^ 0x400;
+  R16 = next;
+  vram_upload_offset = (char *)dst - (char *)vram_upload_data;
+  BYTE(*dst) = 0xff;
+  nmi_load_bg_from_vram = 1;
+}
+
+// The credits' text, offsets and character map, and the captions: the
+// engine's, or a translation's built from the USA cartridge, which keeps them
+// where the USA one does ($0E:B178, $0E:B93D, $0E:B038, $0E:BF4C, $0E:C2E1).
+typedef struct EndingText {
+  const uint8 *credits, *credits_offs, *map, *captions, *captions_offs;
+} EndingText;
+
+static EndingText Ending_Text(void) {
+  EndingText t = {
+    kEnding_Credits_Text, (const uint8 *)kEnding_Credits_Offs, (const uint8 *)kEnding_MapData,
+    kEnding0_Data, (const uint8 *)kEnding0_Offs,
+  };
+  if (LanguageCart_UsaLayout()) {
+    t.credits = LanguageCart_Bytes(0x8eb178, 1);
+    t.credits_offs = LanguageCart_Bytes(0x8eb93d, 394 * 2);
+    t.map = LanguageCart_Bytes(0x8eb038, 320);
+    t.captions = LanguageCart_Bytes(0x8ebf4c, 1);
+    t.captions_offs = LanguageCart_Bytes(0x8ec2e1, 34);
+  }
+  return t;
+}
+
+static uint16 Ending_Word(const uint8 *table, int i) {
+  return table[i * 2] | table[i * 2 + 1] << 8;
+}
+
+void Credits_AddNextAttribution() {  // 8ebe24
+  if (g_loc_rom) {
+    Credits_AddNextAttribution_Loc();
+    return;
+  }
+  static const uint8 kEnding_Func9_Tab2[14] = { 1, 0, 2, 3, 10, 6, 5, 8, 11, 9, 7, 12, 13, 15 };
+  static const uint16 kEnding_Digits_ScrollY[14] = { 0x290, 0x298, 0x2a0, 0x2a8, 0x2b0, 0x2ba, 0x2c2, 0x2ca, 0x2d2, 0x2da, 0x2e2, 0x2ea, 0x2f2, 0x310 };
+  static const uint16 kEnding_Credits_DigitChar[2] = { 0x3ce6, 0x3cf6 };
+
+  EndingText text = Ending_Text();
+  uint16 *dst = vram_upload_data + (vram_upload_offset >> 1);
+
+  dst[0] = swap16(R16);
+  dst[1] = 0x3e40;
+  dst[2] = Ending_Word(text.map, 159);
+  dst += 3;
+
+  if (R18 < 394) {
+    const uint8 *src = &text.credits[Ending_Word(text.credits_offs, R18)];
     if (*src != 0xff) {
       *dst++ = swap16(R16 + *src++);
       int n = *src++;
       *dst++ = swap16(n);
       n = (n + 1) >> 1;
       do {
-        *dst++ = kEnding_MapData[*src++];
+        *dst++ = Ending_Word(text.map, *src++);
       } while (--n);
     }
 
@@ -2565,23 +2711,57 @@ void Credits_AddNextAttribution() {  // 8ebe24
   nmi_load_bg_from_vram = 1;
 }
 
-void Credits_AddEndingSequenceText() {  // 8ec303
+// The French Canadian captions, tile words too, at $0E:EC40 by the offsets at
+// $0E:F36C, drawn from $7800 ($8E:F38E).
+static void Credits_AddEndingSequenceText_Loc() {
+  uint16 *dst = vram_upload_data;
+  dst[0] = 0x78;
+  dst[1] = 0xfe47;
+  dst[2] = 0x3ca9;
+  dst += 3;
 
+  uint16 offs[2];
+  Loc_Words(offs, 0x8ef36c + (submodule_index & 0xfe), 2);
+  const uint8 *curo = Loc_Rom(0x8eec40 + offs[0]);
+  const uint8 *endo = Loc_Rom(0x8eec40 + offs[1]);
+  do {
+    dst[0] = curo[0] | curo[1] << 8;
+    dst[1] = curo[2] | curo[3] << 8;
+    int m = (dst[1] >> 9) & 0x7f;
+    dst += 2, curo += 4;
+    do {
+      *dst++ = curo[0] | curo[1] << 8;
+      curo += 2;
+    } while (--m >= 0);
+  } while (curo < endo);
+
+  vram_upload_offset = (char *)dst - (char *)vram_upload_data;
+  BYTE(*dst) = 0xff;
+  nmi_load_bg_from_vram = 1;
+}
+
+void Credits_AddEndingSequenceText() {  // 8ec303
+  if (g_loc_rom) {
+    Credits_AddEndingSequenceText_Loc();
+    return;
+  }
+
+  EndingText text = Ending_Text();
   uint16 *dst = vram_upload_data;
   dst[0] = 0x60;
   dst[1] = 0xfe47;
-  dst[2] = kEnding_MapData[159];
+  dst[2] = Ending_Word(text.map, 159);
   dst += 3;
 
-  const uint8 *curo = &kEnding0_Data[kEnding0_Offs[submodule_index >> 1]];
-  const uint8 *endo = &kEnding0_Data[kEnding0_Offs[(submodule_index >> 1) + 1]];
+  const uint8 *curo = &text.captions[Ending_Word(text.captions_offs, submodule_index >> 1)];
+  const uint8 *endo = &text.captions[Ending_Word(text.captions_offs, (submodule_index >> 1) + 1)];
   do {
     dst[0] = WORD(curo[0]);
     dst[1] = WORD(curo[2]);
     int m = (dst[1] >> 9) & 0x7f;
     dst += 2, curo += 4;
     do {
-      *dst++ = kEnding_MapData[*curo++];
+      *dst++ = Ending_Word(text.map, *curo++);
     } while (--m >= 0);
   } while (curo != endo);
 
@@ -2655,4 +2835,3 @@ void CrystalCutscene_InitializePolyhedral() {  // 9ecdd9
   TS_copy = 0;
   TM_copy = 0x16;
 }
-

@@ -23,9 +23,8 @@ int main(int argc, char **argv) {
   for(unsigned i=0;i<256;i++) pixels[i]=0xff20b020;
   tex_face=make_tex(16,16,pixels,true);
   tex_bg_parch=make_tex(kSSTexParch_W,kSSTexParch_H,kSSTexParch,false);
-  tex_triforce=make_tex(kSSTexTriforce_W,kSSTexTriforce_H,kSSTexTriforce,true);
+  ensure_cinema_art();
   assert(tex_map[0] && tex_face && tex_bg_parch && tex_triforce);
-  SDL_SetTextureScaleMode(tex_triforce,SDL_ScaleModeLinear);
   uint16_t before[320*240],after[320*240];
   ss_is_new_3ds=false;test_ticks=100;draw_cinema();
   SDL_RenderReadPixels(ss_r,NULL,SDL_PIXELFORMAT_RGB565,before,640);

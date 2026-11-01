@@ -1,5 +1,8 @@
 #pragma once
 
+#include "types.h"
+#include "rando/rando.h"
+
 typedef struct RoomBounds RoomBounds;
 
 enum {
@@ -81,6 +84,7 @@ void Object_Draw_DoorLeft_3x4(uint16 src, int door);
 void Object_Draw_DoorRight_3x4(uint16 src, int door);
 void Dungeon_OpeningLockedDoor_Combined(bool skip_anim);
 const DungPalInfo *GetDungPalInfo(int idx);
+uint32 Dungeon_GetSpritePaletteSig(int room);
 uint16 Dungeon_GetTeleMsg(int room);
 bool Dungeon_IsPitThatHurtsPlayer();
 void Dungeon_PrepareNextRoomQuadrantUpload();
@@ -90,6 +94,9 @@ void OrientLampLightCone();
 void PrepareDungeonExitFromBossFight();
 void SavePalaceDeaths();
 void Dungeon_LoadRoom();
+// Decode static neighboring geometry without touching live WRAM/PPU or pot overlays.
+bool Dungeon_DecodeRoomMaps(uint16 room, uint16 *maps);
+void Dungeon_DrawRoomObjectsHeadless(uint16 room);  // --dump-pot-table (gen_pot_tables.py)
 void RoomDraw_DrawAllObjects(const uint8 *level_data);
 void RoomData_DrawObject_Door(uint16 a);
 void RoomData_DrawObject(uint16 r0, const uint8 *level_data);
@@ -169,7 +176,7 @@ void ChangeDoorToSwitch();
 void Dungeon_FlipCrystalPegAttribute();
 void Dungeon_HandleRoomTags();
 void Dung_TagRoutine_0x00(int k);
-void Dungeon_DetectStaircase();
+bool Dungeon_DetectStaircase();
 void RoomTag_NorthWestTrigger(int k);
 void Dung_TagRoutine_0x2A(int k);
 void Dung_TagRoutine_0x2B(int k);
@@ -245,13 +252,16 @@ uint8 Dungeon_LiftAndReplaceLiftable(Point16U *pt);
 uint8 ThievesAttic_DrawLightenedHole(uint16 pos6, uint16 a, Point16U *pt);
 uint8 HandleItemTileAction_Dungeon(uint16 x, uint16 y);
 void ManipBlock_Something(Point16U *pt);
-void RevealPotItem(uint16 pos6, uint16 pos4);
+void RevealPotItem(uint16 pos6, uint16 pos4, bool is_pot);
+int RandoPot_OverlayOamSelfCheck(void);
 void Dungeon_UpdateTileMapWithCommonTile(int x, int y, uint8 v);
 void Dungeon_PrepSpriteInducedDma(int x, int y, uint8 v);
 void Dungeon_DeleteRupeeTile(uint16 x, uint16 y);
-uint8 OpenChestForItem(uint8 tile, int *chest_position);
+uint8 OpenChestForItem(uint8 tile, int *chest_position,
+                       RandoGrantResult *grant_result);
 void OpenBigChest(uint16 loc, int *chest_position);
-uint8 OpenMiniGameChest(int *chest_position);
+uint8 OpenMiniGameChest(int *chest_position,
+                        RandoGrantResult *grant_result);
 uint16 RoomTag_BuildChestStripes(uint16 pos, uint16 y);
 void Dungeon_SetAttrForActivatedWaterOff();
 void Dungeon_FloodSwampWater_PrepTileMap();

@@ -1,6 +1,7 @@
 # Contributing
 
 Use the build and installation guidance linked from the project README.
+See [building and testing](TESTING.md) for reproducible target builds and host checks.
 Preserve the upstream attribution, existing save formats, device behavior and
 component licenses. Keep ROMs, game data, saves and private diagnostics local.
 

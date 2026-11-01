@@ -1,0 +1,88 @@
+# IcePalace.yaml — Ice Palace Inverted world-state (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/IcePalace.php`
+# (MIT, verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# The Inverted variant `extends Region\Standard\IcePalace` and overrides ONLY
+# `can_enter`; all in-dungeon location predicates (Spike Room, Big Chest,
+# Boss, etc.) and `setFillRules` / `setAlwaysAllow` are inherited from
+# `app/Region/Standard/IcePalace.php` and are already authored in
+# `assets/rando/logic_parts/30_ice_palace.yaml`. This file therefore re-declares
+# the IcePalace_Lobby region and emits ONLY the Inverted-world entry edge.
+# The codegen "last-wins" merge (per `10_desert_palace.yaml` header convention)
+# resolves region/location collisions across files.
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP item-name remappings:
+#       * RescueZelda → registry-canonical RescuedZelda
+#         (NOTE: the Standard parent `can_enter` (php:132-152) requires
+#         `RescueZelda`; the Inverted override (php:22-44) does NOT include
+#         `RescueZelda` in its returned predicate — the parent has been fully
+#         replaced. Per the trust-the-code rule, we omit RescuedZelda here.)
+#       * PegasusBoots → Boots
+#   - Dropped branches (all gated on Phase B trick / config flags that
+#     evaluate FALSE under Phase A axis pins):
+#       * itemPlacement === 'basic' damage-budget gate (php:23-29):
+#         (swordless OR hasSword(2)) AND hasHealth(12) AND (hasBottle(2) OR
+#         hasArmor) — `itemPlacement !== 'basic'` is the Phase A pinned
+#         branch so the whole sub-expression collapses to TRUE.
+#       * canOneFrameClipUW (php:30) — Phase B clip trick, FALSE.
+#       * canFakeFlipper (php:31-38) and its bunny-revive / fly /
+#         hammer-lift sub-disjunction — Phase B trick, FALSE.
+#       * canBootsClip (php:38-39) — Phase B trick, FALSE.
+#       * canOneFrameClipOW (php:41) — Phase B trick, FALSE.
+#       * canSuperSpeed AND canSpinSpeed (php:42-43) — Phase B trick, FALSE.
+#       * `region.cantTakeDamage` gate on the bunny-revive branch (php:33)
+#         — also Phase B, dropped with the parent disjunct.
+#   - After Phase A collapse the surviving Inverted `can_enter` reduces to:
+#       canMeltThings(world) AND Flippers
+#     (Flippers is the only no-glitch disjunct of php:30-43.)
+#
+# Status: translated 2026-05-27. Awaiting review + codegen integration.
+
+format_version: 1
+
+regions:
+  # External parent stub — the Inverted-world overworld region that holds
+  # the Ice Palace entrance. In Inverted, IP's entrance is at the standard
+  # Lake Hylia location which in inverted-world is still in the "south"
+  # band of the Light World map. Stubbed for cross-file region reference.
+  - id: LightWorld_South
+    name: "Light World - South (stub)"
+    source: "stub for cross-file region reference"
+
+  # Re-declared from `30_ice_palace.yaml` — codegen merges (last-wins).
+  - id: IcePalace_Lobby
+    name: "Ice Palace - Lobby"
+    dungeon: IcePalace
+    source: "app/Region/Inverted/IcePalace.php:10 (extends Standard\\IcePalace); base region in app/Region/Standard/IcePalace.php:15-63"
+
+edges:
+  # Inverted `can_enter` (Inverted/IcePalace.php:22-44). Phase A collapse:
+  #   (itemPlacement!='basic' || <basic-damage-budget>)    [TRUE — collapses out]
+  #   AND (canMeltThings(world) || canOneFrameClipUW)      [→ canMeltThings(world)]
+  #   AND (Flippers
+  #        || (canFakeFlipper AND <bunny/fly/hammer-lift>) [FALSE]
+  #        || (canBootsClip AND Boots)                     [FALSE]
+  #        || canOneFrameClipOW                            [FALSE]
+  #        || (canSuperSpeed AND canSpinSpeed))            [FALSE]
+  # Surviving: CanMeltThings(world) AND HAS_ITEM(Flippers).
+  # Slice 4 §7 surfaces the PHP trick disjuncts (canFakeFlipper,
+  # canBootsClip+Boots, canOneFrameClipOW). The canFakeFlipper PHP
+  # branch has an inner bunny sub-chain which is dropped here for
+  # macro simplicity — the conservative widening is harmless under
+  # defaults (CanFakeFlippers = FALSE). canSuperSpeed+canSpinSpeed
+  # and canOneFrameClipUW lack macros — documented drops.
+  - from: LightWorld_South
+    to: IcePalace_Lobby
+    predicate: "(CanMeltThings(world) OR CanOneFrameClipUW()) AND (HAS_ITEM(Flippers) OR CanFakeFlippers() OR CanBootsClip() OR CanOneFrameClipOW() OR (CanSuperSpeed() AND CanSpinSpeed()))"
+    source: "app/Region/Inverted/IcePalace.php:22-44 (can_enter closure)"
+
+locations: []
+
+edges_notes: |
+  All in-dungeon location predicates (Big Key Chest, Map Chest, Spike Room,
+  Freezor Chest, Big Chest, Boss, Prize) come from the Standard parent
+  class via `parent::initalize()` (php:20). Those are translated in
+  `assets/rando/logic_parts/30_ice_palace.yaml` and are NOT re-emitted here.

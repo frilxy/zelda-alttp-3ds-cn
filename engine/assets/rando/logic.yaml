@@ -1,0 +1,412 @@
+# logic.yaml — Phase A graph (starter)
+#
+# Per `randomizer-logic / Logic YAML schema and worked examples` and
+# tasks.md §3.3. Mechanically translated from the ALTTPR PHP closures at
+# `../alttp_vt_randomizer/app/Region/Standard/*.php` (MIT, verified per
+# CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# Scope of this starter file:
+#   - Two dungeons fully translated: Hyrule Castle Escape, Eastern Palace.
+#   - Light World North East overworld region (the EP/HCE parent) with the
+#     simple location predicates that are translatable in Phase A.
+#   - LinksHouse / LightWorld_NorthEast / HCE / EP regions and the edges
+#     wiring them together.
+#
+# Translation discipline (audit.md §0.10.2):
+#   - Every `source:` field cites the PHP file:line range it came from.
+#   - Phase B settings branches are dropped:
+#       * region.wildKeys / wildBigKeys / wildMaps / wildCompasses → false
+#       * region.bossNormalLocation → true
+#       * itemPlacement === 'advanced' → false
+#       * canFakeFlipper / canWaterWalk / canBootsClip / canSuperSpeed /
+#         canOneFrameClipOW → all false (Phase A `tricks=none`, NoGlitches)
+#       * item.require.Lamp → 1 (vanilla default; FireRod-substitution at
+#         EP Big Key Chest is itemPlacement=advanced and is dropped)
+#   - PHP item name remappings: `KeyH2` → `SmallKey_HyruleCastleEscape`,
+#     `BigKeyP1` → `BigKey_EasternPalace`, `CompassP1` → `Compass_EasternPalace`,
+#     `MapP1` → `Map_EasternPalace`, `PegasusBoots` → `Boots`,
+#     `RescueZelda` → `RescuedZelda`.
+#   - `PendantOfCourage` (PHP) → `OP_HAS_PRIZE(Prize_GreenPendant)` — the
+#     Green Pendant is the prize identity; OP_HAS_PRIZE resolves which
+#     dungeon currently holds it via the prize-shuffle table.
+
+format_version: 1
+
+regions:
+  - id: LinksHouse
+    name: "Link's House"
+    world_state_filter: [open, standard, retro]
+    source: "app/Region/Standard/HyruleCastleEscape.php:40"
+
+  - id: LightWorld_NorthEast
+    name: "Light World - North East"
+    source: "app/Region/Standard/LightWorld/NorthEast.php:13-49"
+
+  - id: HyruleCastleEscape
+    name: "Hyrule Castle Escape"
+    dungeon: HyruleCastleEscape
+    source: "app/Region/Standard/HyruleCastleEscape.php:14-57"
+
+  - id: EasternPalace
+    name: "Eastern Palace"
+    dungeon: EasternPalace
+    source: "app/Region/Standard/EasternPalace.php:15-62"
+
+edges:
+  # Link's House -> Light World NorthEast. Gated on RescuedZelda because
+  # in actual gameplay the player can't traverse the overworld from Link's
+  # House — guards block forward progress before the HC escape completes.
+  # After RescuedZelda, the overworld opens up.
+  - from: LinksHouse
+    to: LightWorld_NorthEast
+    predicate: "WORLDSTATE_EQ(open) OR WORLDSTATE_EQ(retro) OR HAS_ITEM(RescuedZelda)"
+    source: "app/Region/Standard/LightWorld/NorthEast.php:97-99 (can_enter closure)"
+
+  # Standard-mode HCE entry: Link must be in the starting house with sword
+  # to start the escape sequence. In Open/Retro the HCE escape is bypassed
+  # but the dungeon's locations are still reachable from the overworld.
+  - from: LinksHouse
+    to: HyruleCastleEscape
+    predicate: "TRUE()"
+    source: "app/Region/Standard/HyruleCastleEscape.php:14-57 (no can_enter closure - HCE is reachable from start)"
+
+  # EP entrance gate: PHP `can_enter` (EasternPalace.php:107-109) is
+  # `$items->has('RescueZelda')`. Open/Inverted/Retro have RescuedZelda
+  # pre-granted at world init (ALTTPR's pre_collected_items mechanism;
+  # mirrored here via Place_AssumedFill's per-world-state starting counts).
+  # In Standard the player earns RescuedZelda via the HCE escort sequence.
+  - from: LightWorld_NorthEast
+    to: EasternPalace
+    predicate: "HAS_ITEM(RescuedZelda)"
+    source: "app/Region/Standard/EasternPalace.php:107-109 (can_enter closure)"
+
+locations:
+  # ===========================================================================
+  # Hyrule Castle Escape — predicates from HyruleCastleEscape.php:65-122
+  # ===========================================================================
+
+  # The forward sewer route is dark, so vanilla zelda3 effectively gates it
+  # on the Lamp because the player can't navigate without light. ALTTPR treats
+  # `darkRoomNavigation` as a trick that bypasses the Lamp; future trick-logic
+  # should do the same here. Open/Retro's graveyard drop reaches the Secret
+  # Room from behind and bypasses that dark route, so it is Lamp-free below.
+
+  # `Sanctuary` (php:67-69): canKillEscapeThings AND has(KeyH2).
+  - id: "Sanctuary"
+    region: HyruleCastleEscape
+    can_reach: "CanKillEscapeThings(world) AND HAS_ITEM(SmallKey_HyruleCastleEscape) AND HAS_ITEM(Lamp)"
+    source: "app/Region/Standard/HyruleCastleEscape.php:67-69 — Lamp added for dark-sewer navigation"
+
+  # Open/Retro can approach from the graveyard: lift the rock, open the grave,
+  # drop into the back passage, then bomb/dash the cracked wall. General bomb
+  # access is renewable (CanBombThings=TRUE), so the alternate route reduces to
+  # CanLiftRocks. Inverted's authoritative override has the same rock branch;
+  # retaining it in this base also gives chest-anchored generated pots the right
+  # Inverted predicate. The forward sewer route retains Standard's stricter
+  # escape-weapon requirement; other modes use ordinary combat.
+  - id: "Sewers - Secret Room - Left"
+    region: HyruleCastleEscape
+    can_reach: "((WORLDSTATE_EQ(open) OR WORLDSTATE_EQ(retro) OR WORLDSTATE_EQ(inverted)) AND CanLiftRocks()) OR (HAS_ITEM(SmallKey_HyruleCastleEscape) AND HAS_ITEM(Lamp) AND CanKillHceThings(world))"
+    source: "app/Region/Open/HyruleCastleEscape.php:23-32 (graveyard or forward route); app/Region/Standard/HyruleCastleEscape.php:71-73"
+
+  - id: "Sewers - Secret Room - Middle"
+    region: HyruleCastleEscape
+    can_reach: "((WORLDSTATE_EQ(open) OR WORLDSTATE_EQ(retro) OR WORLDSTATE_EQ(inverted)) AND CanLiftRocks()) OR (HAS_ITEM(SmallKey_HyruleCastleEscape) AND HAS_ITEM(Lamp) AND CanKillHceThings(world))"
+    source: "app/Region/Open/HyruleCastleEscape.php:34-43 (graveyard or forward route); app/Region/Standard/HyruleCastleEscape.php:75-77"
+
+  - id: "Sewers - Secret Room - Right"
+    region: HyruleCastleEscape
+    can_reach: "((WORLDSTATE_EQ(open) OR WORLDSTATE_EQ(retro) OR WORLDSTATE_EQ(inverted)) AND CanLiftRocks()) OR (HAS_ITEM(SmallKey_HyruleCastleEscape) AND HAS_ITEM(Lamp) AND CanKillHceThings(world))"
+    source: "app/Region/Open/HyruleCastleEscape.php:45-54 (graveyard or forward route); app/Region/Standard/HyruleCastleEscape.php:79-81"
+
+  - id: "Sewers - Dark Cross"
+    region: HyruleCastleEscape
+    # Open/Retro/Inverted inherit the Open parent override: ordinary logic needs
+    # only the Lamp. Standard retains its escape-weapon requirement in addition
+    # to the fork's explicit dark-room Lamp gate. Keeping Inverted explicit here
+    # also makes chest-anchored generated pots inherit the same parent rule.
+    can_reach: "HAS_ITEM(Lamp) AND ((WORLDSTATE_EQ(open) OR WORLDSTATE_EQ(retro) OR WORLDSTATE_EQ(inverted)) OR (WORLDSTATE_EQ(standard) AND CanKillEscapeThings(world)))"
+    source: "app/Region/Open/HyruleCastleEscape.php:45-48; app/Region/Standard/HyruleCastleEscape.php:83-85 — Lamp added to Standard for dark-sewer navigation"
+
+  - id: "Hyrule Castle - Boomerang Chest"
+    region: HyruleCastleEscape
+    # Open/Retro use the Open parent's general combat predicate; Standard uses
+    # the stricter escape predicate. The Open KeyH2 term is intentionally not
+    # duplicated here: forced guard keys are free when enemy-drop checks are
+    # off, while rando_logic_gen.py adds the appropriate itemized key-depth
+    # requirement when those drops are shuffled.
+    can_reach: "CanKillHceThings(world)"
+    source: "app/Region/Open/HyruleCastleEscape.php:50-52; app/Region/Standard/HyruleCastleEscape.php:87-89"
+
+  - id: "Hyrule Castle - Map Chest"
+    region: HyruleCastleEscape
+    # Reachable weaponless only by sneaking past patrolling guards — a
+    # skill-based trick. Future trick-logic should gate this on a
+    # `sneak-past-guards` setting so accessibility=locations seeds stay
+    # honest. For now it's TRUE() because the seed must offer at least one
+    # sphere-0 weapon path.
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/HyruleCastleEscape.php:91-93 — relaxed (sneak-past-guards trick)"
+
+  - id: "Hyrule Castle - Zelda's Cell"
+    region: HyruleCastleEscape
+    # The 2 small-key doors between Uncle's death and Zelda's cell are gated
+    # by 2 pinned (non-randomized) small keys that drop from specific
+    # soldiers. Standard's opening escape requires a concrete weapon/refill;
+    # Open/Retro use ordinary renewable-bomb combat. The rando-pool small key
+    # is reserved for the sewers section (Sanctuary / Secret Rooms), not for
+    # this path.
+    # gen_soul_room_tables.py adds the reviewed room-0x071 Soul_Soldier wrap
+    # to this base predicate and every world-state override. It is a static
+    # inventory gate; guard kill state never changes reachability.
+    # As with Boomerang Chest, generated enemy-drop depth/big-key terms model
+    # itemized forced drops, and the generated Soldier-soul wrap composes after
+    # this world-state-specific combat predicate.
+    can_reach: "CanKillHceThings(world)"
+    source: "app/Region/Open/HyruleCastleEscape.php:54-56; app/Region/Standard/HyruleCastleEscape.php:95-97"
+
+  # `Secret Passage` (php:99-106) — adds a setFillRules dungeon-item ban.
+  # Phase B `region.wild*` config flags are pinned false, so the can_place
+  # restriction is: no key/bigkey/map/compass at this slot. HCE has only
+  # SmallKey_HyruleCastleEscape and Map_HyruleCastleEscape in our pool;
+  # other dungeon-items (every other dungeon's keys/big-keys/maps/compasses)
+  # are also barred. We enumerate the full set to stay faithful to the PHP.
+  - id: "Secret Passage"
+    region: HyruleCastleEscape
+    # Same sneak-past-guards trick as HC Map Chest — see that entry for
+    # the future trick-logic gating note.
+    can_reach: "TRUE()"
+    can_place: "NotADungeonItem()"
+    source: "app/Region/Standard/HyruleCastleEscape.php:99-106 — relaxed (sneak-past-guards trick)"
+
+  # `Link's Uncle` (php:108-114) — registry assigns region=LinksHouse.
+  # The setFillRules restricts to:
+  #   - Sanctuary->canAccess(collectItems())  : reachability gate, modeled
+  #     in the placer (not at can_place time per audit §0.10.2).
+  #   - dungeon-item ban (same as Secret Passage above).
+  # We carry only the dungeon-item ban; the Sanctuary-canAccess gate is a
+  # standard reachability post-condition that the placer enforces.
+  - id: "Link's Uncle"
+    region: LinksHouse
+    can_reach: "TRUE()"
+    can_place: "NotADungeonItem()"
+    source: "app/Region/Standard/HyruleCastleEscape.php:108-114"
+
+  # `Zelda` prize-event (php:51, 120) — can_complete = Sanctuary canAccess.
+  # The rescue requires escorting Zelda through the dark sewers to the
+  # Sanctuary, so Lamp is needed (same as Sanctuary itself).
+  # gen_soul_room_tables.py also applies Zelda's Cell's reviewed static
+  # Soldier-soul gate to this event and all world-state overrides.
+  - id: "Zelda"
+    region: HyruleCastleEscape
+    can_reach: "CanKillEscapeThings(world) AND HAS_ITEM(SmallKey_HyruleCastleEscape) AND HAS_ITEM(Lamp)"
+    source: "app/Region/Standard/HyruleCastleEscape.php:51, 116-120 (can_complete = Sanctuary access)"
+
+  # ===========================================================================
+  # Eastern Palace — predicates from EasternPalace.php:70-114
+  # ===========================================================================
+
+  # NOTE: every EP entry below carries an explicit `region:` field so the
+  # codegen "last-wins" merge can't silently lose the binding if the
+  # logic_parts/01_eastern_palace.yaml duplicates ever get removed (same
+  # defense the LightWorld_NorthEast section uses; same regression that
+  # prompted the codegen's region-binding well-formedness guard).
+  # EP - Compass Chest (php:51) — no setRequirements; default = TRUE.
+  # (Listed for source citation; can_reach defaults to TRUE.)
+  - id: "Eastern Palace - Compass Chest"
+    region: EasternPalace_Lobby
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/EasternPalace.php:51"
+
+  # EP - Big Chest (php:72-74): has(BigKeyP1).
+  # ALTTPR does NOT set setFillRules / setAlwaysAllow on the Big Chest;
+  # the dungeon's own compass/map are placeable here by default. Phase A
+  # leaves can_place / always_allow at their defaults (TRUE / FALSE).
+  - id: "Eastern Palace - Big Chest"
+    region: EasternPalace_Lobby
+    can_reach: "HAS_ITEM(BigKey_EasternPalace)"
+    source: "app/Region/Standard/EasternPalace.php:72-74"
+
+  # EP - Cannonball Chest (php:53) — no setRequirements; default.
+  - id: "Eastern Palace - Cannonball Chest"
+    region: EasternPalace_Lobby
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/EasternPalace.php:53"
+
+  # EP - Big Key Chest (php:76-78): has(Lamp, item.require.Lamp default 1).
+  # The PHP `itemPlacement=='advanced' && has(FireRod)` substitute branch
+  # is Phase B; dropped here.
+  - id: "Eastern Palace - Big Key Chest"
+    region: EasternPalace_Lobby
+    can_reach: "HAS_ITEM(Lamp)"
+    source: "app/Region/Standard/EasternPalace.php:76-78"
+
+  # EP - Map Chest (php:55) — no setRequirements; default.
+  - id: "Eastern Palace - Map Chest"
+    region: EasternPalace_Lobby
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/EasternPalace.php:55"
+
+  # EP - Boss (php:84-105):
+  #   canShootArrows(world)
+  #   && (has(Lamp, req.Lamp default 1) || (itemPlacement=='advanced' && FireRod))
+  #   && has(BigKeyP1)
+  #   && boss->canBeat(items, locations)   [Armos Knights]
+  #   && (!wildCompasses || has(CompassP1) || boss-holds-CompassP1)
+  #   && (!wildMaps || has(MapP1) || boss-holds-MapP1)
+  # Phase A: wildCompasses/wildMaps are false → both wild-checks collapse
+  # to TRUE. itemPlacement=='advanced' branch dropped.
+  - id: "Eastern Palace - Boss"
+    region: EasternPalace_PastArmos
+    can_reach: "CanShootArrowsL1() AND HAS_ITEM(Lamp) AND HAS_ITEM(BigKey_EasternPalace) AND CanKillBoss(EasternPalace)"
+    # setFillRules (php:92-101): if !bossNormalLocation && item is dungeon
+    # item → false. Phase A pins bossNormalLocation=true so the condition
+    # is unreachable → can_place = TRUE (default).
+    # setAlwaysAllow (php:102-105): when bossNormalLocation=true (default),
+    # the EP compass/map are allowed at the boss slot. The codegen
+    # well-formedness pass restricts OP_ITEM_IS to can_place contexts; the
+    # "allow EP compass/map" semantics here are vacuous in Phase A because
+    # can_place is already TRUE (no Phase B restrictions in force) — the
+    # always_allow override has no work to do until Phase B reintroduces
+    # the `region.bossNormalLocation=false` and dungeon_items shuffle modes.
+    source: "app/Region/Standard/EasternPalace.php:84-105"
+
+  # EP - Prize (php:58, 111) — can_complete = Boss canAccess.
+  - id: "Eastern Palace - Prize"
+    region: EasternPalace_PastArmos
+    can_reach: "CanShootArrowsL1() AND HAS_ITEM(Lamp) AND HAS_ITEM(BigKey_EasternPalace) AND CanKillBoss(EasternPalace)"
+    source: "app/Region/Standard/EasternPalace.php:58, 80-82, 111 (can_complete = Boss access)"
+
+  # ===========================================================================
+  # Light World — North East — predicates from LightWorld/NorthEast.php:57-99
+  # ===========================================================================
+
+  # `Sahasrahla` (php:59-61): has(PendantOfCourage) → engine resolves which
+  # dungeon currently holds the Green Pendant via prize-shuffle, then
+  # checks DUNGEON_CLEARED on it. OP_HAS_PRIZE is the right Phase A op
+  # (op_registry.yaml:106-115).
+  # NOTE: every entry below MUST carry `region: LightWorld_NorthEast`.
+  # The 6 locations here used to be duplicated in
+  # `logic_parts/45_lightworld_northeast.yaml` (which carried the region
+  # binding via the codegen "last-wins" merge). The duplicate-override
+  # fix removed those duplicates and left logic.yaml as the canonical
+  # source, but the original entries here had no `region:` field —
+  # codegen defaulted to `0xFFFF` which BYPASSES region-membership
+  # reachability, letting placements at King Zora etc. be sphere-0
+  # reachable without the RescuedZelda gate that LightWorld_NorthEast's
+  # entry edge enforces in Standard mode. Region binding restored here.
+  - id: "Sahasrahla"
+    region: LightWorld_NorthEast
+    can_reach: "OP_HAS_PRIZE(Prize_GreenPendant)"
+    source: "app/Region/Standard/LightWorld/NorthEast.php:59-61"
+
+  # `King Zora` (php:63-69):
+  #   canFakeFlipper || ((canWaterWalk || canBootsClip) && PegasusBoots)
+  #   || canOneFrameClipOW || canLiftRocks || Flippers
+  # Phase A retained `canLiftRocks || Flippers`. Phase B Slice 4 §7
+  # surfaces `CanFakeFlippers`, `CanBootsClip` (boots gate is inside
+  # the macro), and the OWG bypass. `canWaterWalk` lacks a macro
+  # (Phase B reservation) so its disjunct is dropped.
+  - id: "King Zora"
+    region: LightWorld_NorthEast
+    can_reach: "CanLiftRocks() OR HAS_ITEM(Flippers) OR CanFakeFlippers() OR CanBootsClip() OR CanOneFrameClipOW() OR (CanWaterWalk() AND HAS_ITEM(Boots))"
+    source: "app/Region/Standard/LightWorld/NorthEast.php:63-69"
+
+  # `Potion Shop` (php:71-73): has(Mushroom).
+  - id: "Potion Shop"
+    region: LightWorld_NorthEast
+    can_reach: "HAS_ITEM(Mushroom)"
+    source: "app/Region/Standard/LightWorld/NorthEast.php:71-73"
+
+  # `Zora's Ledge` (php:75-83): has(Flippers) OR (PegasusBoots AND trick).
+  # All trick-branch disjuncts collapse to FALSE in Phase A → just Flippers.
+  - id: "Zora's Ledge"
+    region: LightWorld_NorthEast
+    can_reach: "HAS_ITEM(Flippers)"
+    source: "app/Region/Standard/LightWorld/NorthEast.php:75-83"
+
+  # `Waterfall Fairy - Left/Right` (php:85-95): same Flippers-or-trick body.
+  - id: "Waterfall Fairy - Left"
+    region: LightWorld_NorthEast
+    can_reach: "HAS_ITEM(Flippers)"
+    source: "app/Region/Standard/LightWorld/NorthEast.php:85-89"
+
+  - id: "Waterfall Fairy - Right"
+    region: LightWorld_NorthEast
+    can_reach: "HAS_ITEM(Flippers)"
+    source: "app/Region/Standard/LightWorld/NorthEast.php:91-95"
+
+macros:
+  # CanKillArmosKnights — EP boss. Inlined verbatim from the worked example
+  # `logic_examples/01_eastern_palace.yaml` (lines 118-121). When the full
+  # Boss table (task 3.4a) lands, this macro is superseded by a single
+  # CanKillBoss(ArmosKnights) call.
+  - name: CanKillArmosKnights
+    parameters: []
+    body: "(HasSword(1) OR HAS_ITEM(Hammer) OR CanShootArrowsL1() OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod) OR HAS_ITEM(CaneOfSomaria) OR HAS_ITEM(CaneOfByrna)) AND NeedsBossSoul(Soul_ArmosKnights)"
+    source: "app/Boss.php (Boss::canBeat for ArmosKnights — table TBD in §3.4a)"
+
+  # NotADungeonItem — the can_place restriction the PHP setFillRules
+  # closures spell out as `!(item instanceof Key||BigKey||Map||Compass)`
+  # in HCE Secret Passage (php:101-106) and Link's Uncle (php:108-114).
+  # The filter must bar EVERY dungeon item from these always-reachable
+  # slots. `region.wild*` and Retro genericKeys are now LIVE (no longer
+  # pinned false), so SmallKey_DesertPalace/SmallKey_EasternPalace (the
+  # fungible-under-wild small keys) and the Retro GenericKey (id 125) are
+  # enumerated below too — otherwise an early Key could land on Link's
+  # Uncle / Secret Passage, violating the `!(item instanceof Key)` rule.
+  - name: NotADungeonItem
+    parameters: []
+    # Enumerates every small-key/big-key/map/compass id present in our
+    # item_registry.yaml. Listed verbatim so codegen well-formedness can
+    # validate each item id.
+    body: |
+      NOT OP_ITEM_IS(SmallKey_HyruleCastleEscape)
+      AND NOT OP_ITEM_IS(Map_HyruleCastleEscape)
+      AND NOT OP_ITEM_IS(BigKey_EasternPalace)
+      AND NOT OP_ITEM_IS(Map_EasternPalace)
+      AND NOT OP_ITEM_IS(Compass_EasternPalace)
+      AND NOT OP_ITEM_IS(BigKey_DesertPalace)
+      AND NOT OP_ITEM_IS(Map_DesertPalace)
+      AND NOT OP_ITEM_IS(Compass_DesertPalace)
+      AND NOT OP_ITEM_IS(SmallKey_TowerOfHera)
+      AND NOT OP_ITEM_IS(BigKey_TowerOfHera)
+      AND NOT OP_ITEM_IS(Map_TowerOfHera)
+      AND NOT OP_ITEM_IS(Compass_TowerOfHera)
+      AND NOT OP_ITEM_IS(SmallKey_HyruleCastleTower)
+      AND NOT OP_ITEM_IS(SmallKey_PalaceOfDarkness)
+      AND NOT OP_ITEM_IS(BigKey_PalaceOfDarkness)
+      AND NOT OP_ITEM_IS(Map_PalaceOfDarkness)
+      AND NOT OP_ITEM_IS(Compass_PalaceOfDarkness)
+      AND NOT OP_ITEM_IS(SmallKey_SwampPalace)
+      AND NOT OP_ITEM_IS(BigKey_SwampPalace)
+      AND NOT OP_ITEM_IS(Map_SwampPalace)
+      AND NOT OP_ITEM_IS(Compass_SwampPalace)
+      AND NOT OP_ITEM_IS(SmallKey_SkullWoods)
+      AND NOT OP_ITEM_IS(BigKey_SkullWoods)
+      AND NOT OP_ITEM_IS(Map_SkullWoods)
+      AND NOT OP_ITEM_IS(Compass_SkullWoods)
+      AND NOT OP_ITEM_IS(SmallKey_ThievesTown)
+      AND NOT OP_ITEM_IS(BigKey_ThievesTown)
+      AND NOT OP_ITEM_IS(Map_ThievesTown)
+      AND NOT OP_ITEM_IS(Compass_ThievesTown)
+      AND NOT OP_ITEM_IS(SmallKey_IcePalace)
+      AND NOT OP_ITEM_IS(BigKey_IcePalace)
+      AND NOT OP_ITEM_IS(Map_IcePalace)
+      AND NOT OP_ITEM_IS(Compass_IcePalace)
+      AND NOT OP_ITEM_IS(SmallKey_MiseryMire)
+      AND NOT OP_ITEM_IS(BigKey_MiseryMire)
+      AND NOT OP_ITEM_IS(Map_MiseryMire)
+      AND NOT OP_ITEM_IS(Compass_MiseryMire)
+      AND NOT OP_ITEM_IS(SmallKey_TurtleRock)
+      AND NOT OP_ITEM_IS(BigKey_TurtleRock)
+      AND NOT OP_ITEM_IS(Map_TurtleRock)
+      AND NOT OP_ITEM_IS(Compass_TurtleRock)
+      AND NOT OP_ITEM_IS(SmallKey_GanonsTower)
+      AND NOT OP_ITEM_IS(BigKey_GanonsTower)
+      AND NOT OP_ITEM_IS(Map_GanonsTower)
+      AND NOT OP_ITEM_IS(Compass_GanonsTower)
+      AND NOT OP_ITEM_IS(SmallKey_EasternPalace)
+      AND NOT OP_ITEM_IS(SmallKey_DesertPalace)
+      AND NOT OP_ITEM_IS(GenericKey)
+    source: "app/Region/Standard/HyruleCastleEscape.php:101-106, 110-113 (setFillRules dungeon-item closures)"

@@ -82,11 +82,18 @@ uint8_t *ReadWholeFile(const char *name, size_t *length) {
 #else
 uint8_t *ReadWholeFile(const char *name, size_t *length) {
   const char* externalDir = SDL_AndroidGetExternalStoragePath();
+  // "apk:<path>" is a file of the APK's assets (the mods built into the APK):
+  // SDL opens a relative path from the app's internal storage, then from the
+  // assets.
+  bool in_apk = strncmp(name, "apk:", 4) == 0;
 
-  if (externalDir) {
+  if (externalDir || in_apk) {
     // Create a file path for the config file in the external storage directory
     char ExternalFilePath[256];
-    snprintf(ExternalFilePath, sizeof(ExternalFilePath), "%s/%s", externalDir, name);
+    if (in_apk)
+      snprintf(ExternalFilePath, sizeof(ExternalFilePath), "%s", name + 4);
+    else
+      snprintf(ExternalFilePath, sizeof(ExternalFilePath), "%s/%s", externalDir, name);
 
     SDL_RWops *rwops = SDL_RWFromFile(ExternalFilePath, "rb");
     if (rwops == NULL) {

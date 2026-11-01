@@ -1,0 +1,147 @@
+# TowerOfHera.yaml — Tower of Hera Inverted world-state (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/TowerOfHera.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# The Inverted variant `extends Region\Standard\TowerOfHera` and calls
+# `parent::initalize()` (php:21), then overrides ONLY:
+#   - the `$main` and `$mire` lambdas (php:23-49)
+#   - "Tower of Hera - Big Key Chest" setRequirements/AlwaysAllow/FillRules (php:52-62)
+#   - "Tower of Hera - Compass Chest" setRequirements (php:64-68)
+#   - "Tower of Hera - Big Chest" setRequirements (php:70-75)
+#   - "Tower of Hera - Boss" setRequirements/FillRules/AlwaysAllow (php:77-99)
+#   - `can_enter` (php:101-104)
+# In-dungeon locations NOT overridden (Tower of Hera - Basement Cage,
+# Tower of Hera - Map Chest, Tower of Hera - Prize) inherit from the Standard
+# parent and are already authored in `assets/rando/logic_parts/11_tower_of_hera.yaml`.
+# The codegen "last-wins" merge handles region/location collisions.
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP item-name remappings (used in this file):
+#       * KeyP3       → SmallKey_TowerOfHera
+#       * BigKeyP3    → BigKey_TowerOfHera
+#       * CompassP3   → Compass_TowerOfHera
+#       * MapP3       → Map_TowerOfHera
+#       * KeyD6 / BigKeyD6 → SmallKey_MiseryMire / BigKey_MiseryMire
+#         (referenced inside the `$mire` lambda; lambda collapses to FALSE so
+#         these names never appear in surviving predicates)
+#       * PegasusBoots → Boots (referenced inside dropped trick branches)
+#   - Dropped branches (all gated on Phase B trick / config flags that
+#     evaluate FALSE under Phase A axis pins; per op_registry.yaml the
+#     OP_TRICK / OP_DIFFICULTY_AT_LEAST / OP_GLITCH_LEVEL_AT_LEAST ops are
+#     reserved but no Phase B trick predicates are authored yet):
+#       * `$main` WestDM branch (php:26-37): the entire trick disjunction
+#         requires one of canBootsClip, canSuperSpeed, canOneFrameClipOW,
+#         canOWYBA, canBunnyRevive, canSuperBunny. All Phase B → FALSE.
+#         The surviving EastDM disjunct (php:24-26) is what we keep:
+#           EastDM->canEnter AND MoonPearl AND Hammer.
+#       * `$mire` lambda (php:40-49): gated on canOneFrameClipUW → FALSE.
+#         All references collapse out.
+#       * Big Key Chest secondary-pearl disjunct (php:55-57):
+#         `(MoonPearl OR canOWYBA+hasABottle OR canBunnyRevive)` —
+#         MoonPearl is already required by can_enter via `$main`, so this
+#         reduces to TRUE inside the region. The trick fallbacks drop.
+#       * Big Key Chest setAlwaysAllow / setFillRules (php:58-62) gate on
+#         `accessibility !== 'locations'`; Phase A pins accessibility=items
+#         so both rules degenerate to defaults.
+#       * `region.wildCompasses` / `region.wildMaps` (php:81-85) → false →
+#         Boss guards collapse to TRUE.
+#       * `region.bossNormalLocation` (php:86-99) → true → boss-slot
+#         dungeon-item ban (setFillRules) is unreachable; setAlwaysAllow
+#         allows ToH's own compass/map.
+#
+# Status: translated 2026-05-27. Awaiting review + codegen integration.
+
+format_version: 1
+
+regions:
+  # External parent — in Inverted, East Death Mountain is the entry side
+  # (per `$main` lambda php:24-26). Stubbed for cross-file region reference;
+  # codegen "last-wins" merge resolves with the eventual full LightWorld/
+  # DeathMountain/East translation.
+  - id: LightWorld_DeathMountain_East
+    name: "Light World - Death Mountain East (stub)"
+    source: "stub for cross-file region reference"
+
+  # Re-declared from `11_tower_of_hera.yaml` — codegen merges (last-wins).
+  - id: TowerOfHera_Lobby
+    name: "Tower of Hera - Lobby"
+    dungeon: TowerOfHera
+    world_state_filter: [Inverted]
+    source: "app/Region/Inverted/TowerOfHera.php:11 (extends Standard\\TowerOfHera); base region in app/Region/Standard/TowerOfHera.php"
+
+edges:
+  # Inverted `can_enter` (php:101-104): `$main OR $mire`.
+  # $mire collapses to FALSE (canOneFrameClipUW Phase B).
+  # $main (php:23-38) surviving Phase A path: EastDM->canEnter AND MoonPearl
+  # AND Hammer (the WestDM disjunct collapses entirely — all its branches
+  # require Phase B tricks).
+  - from: LightWorld_DeathMountain_East
+    to: TowerOfHera_Lobby
+    predicate: "HAS_ITEM(MoonPearl) AND HAS_ITEM(Hammer)"
+    source: "app/Region/Inverted/TowerOfHera.php:23-38, 101-104 (can_enter + $main lambda)"
+
+locations:
+  # Big Key Chest (php:52-62):
+  #   canLightTorches AND ((KeyP3 AND (MoonPearl|...)) OR $mire)
+  # $mire = FALSE. The (MoonPearl|...) clause is satisfied by MoonPearl which
+  # is already required by the entry edge; trick fallbacks drop. Reduces to:
+  #   canLightTorches AND SmallKey_TowerOfHera.
+  - id: "Tower of Hera - Big Key Chest"
+    name: "Tower of Hera - Big Key Chest"
+    region: TowerOfHera_Lobby
+    type: Chest
+    vanilla_item: BigKey_TowerOfHera
+    dungeon_item_class: big_key
+    can_reach: "CanLightTorches() AND HAS_ITEM(SmallKey_TowerOfHera)"
+    # setFillRules + setAlwaysAllow (php:58-62) gate on accessibility != 'locations';
+    # Phase A pins accessibility=items → both rules degenerate to defaults.
+    source: "app/Region/Inverted/TowerOfHera.php:52-62"
+
+  # Compass Chest (php:64-68):
+  #   ($main AND has(BigKeyP3)) OR $mire
+  # $main covered by entry edge; $mire = FALSE → reduces to BigKey.
+  - id: "Tower of Hera - Compass Chest"
+    name: "Tower of Hera - Compass Chest"
+    region: TowerOfHera_Lobby
+    type: Chest
+    vanilla_item: Compass_TowerOfHera
+    dungeon_item_class: compass
+    can_reach: "HAS_ITEM(BigKey_TowerOfHera)"
+    source: "app/Region/Inverted/TowerOfHera.php:64-68"
+
+  # Big Chest (php:70-75):
+  #   ($main AND has(BigKeyP3)) OR ($mire AND (has(BigKeyP3) OR has(BigKeyD6)))
+  # $main on entry edge; $mire = FALSE → reduces to BigKey.
+  - id: "Tower of Hera - Big Chest"
+    name: "Tower of Hera - Big Chest"
+    region: TowerOfHera_Lobby
+    type: BigChest
+    vanilla_item: MirrorShield
+    can_reach: "HAS_ITEM(BigKey_TowerOfHera)"
+    source: "app/Region/Inverted/TowerOfHera.php:70-75"
+
+  # Boss (php:77-99):
+  #   $main
+  #   && boss->canBeat                 -- Moldorm: HasSword(1) OR Hammer
+  #   && (has(BigKeyP3) || ($mire && has(BigKeyD6)))
+  #   && (!wildCompasses || ...)       -- collapses to TRUE
+  #   && (!wildMaps || ...)            -- collapses to TRUE
+  # $main on entry edge; $mire = FALSE → BigKey check reduces to BigKey_TowerOfHera.
+  - id: "Tower of Hera - Boss"
+    name: "Tower of Hera - Boss"
+    region: TowerOfHera_Lobby
+    type: Drop
+    vanilla_item: BossHeartContainer
+    can_reach: "CanKillBoss(TowerOfHera) AND HAS_ITEM(BigKey_TowerOfHera)"
+    # setFillRules (php:86-95): bossNormalLocation=true makes the dungeon-item
+    # ban unreachable; default TRUE.
+    # setAlwaysAllow (php:96-99): when bossNormalLocation=true (default),
+    # ToH's own compass/map are allowed at the boss slot.
+    always_allow: "OP_ITEM_IS(Compass_TowerOfHera) OR OP_ITEM_IS(Map_TowerOfHera)"
+    source: "app/Region/Inverted/TowerOfHera.php:77-99"
+
+# Note on macros: CanKillMoldorm and CanLightTorches are defined in
+# `11_tower_of_hera.yaml` and `macros.yaml` respectively; codegen pulls them
+# from the merged macro table.

@@ -1,0 +1,77 @@
+# inverted/Shops.yaml — Inverted overrides for the three shop-slot families
+# whose upstream INVERTED requirement callbacks differ from Standard
+# (add-rando-shopsanity audit HIGH-2/MED-1 fix; the other six shops carry no
+# upstream callback in either world state and keep their base entries).
+#
+# The base 50_shops.yaml claim "no inverted override is needed" was WRONG:
+# upstream re-authors all three callbacks for Inverted because the pearl
+# context flips. The seed-breaking case was the Light World Death Mountain
+# Shop: the fork's inverted graph reaches LightWorld_DeathMountain_East as a
+# BUNNY (DarkWorld_DeathMountain_East edge, CanLiftDarkRocks), every sibling
+# row there re-adds HAS_ITEM(MoonPearl) (Spiral / Mimic / Paradox), and the
+# base entry's bare CanBombThings() let the placer put progression — even
+# the Moon Pearl itself — behind a bombable wall a bunny cannot bomb.
+#
+# House inverted style: trick/glitch alternatives DROP (see the Spiral Cave
+# note in inverted/LightWorld/DeathMountain/East.yaml); only the NoGlitches
+# survivors are authored.
+
+format_version: 1
+
+locations:
+  # `Light World Death Mountain Shop` (Inverted/LightWorld/DeathMountain/
+  # East.php:37-49): NoGlitches survivors are MoonPearl AND Hookshot (+ the
+  # bomb wall). The Hookshot belongs at the LOCATION level and must NOT be
+  # assumed from region reachability: the region's dark-rock-lift entry
+  # (CanLiftDarkRocks portal edge, East.php:190-203 branch 1) admits a
+  # Mitt-only arrival, and upstream's per-location callbacks — Spiral and
+  # Paradox need only MoonPearl from there — prove the region edge carries
+  # no Hookshot. The first override shipped without Hookshot (external
+  # review P1: a Hookshot placed IN this shop passed generation but was
+  # physically self-locked). The bomb gate is kept — the wall is physical
+  # in this fork's US-1.0 runtime.
+  - id: "Light World Death Mountain Shop - 0"
+    region: LightWorld_DeathMountain_East
+    can_reach: "CanBombThings() AND HAS_ITEM(MoonPearl) AND HAS_ITEM(Hookshot)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:37-49"
+  - id: "Light World Death Mountain Shop - 1"
+    region: LightWorld_DeathMountain_East
+    can_reach: "CanBombThings() AND HAS_ITEM(MoonPearl) AND HAS_ITEM(Hookshot)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:37-49"
+  - id: "Light World Death Mountain Shop - 2"
+    region: LightWorld_DeathMountain_East
+    can_reach: "CanBombThings() AND HAS_ITEM(MoonPearl) AND HAS_ITEM(Hookshot)"
+    source: "app/Region/Inverted/LightWorld/DeathMountain/East.php:37-49"
+
+  # `Dark World Outcasts Shop` (Inverted/DarkWorld/NorthWest.php:20-22):
+  # Hammer only — Link is native in the Dark World, no pearl arm.
+  - id: "Dark World Village of Outcasts - 0"
+    region: DarkWorld_NorthWest
+    can_reach: "HAS_ITEM(Hammer)"
+    source: "app/Region/Inverted/DarkWorld/NorthWest.php:20-22"
+  - id: "Dark World Village of Outcasts - 1"
+    region: DarkWorld_NorthWest
+    can_reach: "HAS_ITEM(Hammer)"
+    source: "app/Region/Inverted/DarkWorld/NorthWest.php:20-22"
+  - id: "Dark World Village of Outcasts - 2"
+    region: DarkWorld_NorthWest
+    can_reach: "HAS_ITEM(Hammer)"
+    source: "app/Region/Inverted/DarkWorld/NorthWest.php:20-22"
+
+  # `Dark World Potion Shop` (Inverted/DarkWorld/NorthEast.php:35-52):
+  # NoGlitches survivors — canFly OR Hammer OR Flippers OR (MagicMirror AND
+  # North-East-Light-World canEnter AND MoonPearl). The OWYBA / boots-clip /
+  # spin-speed / one-frame-clip / fake-flipper / water-walk / bunny-revive
+  # alternatives drop per house inverted style.
+  - id: "Dark World Potion Shop - 0"
+    region: DarkWorld_NorthEast
+    can_reach: "CanFly(world) OR HAS_ITEM(Hammer) OR HAS_ITEM(Flippers) OR (HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(LightWorld_NorthEast) AND HAS_ITEM(MoonPearl))"
+    source: "app/Region/Inverted/DarkWorld/NorthEast.php:35-52"
+  - id: "Dark World Potion Shop - 1"
+    region: DarkWorld_NorthEast
+    can_reach: "CanFly(world) OR HAS_ITEM(Hammer) OR HAS_ITEM(Flippers) OR (HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(LightWorld_NorthEast) AND HAS_ITEM(MoonPearl))"
+    source: "app/Region/Inverted/DarkWorld/NorthEast.php:35-52"
+  - id: "Dark World Potion Shop - 2"
+    region: DarkWorld_NorthEast
+    can_reach: "CanFly(world) OR HAS_ITEM(Hammer) OR HAS_ITEM(Flippers) OR (HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(LightWorld_NorthEast) AND HAS_ITEM(MoonPearl))"
+    source: "app/Region/Inverted/DarkWorld/NorthEast.php:35-52"

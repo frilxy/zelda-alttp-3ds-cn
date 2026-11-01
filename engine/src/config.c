@@ -14,6 +14,26 @@ enum {
 };
 
 Config g_config;
+typedef struct ConfigBuffer { struct ConfigBuffer *next; char *data; } ConfigBuffer;
+static ConfigBuffer *config_buffers;
+
+const char *Config_InternString(const char *s) {
+  // Strings assigned by optional runtime presentation settings must survive
+  // ParseConfigFile reloading its file-backed buffers.
+  static ConfigBuffer *interned;
+  if (!s) return NULL;
+  for (ConfigBuffer *p = interned; p; p = p->next)
+    if (strcmp(p->data, s) == 0) return p->data;
+  ConfigBuffer *owner = malloc(sizeof(*owner));
+  char *copy = malloc(strlen(s) + 1);
+  if (!owner || !copy) { free(owner); free(copy); return NULL; }
+  strcpy(copy, s);
+  *owner = (ConfigBuffer){interned, copy};
+  interned = owner;
+  return copy;
+}
+
+
 
 #define REMAP_SDL_KEYCODE(key) ((key) & SDLK_SCANCODE_MASK ? kKeyMod_ScanCode : 0) | (key) & (kKeyMod_ScanCode - 1)
 #define _(x) REMAP_SDL_KEYCODE(x)
@@ -402,6 +422,9 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
     } else if (StringEqualsNoCase(key, "LinkGraphics")) {
       g_config.link_graphics = value;
       return true;
+    } else if (StringEqualsNoCase(key, "Mods")) {
+      g_config.mods = *value ? value : NULL;
+      return true;
     } else if (StringEqualsNoCase(key, "Shader")) {
       g_config.shader = *value ? value : NULL;
       return true;
@@ -438,6 +461,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return true;
     } else if (StringEqualsNoCase(key, "ResumeMSU")) {
       return ParseBool(value, &g_config.resume_msu);
+    } else if (StringEqualsNoCase(key, "PannedSoundEffects")) {
+      return ParseBool(value, &g_config.panned_sound_effects);
     }
   } else if (section == 3) {
     if (StringEqualsNoCase(key, "Autosave")) {
@@ -472,21 +497,31 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
         g_config.features0 |= kFeatures0_ExtendScreen64;
       if (g_config.extended_aspect_ratio && !novis)
         g_config.features0 |= kFeatures0_WidescreenVisualFixes;
+      g_config.wide_features_off = (nospr ? kFeatures0_ExtendScreen64 : 0) |
+                                   (novis ? kFeatures0_WidescreenVisualFixes : 0);
       return true;
     } else if (StringEqualsNoCase(key, "DisplayPerfInTitle")) {
       return ParseBool(value, &g_config.display_perf_title);
     } else if (StringEqualsNoCase(key, "DisableFrameDelay")) {
       return ParseBool(value, &g_config.disable_frame_delay);
     } else if (StringEqualsNoCase(key, "Language")) {
-      g_config.language = value;
+      g_config.language = *value ? value : NULL;  // empty: the USA text
+      return true;
+    } else if (StringEqualsNoCase(key, "SaveFolder")) {
+      g_config.save_folder = *value ? value : NULL;
       return true;
     } else if (StringEqualsNoCase(key, "SecondScreenXItemRing") ||
                StringEqualsNoCase(key, "SecondScreenSwap") ||
-               StringEqualsNoCase(key, "SecondScreenCrt")) {
+               StringEqualsNoCase(key, "SecondScreenCrt") ||
+               StringEqualsNoCase(key, "MenuLanguage")) {
       return true;  // read by the second-screen UI only, the engine ignores it
+    } else if (StringEqualsNoCase(key, "WideEdgeMode")) {
+      // Auto and FixedCamera: the fixed camera; Standard: the side bands stop
+      // at the area's edges. platform_3ds.c reads it again on the 3DS.
+      g_config.wide_edge_mode = StringEqualsNoCase(value, "Standard") ? 0 : 1;
+      return true;
     } else if (StringEqualsNoCase(key, "DisplayMode") ||
                StringEqualsNoCase(key, "WideMode") ||
-               StringEqualsNoCase(key, "WideEdgeMode") ||
                StringEqualsNoCase(key, "WideZoom") ||
                StringEqualsNoCase(key, "CStickMode") ||
                StringEqualsNoCase(key, "CStickTurboMultiplier") ||
@@ -532,6 +567,10 @@ static bool ParseOneConfigFile(const char *filename, int depth) {
   if (!filedata)
     return false;
   
+  ConfigBuffer *owner = malloc(sizeof(*owner));
+  if (!owner) { free(filedata); Die("Config buffer allocation failed"); }
+  *owner = (ConfigBuffer){config_buffers, filedata};
+  config_buffers = owner;
   int section = -2;
   g_config.memory_buffer = filedata;
 
@@ -564,7 +603,21 @@ static bool ParseOneConfigFile(const char *filename, int depth) {
 }
 
 void ParseConfigFile(const char *filename) {
+  // A real reset/language switch re-enters in this process. Old key maps and
+  // included-file string storage must not accumulate or bleed into a profile.
+  while (config_buffers) {
+    ConfigBuffer *next = config_buffers->next;
+    free(config_buffers->data); free(config_buffers); config_buffers = next;
+  }
+  free(keymap_hash); keymap_hash = NULL; keymap_hash_size = 0;
+  memset(keymap_hash_first, 0, sizeof(keymap_hash_first));
+  free(joymap_ents); joymap_ents = NULL; joymap_size = 0;
+  memset(joymap_first, 0, sizeof(joymap_first)); has_joypad_controls = false;
+  memset(&g_config, 0, sizeof(g_config));
+  g_config.field_item_sprites = true;
+  g_config.enemy_drop_marker = kEnemyDropMarker_Generic;
   g_config.msuvolume = 100;  // default msu volume, 100%
+  g_config.wide_edge_mode = 1;  // fixed camera, as on the 3DS
 
   if (filename != NULL || !ParseOneConfigFile("zelda3.user.ini", 0)) {
     if (filename == NULL)

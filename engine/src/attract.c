@@ -1,4 +1,5 @@
 #include "zelda_rtl.h"
+#include "localized.h"
 #include "variables.h"
 #include "snes/snes_regs.h"
 #include "load_gfx.h"
@@ -185,8 +186,8 @@ void Attract_ZeldaPrison_Case1() {
     }
 
     k = attract_var10 >= 0xc0 ? 0 :
-      attract_var10 >= 0xb8 ? 1 :
-      attract_var10 >= 0xb0 ? 2 :
+      attract_var10 >= (g_loc_rom ? 0xbb : 0xb8) ? 1 :  // $8E:B385
+      attract_var10 >= (g_loc_rom ? 0xb5 : 0xb0) ? 2 :
       attract_var10 >= 0xa0 ? 3 : 4;
   }
   if (frame_counter & 1)
@@ -423,7 +424,9 @@ void Attract_InitGraphics() {  // 8cee0c
   messaging_module = 0;
   dialogue_message_index = 0x112;
   BG2VOFS_copy2 = 0;
-  attract_legend_ctr = 0x1010;
+  // The French Canadian cartridge tells the legend in fewer frames
+  // ($8E:AE31).
+  attract_legend_ctr = g_loc_rom ? 0x0e80 : 0x1010;
   attract_state += 3;
   HdmaSetup(0xCFA87, 0xCFA94, 1, (uint8)WH0, (uint8)WH2, 0);
   HDMAEN_copy = 0xc0;
@@ -619,7 +622,7 @@ void Attract_PrepMaidenWarp() {  // 8cf058
   attract_var5 = 0;
   attract_var11 = 0;
 
-  oam_priority_value = 0xc0;
+  oam_priority_value = g_loc_rom ? 0x180 : 0xc0;  // longer text there ($8E:B0A2)
   Attract_PrepFinish();
 }
 
@@ -657,7 +660,8 @@ void Attract_EnactStory() {  // 8cf115
 }
 
 void AttractDramatize_PolkaDots() {  // 8cf126
-  if (!(frame_counter & 3)) {
+  // Twice as fast in the French Canadian cartridge ($8E:B0F8).
+  if (!(frame_counter & (g_loc_rom ? 1 : 3))) {
     BYTE(BG1VOFS_copy)++;
     BYTE(BG1HOFS_copy)++;
     BYTE(BG2VOFS_copy)++;
@@ -683,12 +687,14 @@ void AttractDramatize_PolkaDots() {  // 8cf126
 }
 
 void AttractDramatize_WorldMap() {  // 8cf176
-  if (timer_for_mode7_zoom != 0) {
-    if (timer_for_mode7_zoom < 15)
+  // The French Canadian cartridge zooms two steps a frame, so it stops at 1
+  // and fades from 0x1f ($8E:B149).
+  if (timer_for_mode7_zoom != (g_loc_rom ? 1 : 0)) {
+    if (timer_for_mode7_zoom < (g_loc_rom ? 0x1f : 15))
       INIDISP_copy--;
     if (!--attract_var10) {
       attract_var10 = 1;
-      timer_for_mode7_zoom -= 1;
+      timer_for_mode7_zoom -= g_loc_rom ? 2 : 1;
       Attract_ControlMapZoom();
     }
   } else {
@@ -960,8 +966,12 @@ void Attract_BuildNextImageTileMap() {  // 8cf73e
     kAttract_Legendgraphics_3,
   };
   static const uint16 kAttract_LegendGraphics_sizes[4] = { 157+1, 237+1, 199+1, 265+1 };
+  // The French Canadian pictures are drawn at its own BG3 addresses, from
+  // $0E:BA92, $0E:BB2F, $0E:BC1C and $0E:BCE3, the same sizes ($8E:B70E).
+  static const uint32 kAttract_LegendGraphics_Loc[4] = { 0x8eba92, 0x8ebb2f, 0x8ebc1c, 0x8ebce3 };
   int i = attract_next_legend_gfx >> 1;
-  memcpy(&g_ram[0x1002], kAttract_LegendGraphics_pointers[i], kAttract_LegendGraphics_sizes[i]);
+  memcpy(&g_ram[0x1002], g_loc_rom ? Loc_Rom(kAttract_LegendGraphics_Loc[i]) : kAttract_LegendGraphics_pointers[i],
+         kAttract_LegendGraphics_sizes[i]);
   nmi_load_bg_from_vram = 1;
 }
 

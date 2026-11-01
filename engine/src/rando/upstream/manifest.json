@@ -1,0 +1,832 @@
+{
+  "repository": "https://github.com/Slashmolder/zelda3randomizer",
+  "commit": "34495145fc638edc9ba0e327997c6c04e71460f9",
+  "stage": "Integration in progress; no gameplay support is advertised yet.",
+  "files": [
+    {
+      "path": "engine/assets/rando/chain_boss_entrances.gen.yaml",
+      "upstream_path": "assets/rando/chain_boss_entrances.gen.yaml",
+      "sha256": "4837ce18421299e0f2db2eb1967142a5c7c6bec36c1b517399e4a108386407f6"
+    },
+    {
+      "path": "engine/assets/rando/customizer.example.yaml",
+      "upstream_path": "assets/rando/customizer.example.yaml",
+      "sha256": "b70360e247093a575547b5ce71765925ba787ebe8798550b52db383768742fb7"
+    },
+    {
+      "path": "engine/assets/rando/direct_grant_icons.yaml",
+      "upstream_path": "assets/rando/direct_grant_icons.yaml",
+      "sha256": "b5312fb1be20832fd3a929f5fc3bd49cf2803ec24947819d6e2d7bda03ac08dc"
+    },
+    {
+      "path": "engine/assets/rando/door_portals.yaml",
+      "upstream_path": "assets/rando/door_portals.yaml",
+      "sha256": "08e1b36c1a5734030847d1efcc55ead0b6a9925b2fa57b73812917fe0f8b02b0"
+    },
+    {
+      "path": "engine/assets/rando/door_predicates.gen.json",
+      "upstream_path": "assets/rando/door_predicates.gen.json",
+      "sha256": "b6f039812bab5d14732dbc2563d1010fc9467bc89c17b30b8cd4c4617098a7d2"
+    },
+    {
+      "path": "engine/assets/rando/door_registry.yaml",
+      "upstream_path": "assets/rando/door_registry.yaml",
+      "sha256": "6bbe589da3d03fed7dd507b850e066a8e1f55eb391eeb53363021652fe0c7724"
+    },
+    {
+      "path": "engine/assets/rando/entrance_registry.yaml",
+      "upstream_path": "assets/rando/entrance_registry.yaml",
+      "sha256": "9a195dc1f03d371a3b2a58937b4afb20707b158e37dc59c19b473cbc7492271c"
+    },
+    {
+      "path": "engine/assets/rando/hint_metadata.lock.json",
+      "upstream_path": "assets/rando/hint_metadata.lock.json",
+      "sha256": "7531600e2cf69e3862ee3b7a50f53802565885164e4626d0c4e4ed2d7a74d5c8"
+    },
+    {
+      "path": "engine/assets/rando/hint_metadata.yaml",
+      "upstream_path": "assets/rando/hint_metadata.yaml",
+      "sha256": "eeb13066aab6b57cbe098cc66aec3b873594603db7676e18d1df0bdf1098a56f"
+    },
+    {
+      "path": "engine/assets/rando/hint_registry_contract.json",
+      "upstream_path": "assets/rando/hint_registry_contract.json",
+      "sha256": "9c30effbf00a86131619a62c816f3968bc8f62382a33773c8432c0cee92d6200"
+    },
+    {
+      "path": "engine/assets/rando/icon_atlas.yaml",
+      "upstream_path": "assets/rando/icon_atlas.yaml",
+      "sha256": "32dd86c55389edbad4bd0bc9650af12bd2afe1b8f55366b0d4fa7d1800e88d41"
+    },
+    {
+      "path": "engine/assets/rando/item_registry.yaml",
+      "upstream_path": "assets/rando/item_registry.yaml",
+      "sha256": "98a90fb3b91cdcad5ff34f6bbab15b264891cd13d7f864fe4df75eb057dabee3"
+    },
+    {
+      "path": "engine/assets/rando/location_registry.yaml",
+      "upstream_path": "assets/rando/location_registry.yaml",
+      "sha256": "ad08f022ac70cfcd8317bdf84e4fc7d8da00726933659b6c371f8918ca51623c"
+    },
+    {
+      "path": "engine/assets/rando/logic.schema.yaml",
+      "upstream_path": "assets/rando/logic.schema.yaml",
+      "sha256": "693622113eefd84d24c07fc3151d2c5745a1877df0acc3f4f0e184558ab3a539"
+    },
+    {
+      "path": "engine/assets/rando/logic.yaml",
+      "upstream_path": "assets/rando/logic.yaml",
+      "sha256": "087cd6cd2bda3a19559e22bae920d28a542f0791e49c1bb39acc4ff7ab67f6d2"
+    },
+    {
+      "path": "engine/assets/rando/logic_examples/01_eastern_palace.yaml",
+      "upstream_path": "assets/rando/logic_examples/01_eastern_palace.yaml",
+      "sha256": "7e92bd446692d4ba6ddcb50e3177674f2c231b5939d9b376ebf58b0db921a32f"
+    },
+    {
+      "path": "engine/assets/rando/logic_examples/02_uncle_standard_mode.yaml",
+      "upstream_path": "assets/rando/logic_examples/02_uncle_standard_mode.yaml",
+      "sha256": "baef9e044a301f5291f760b4c99781e2731b854f1cb22828018ae76e12dd25b5"
+    },
+    {
+      "path": "engine/assets/rando/logic_examples/03_pyramid_fairy.yaml",
+      "upstream_path": "assets/rando/logic_examples/03_pyramid_fairy.yaml",
+      "sha256": "be2881dedf8bd74f6b3e665d09f62a24a0dfcec9ad4036ddef0abd161c015042"
+    },
+    {
+      "path": "engine/assets/rando/logic_examples/04_medallion_entrances.yaml",
+      "upstream_path": "assets/rando/logic_examples/04_medallion_entrances.yaml",
+      "sha256": "1ba7dc9b458b8eb24db1ee4977c1f504c808f1b33194759cab1002f1c0d4b17c"
+    },
+    {
+      "path": "engine/assets/rando/logic_examples/05_hearts_and_swordless.yaml",
+      "upstream_path": "assets/rando/logic_examples/05_hearts_and_swordless.yaml",
+      "sha256": "fcabe56dcffe6810cfd4c50623c4799343b69868ccf11ff64b159c45a84e5658"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/01_eastern_palace.yaml",
+      "upstream_path": "assets/rando/logic_parts/01_eastern_palace.yaml",
+      "sha256": "5e45cd150ddba53cbd0f090768a540acbab81e49d5f41cdb73a195da3e4731b8"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/10_desert_palace.yaml",
+      "upstream_path": "assets/rando/logic_parts/10_desert_palace.yaml",
+      "sha256": "7995a2e8e33007647ee010339ff6a6ed0c5569cc0a8f7fff43934a5d02a2e157"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/11_tower_of_hera.yaml",
+      "upstream_path": "assets/rando/logic_parts/11_tower_of_hera.yaml",
+      "sha256": "fc904f1f03bc59768a05f77399c9cf4a8de656ab40caa417f3b20d22cf8ef5af"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/12_hyrule_castle_tower.yaml",
+      "upstream_path": "assets/rando/logic_parts/12_hyrule_castle_tower.yaml",
+      "sha256": "54a2d322857e0314ff30934a65298bf0976c98b8b91f2ac52a2d2a1682f594c7"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/20_palace_of_darkness.yaml",
+      "upstream_path": "assets/rando/logic_parts/20_palace_of_darkness.yaml",
+      "sha256": "75aa0365c1c4270e3bfd3dd1701a9fe9e62524195f0b5f38cf1ae2e54f9cd690"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/21_swamp_palace.yaml",
+      "upstream_path": "assets/rando/logic_parts/21_swamp_palace.yaml",
+      "sha256": "4d975fa316d22194e919ae8d20a0ce4400ef1025f6cdc36f4ce33918d2305177"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/22_skull_woods.yaml",
+      "upstream_path": "assets/rando/logic_parts/22_skull_woods.yaml",
+      "sha256": "6fd97446c2a1392ff45e3557f8ea1af9f3e8b08a16d2c8af3a7d770b78f28996"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/23_thieves_town.yaml",
+      "upstream_path": "assets/rando/logic_parts/23_thieves_town.yaml",
+      "sha256": "d38aaa7903d8ba10b7b9b63a02730bb60b01f480923be811ff698ffacc8874ef"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/30_ice_palace.yaml",
+      "upstream_path": "assets/rando/logic_parts/30_ice_palace.yaml",
+      "sha256": "cef9eb029535e79532d96a7946aa8f9fb97b282da34fab8452aa0ef11f7825d5"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/31_misery_mire.yaml",
+      "upstream_path": "assets/rando/logic_parts/31_misery_mire.yaml",
+      "sha256": "038920d362a672bc44c9ba661d5ffc03313c021987f2da6738b274db787d18c2"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/32_turtle_rock.yaml",
+      "upstream_path": "assets/rando/logic_parts/32_turtle_rock.yaml",
+      "sha256": "fe6753d37a79fb45c319ac77d0723f2ed9c6936c4f57212df3120855c33ea5a3"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/33_ganons_tower.yaml",
+      "upstream_path": "assets/rando/logic_parts/33_ganons_tower.yaml",
+      "sha256": "bc73460680427cbc366444f78acc0d45ed1bc55fd637dc93dfe02a2c77eb0f17"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/40_lightworld_northwest.yaml",
+      "upstream_path": "assets/rando/logic_parts/40_lightworld_northwest.yaml",
+      "sha256": "754469389261d9ae044c2526a836873c5e9ffcd08a655fe50b5367cae2b6f492"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/41_lightworld_south.yaml",
+      "upstream_path": "assets/rando/logic_parts/41_lightworld_south.yaml",
+      "sha256": "f251f4ae019768a77b106f7c21a44bc4fbe35bd76478a640bf73b5e6b67e98b6"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/42_lightworld_deathmountain.yaml",
+      "upstream_path": "assets/rando/logic_parts/42_lightworld_deathmountain.yaml",
+      "sha256": "78aff9a91a54027c466db6c2f7f63ffeddd7ea2db8d1bdc84f6b68b974c0c170"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/43_darkworld.yaml",
+      "upstream_path": "assets/rando/logic_parts/43_darkworld.yaml",
+      "sha256": "4158d0495d7d8cad7050d88329b1e29d60e48a41cfd91992edab825b88db7bc6"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/45_lightworld_northeast.yaml",
+      "upstream_path": "assets/rando/logic_parts/45_lightworld_northeast.yaml",
+      "sha256": "f4877ae247caf7f1a6c9c0fb6d13b60972720b6d64ff987edf7dd7a7157dddc9"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/50_shops.yaml",
+      "upstream_path": "assets/rando/logic_parts/50_shops.yaml",
+      "sha256": "0775c525c9dcabb035f540b4b7d2c05f61ee96de943e9d7acf1c10575f2a933d"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/DarkWorld/DeathMountain/East.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/DarkWorld/DeathMountain/East.yaml",
+      "sha256": "5f5176ec885c672dce2fbf436f942eeb0bd57df80395228663b885304eedde63"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/DarkWorld/DeathMountain/West.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/DarkWorld/DeathMountain/West.yaml",
+      "sha256": "5f84b6359965b71f0cab4e436588c74976058873341f726a962208124c4ce54d"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/DarkWorld/Mire.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/DarkWorld/Mire.yaml",
+      "sha256": "93509f1b29d7d017618ee4d0931648591c4865141389af97b5b58bb91de07125"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/DarkWorld/NorthEast.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/DarkWorld/NorthEast.yaml",
+      "sha256": "f5fc790e388d18f0e07b147af7b011770695a73340885f0f9ba7c5d3372a8b96"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/DarkWorld/NorthWest.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/DarkWorld/NorthWest.yaml",
+      "sha256": "e00ea5af177720e1562c2625996bef3dcbe105f74aab793c5a52a015ad90c556"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/DarkWorld/South.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/DarkWorld/South.yaml",
+      "sha256": "91d62c61f2f5dc8a4a8e2c33a3f945bfe397207326924ffe47ef1f5ddc5ea699"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/DesertPalace.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/DesertPalace.yaml",
+      "sha256": "1faec9477c943dfdce90fa7159d9fe7bb6a68aade5bf2f0f7b39bfc4cb167bf1"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/EasternPalace.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/EasternPalace.yaml",
+      "sha256": "fcdb3c43b938b59a7fab131a05727381e60af4b4d35d1cb5294672cf81c5b0d4"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/GanonsTower.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/GanonsTower.yaml",
+      "sha256": "260d6e304760d68ed20bd2e58f1023f50fb2729b4a32338fe78c8c425d29a3a3"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/HyruleCastleEscape.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/HyruleCastleEscape.yaml",
+      "sha256": "d1609d06cb1d8e8782a6edb1ca1ca819bea07c7d8d00fcd9435f3f2fd2213731"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/HyruleCastleTower.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/HyruleCastleTower.yaml",
+      "sha256": "048753819555d60a9f5ab952f1792b8fdd067d41617db0f351a3c9f3b6c74772"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/IcePalace.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/IcePalace.yaml",
+      "sha256": "3698ae4f98e963827c8c7a6cab8232a40fa63f6aed461b056327acf5f242e646"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/LightWorld/DeathMountain/East.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/LightWorld/DeathMountain/East.yaml",
+      "sha256": "c399411df3316b990a374e3ae36f96f2a47b7cc97e01b16e025e8213416d482b"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/LightWorld/DeathMountain/West.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/LightWorld/DeathMountain/West.yaml",
+      "sha256": "143d09c5bb4042450de00c64a79f4b855ab9fb5c04f3177c9dd435c32ffa403c"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/LightWorld/NorthEast.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/LightWorld/NorthEast.yaml",
+      "sha256": "dbcd910bf93225d012d4f51795942aaef657809fa9ad3b0e84c7e95ed2420266"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/LightWorld/NorthWest.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/LightWorld/NorthWest.yaml",
+      "sha256": "8d086a92771c24d6cfec58f154222e28cdbc27c383a0fc6b87148d55310115a2"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/LightWorld/South.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/LightWorld/South.yaml",
+      "sha256": "c2ccdedb6b701560c3f212c0c0860e675b7b23b8e607e3d0cda03db4df888799"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/MiseryMire.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/MiseryMire.yaml",
+      "sha256": "949796790ea3637c69968bdd7d230c49fdb038106b324a3c5918dc6539258e80"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/PalaceOfDarkness.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/PalaceOfDarkness.yaml",
+      "sha256": "4f742c5328a4673f1bbaca39c977588219346af3402bb791f65015f012fc6e40"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/Shops.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/Shops.yaml",
+      "sha256": "dceab515b745d0d23988173c6cf6a53ab9ce270624de75e6546ace1a58fc059e"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/SkullWoods.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/SkullWoods.yaml",
+      "sha256": "ebaa32f78a5746264ea220cf133fb9b5746e598c616e210c3c2911f900948227"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/SwampPalace.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/SwampPalace.yaml",
+      "sha256": "1118d8740ef6d264e5b2abf578d465c5e969ad99a2c5acbd6660cff84046be4c"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/ThievesTown.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/ThievesTown.yaml",
+      "sha256": "57ec901ae53c6f2c34bad5165a842dc12f6be931c52d1487dd8441213678c270"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/TowerOfHera.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/TowerOfHera.yaml",
+      "sha256": "2465d3bbce0abb7daec085731e56bedee7ec783648e4ee3775e620eb357e8927"
+    },
+    {
+      "path": "engine/assets/rando/logic_parts/inverted/TurtleRock.yaml",
+      "upstream_path": "assets/rando/logic_parts/inverted/TurtleRock.yaml",
+      "sha256": "e1a837206c12914cbe307decab3fc6d60ce70046d5b429d80c1cea331bdeb83a"
+    },
+    {
+      "path": "engine/assets/rando/macros.yaml",
+      "upstream_path": "assets/rando/macros.yaml",
+      "sha256": "a750d18fbfb95807f3cfb5acc865b227a97eef0e928960e589123d6baa2f2e35"
+    },
+    {
+      "path": "engine/assets/rando/npc_souls.yaml",
+      "upstream_path": "assets/rando/npc_souls.yaml",
+      "sha256": "92eadbc30054b8818e328c458a733f9d79eb3002c2e26b9c5c9494a39e35d9e1"
+    },
+    {
+      "path": "engine/assets/rando/op_registry.yaml",
+      "upstream_path": "assets/rando/op_registry.yaml",
+      "sha256": "124877d5eb86bedb42b60915c9bff0d4613c075789f9dd25babe15a0bce2c804"
+    },
+    {
+      "path": "engine/assets/rando/ow_quotient_allowlist.yaml",
+      "upstream_path": "assets/rando/ow_quotient_allowlist.yaml",
+      "sha256": "4c7eddfc4f4732ef534a3a903bcf05e32f0ab12f89cc0caf348acf522ca55f3a"
+    },
+    {
+      "path": "engine/assets/rando/pot_logic_overrides.yaml",
+      "upstream_path": "assets/rando/pot_logic_overrides.yaml",
+      "sha256": "3b39bde48f812765a280cf624dd15cfac0c67e3bbf291dab1f355f774fe8dde6"
+    },
+    {
+      "path": "engine/assets/rando/region_ids.lock.json",
+      "upstream_path": "assets/rando/region_ids.lock.json",
+      "sha256": "13ce3860dc635ac140925cf984c3c6570d463d530ba28f33d4d7e4c6bb0c6d60"
+    },
+    {
+      "path": "engine/assets/rando/terrain_logic_overrides.yaml",
+      "upstream_path": "assets/rando/terrain_logic_overrides.yaml",
+      "sha256": "802b906cb0ab7c1217af1d2d42e645e76c2af69c3acc345472ab552d508454d9"
+    },
+    {
+      "path": "engine/src/rando/auto_tracker.c",
+      "upstream_path": "src/rando/auto_tracker.c",
+      "sha256": "a3bde8c3c95588d565fe6051131f0a973f27cc9f9beb9fbb19febd3eae278345"
+    },
+    {
+      "path": "engine/src/rando/auto_tracker.h",
+      "upstream_path": "src/rando/auto_tracker.h",
+      "sha256": "f3882bb9a26acd825fa53c1345747249265798b1ed6a79fb14ae426a85cfe875"
+    },
+    {
+      "path": "engine/src/rando/bonk_lookup.h",
+      "upstream_path": "src/rando/bonk_lookup.h",
+      "sha256": "5390dcbc7b2c1f301d0c1d5aa6e3a21b448aad5453dc927f55c93ea9cf0346f4"
+    },
+    {
+      "path": "engine/src/rando/cave_arrival_baked.h",
+      "upstream_path": "src/rando/cave_arrival_baked.h",
+      "sha256": "161be86adff8cdda7b984c431147c9336937f94ec98a5735dc6a9bd983b9ad9e"
+    },
+    {
+      "path": "engine/src/rando/chain_boss_entrances.gen.h",
+      "upstream_path": "src/rando/chain_boss_entrances.gen.h",
+      "sha256": "c9b2304fc85c414ca537afe5bd9c13fea714948e338793d340cd87533d6012f8"
+    },
+    {
+      "path": "engine/src/rando/chain_seams.gen.c",
+      "upstream_path": "src/rando/chain_seams.gen.c",
+      "sha256": "c2f0d80c6d2f8b61ad7811c90855a39e5e3d522f661bab172933b5a176ac0136"
+    },
+    {
+      "path": "engine/src/rando/chain_seams.gen.h",
+      "upstream_path": "src/rando/chain_seams.gen.h",
+      "sha256": "97a9508309990c33bb06b24d630866c29bdbed023bed6a68dd4166415bbe523e"
+    },
+    {
+      "path": "engine/src/rando/chains_runtime.c",
+      "upstream_path": "src/rando/chains_runtime.c",
+      "sha256": "4a5f32646dc6e2ef10adf7ac15464c5c6d11836fe58f737902b4e0d1df1bd18b"
+    },
+    {
+      "path": "engine/src/rando/chains_runtime.h",
+      "upstream_path": "src/rando/chains_runtime.h",
+      "sha256": "e6d1a4a1bf8a38a66d3bac62819e5e530121a64e443958ac55aba7ef3bfb50e5"
+    },
+    {
+      "path": "engine/src/rando/chest_lookup.h",
+      "upstream_path": "src/rando/chest_lookup.h",
+      "sha256": "1e9ca3f26c3a37abda7c5eb3bcca52927a7d89d375d6f86dd13e3991d6fd978f"
+    },
+    {
+      "path": "engine/src/rando/customizer.c",
+      "upstream_path": "src/rando/customizer.c",
+      "sha256": "d36d8120ae76c78fd175f4ed4485793f2815d0b268d71a8c3cb2a87e2d9eb456"
+    },
+    {
+      "path": "engine/src/rando/customizer.h",
+      "upstream_path": "src/rando/customizer.h",
+      "sha256": "e14bde62c6c80a3fa04d4954bedc55915aaae009c7ac1031c17c3b4eb9b37e77"
+    },
+    {
+      "path": "engine/src/rando/direct_grant_icons.h",
+      "upstream_path": "src/rando/direct_grant_icons.h",
+      "sha256": "f7ae97a3188d3b3985423061bf1f28fd9e375c895af7952dcc0e8e49b211a45a"
+    },
+    {
+      "path": "engine/src/rando/door_keylogic.c",
+      "upstream_path": "src/rando/door_keylogic.c",
+      "sha256": "cd920f607131ff62b624fe4c707177dd6bc777b1e3ef2227e73c78dba2bbd526"
+    },
+    {
+      "path": "engine/src/rando/door_keylogic.h",
+      "upstream_path": "src/rando/door_keylogic.h",
+      "sha256": "096c64f945c86f93d5a9e308072dd2cd81986113d541edaa23113954b857f517"
+    },
+    {
+      "path": "engine/src/rando/door_runtime.c",
+      "upstream_path": "src/rando/door_runtime.c",
+      "sha256": "8b6c9df7db6d27016ce182a22be28bf2cfe2b5995ea93a309caf5eaae7bae622"
+    },
+    {
+      "path": "engine/src/rando/door_runtime.h",
+      "upstream_path": "src/rando/door_runtime.h",
+      "sha256": "21cc97e343c18d71a4e811cb47bd279b6c557e34ae1358455581a438601ccb96"
+    },
+    {
+      "path": "engine/src/rando/door_tables.gen.c",
+      "upstream_path": "src/rando/door_tables.gen.c",
+      "sha256": "c659fc6738bc5ea7dfb9d868c4efbadc966be997348d6711f28fd72cfb36d53c"
+    },
+    {
+      "path": "engine/src/rando/door_tables.gen.h",
+      "upstream_path": "src/rando/door_tables.gen.h",
+      "sha256": "9c33160aeddd049dded086e2180fb2cb603336c9fa2548fab78a069f5e4dc85a"
+    },
+    {
+      "path": "engine/src/rando/dungeon_ids.h",
+      "upstream_path": "src/rando/dungeon_ids.h",
+      "sha256": "384ce9aa3708f3efc975af3b786caa0e1710e83ae284798fdf6a8f0603d39a86"
+    },
+    {
+      "path": "engine/src/rando/enemy_check_lookup.h",
+      "upstream_path": "src/rando/enemy_check_lookup.h",
+      "sha256": "bdb8e9e1fe3e43e84602cc928c15e61eb9a24198d59a8b17f77302e48a8b3f9f"
+    },
+    {
+      "path": "engine/src/rando/enemy_drop_lookup.h",
+      "upstream_path": "src/rando/enemy_drop_lookup.h",
+      "sha256": "946d2000e2d56bc2d18961225d5c0d9f4fbee27e7b526dd77b63894317ed2eb5"
+    },
+    {
+      "path": "engine/src/rando/hint_metadata.h",
+      "upstream_path": "src/rando/hint_metadata.h",
+      "sha256": "1d07e2e44b9904ce1caa475ef28db7b581db278bd0eea50e86f52597423a0fdf"
+    },
+    {
+      "path": "engine/src/rando/icon_atlas.h",
+      "upstream_path": "src/rando/icon_atlas.h",
+      "sha256": "37ed74d9564cc0a3c25fc9eb64920cd2ae7f017bc8daf3fd659e2cf1b1ea2c47"
+    },
+    {
+      "path": "engine/src/rando/inverted_entrances.c",
+      "upstream_path": "src/rando/inverted_entrances.c",
+      "sha256": "89a0657c0db03e5e9a5835c77f9004971b0c0531aeae2a3d7a8962ddf0ecdc9b"
+    },
+    {
+      "path": "engine/src/rando/inverted_entrances.h",
+      "upstream_path": "src/rando/inverted_entrances.h",
+      "sha256": "e6c1eb4df6cb9dfd12cc92e926381b123423f7623f2085164e5b386fd1a3e6eb"
+    },
+    {
+      "path": "engine/src/rando/inverted_maps.c",
+      "upstream_path": "src/rando/inverted_maps.c",
+      "sha256": "8c6afab7924741e102c6f2e71fc38491c36998e6f6ed3363d51365f426c637f9"
+    },
+    {
+      "path": "engine/src/rando/inverted_maps.h",
+      "upstream_path": "src/rando/inverted_maps.h",
+      "sha256": "4a4ad41a7706f2a2a2f0e53c7dc3f7110b1665818fd9786751cea674e6a90a5b"
+    },
+    {
+      "path": "engine/src/rando/inverted_maps_apply.c",
+      "upstream_path": "src/rando/inverted_maps_apply.c",
+      "sha256": "c31d2d5909b25830001252924dd21100248dce4b9ce32d3c1e35df7c44394cb5"
+    },
+    {
+      "path": "engine/src/rando/item_ids.h",
+      "upstream_path": "src/rando/item_ids.h",
+      "sha256": "adcc3631e03534ef2d6364a93b1d7ad1fb3cc77e49fdcbd0f85262c0bb938e60"
+    },
+    {
+      "path": "engine/src/rando/location_ids.h",
+      "upstream_path": "src/rando/location_ids.h",
+      "sha256": "25c8d9cc6c8e2a5a03553ae5958b0b221722c6f1d8040107354bfc78b9933a37"
+    },
+    {
+      "path": "engine/src/rando/logic_data.c",
+      "upstream_path": "src/rando/logic_data.c",
+      "sha256": "32df2935d883e3cb205c11febbf6a195de04f2e1e3eac76075b437fd46574199"
+    },
+    {
+      "path": "engine/src/rando/medallion_icons.c",
+      "upstream_path": "src/rando/medallion_icons.c",
+      "sha256": "7d217ed1226998e76d8111c0e71b2cffcd85d8a2c2c13a73df81fb261a267d76"
+    },
+    {
+      "path": "engine/src/rando/medallion_icons.h",
+      "upstream_path": "src/rando/medallion_icons.h",
+      "sha256": "47e78068a5435ba481758dc09ce81d29654063bda72d2fc9a8281b13c16e06bd"
+    },
+    {
+      "path": "engine/src/rando/npc_soul_tables.h",
+      "upstream_path": "src/rando/npc_soul_tables.h",
+      "sha256": "eb8d0300394c79c8d380c294d2a21d4e9fe2fd8031232b5d6b3fa319fb1ab583"
+    },
+    {
+      "path": "engine/src/rando/ow_map_prizes.c",
+      "upstream_path": "src/rando/ow_map_prizes.c",
+      "sha256": "2b727b65cd92a8e22adb56ec455787b869844ea819e6da144be5e5074343d48f"
+    },
+    {
+      "path": "engine/src/rando/ow_map_prizes.h",
+      "upstream_path": "src/rando/ow_map_prizes.h",
+      "sha256": "1eaf716f5fce100db1c673ef87dd91abf7808a70705d269a968a672ba2a86270"
+    },
+    {
+      "path": "engine/src/rando/pot_lookup.h",
+      "upstream_path": "src/rando/pot_lookup.h",
+      "sha256": "bc40e26424bf34537bb4d6d55dcc57c5c34868a591245c533019eb1f1ad15ff7"
+    },
+    {
+      "path": "engine/src/rando/pot_nonpot_drop_counts.h",
+      "upstream_path": "src/rando/pot_nonpot_drop_counts.h",
+      "sha256": "fcb567233b489b9171cc16045b65c7a027f4813a59288a87e08ec0eb5dbcdc63"
+    },
+    {
+      "path": "engine/src/rando/rando.c",
+      "upstream_path": "src/rando/rando.c",
+      "sha256": "8274fad9794354fe856e73d8244dca7f57f6884a8243fddc62a86792be154de4"
+    },
+    {
+      "path": "engine/src/rando/rando.h",
+      "upstream_path": "src/rando/rando.h",
+      "sha256": "98d26c18f1dcb060284fbb98b68b06b2157c4725fc36eb6148b588eeb9bb98b5"
+    },
+    {
+      "path": "engine/src/rando/rando_asset_decisions.c",
+      "upstream_path": "src/rando/rando_asset_decisions.c",
+      "sha256": "8e895a5d7357fecfdadcb0f8a8167876b0869e131900f68d058709ead85a8f0b"
+    },
+    {
+      "path": "engine/src/rando/rando_asset_decisions.h",
+      "upstream_path": "src/rando/rando_asset_decisions.h",
+      "sha256": "605b8c1f99576b995338dfe4ab86c0e7cfdaff38cbc96d9ac5effb469b7630ec"
+    },
+    {
+      "path": "engine/src/rando/rando_dialogue.c",
+      "upstream_path": "src/rando/rando_dialogue.c",
+      "sha256": "3bece261b9021742428f89aaa7a37df090ce08152490534312e091e65b4a6cd6"
+    },
+    {
+      "path": "engine/src/rando/rando_dialogue.h",
+      "upstream_path": "src/rando/rando_dialogue.h",
+      "sha256": "ae50c3793d4b09dbaa1e132c56fe505777054ed10235dff5d0bfe3a6b6a50bf3"
+    },
+    {
+      "path": "engine/src/rando/rando_generate.c",
+      "upstream_path": "src/rando/rando_generate.c",
+      "sha256": "6adcfb31d62a91e696bdb5cae1e1c3a975478d8c228c9e434596546533f3f68e"
+    },
+    {
+      "path": "engine/src/rando/rando_generate.h",
+      "upstream_path": "src/rando/rando_generate.h",
+      "sha256": "d48cf738390a6e9110d84582fef325b40b1a72decc5cf7af185dfd0f51bae096"
+    },
+    {
+      "path": "engine/src/rando/rando_hints.c",
+      "upstream_path": "src/rando/rando_hints.c",
+      "sha256": "b1d95cfbf637b928147e37c44c91b680096dabc9b7a41ef3e805b292660ac202"
+    },
+    {
+      "path": "engine/src/rando/rando_hints.h",
+      "upstream_path": "src/rando/rando_hints.h",
+      "sha256": "4f93943e283ac424218f55fe0de46f7927f4c5e70d91a27414f5958f257f4c1b"
+    },
+    {
+      "path": "engine/src/rando/rando_logic.c",
+      "upstream_path": "src/rando/rando_logic.c",
+      "sha256": "0943ea5846540bf1ed65da8a94e60c26120f973b8513e5230df472d0b52aa2c7"
+    },
+    {
+      "path": "engine/src/rando/rando_logic.h",
+      "upstream_path": "src/rando/rando_logic.h",
+      "sha256": "0e5abb9ee615b14bb83939f441c0231b21c0c0e37c8069f4bd057df611fd2f24"
+    },
+    {
+      "path": "engine/src/rando/rando_map.c",
+      "upstream_path": "src/rando/rando_map.c",
+      "sha256": "b6e961757b737b11100b954f6d721791a8d4223b826c73b33eb5cd5a6b13a8d8"
+    },
+    {
+      "path": "engine/src/rando/rando_map.h",
+      "upstream_path": "src/rando/rando_map.h",
+      "sha256": "3d73432b5677c3cfc4c98de7f7666e0fc9e10046a705dd17f71a0400e30e156f"
+    },
+    {
+      "path": "engine/src/rando/rando_placement.c",
+      "upstream_path": "src/rando/rando_placement.c",
+      "sha256": "795fad372356ce0db47eeec6ccbc91dfcf1c277aef55eeab3ef45f39de849690"
+    },
+    {
+      "path": "engine/src/rando/rando_placement.h",
+      "upstream_path": "src/rando/rando_placement.h",
+      "sha256": "d629337099012894746c2244b0504a875340c38ae5105d9a81552be7cd12ad07"
+    },
+    {
+      "path": "engine/src/rando/rando_rng.c",
+      "upstream_path": "src/rando/rando_rng.c",
+      "sha256": "1839781507a94769b1d575e1be201ee94d7c8b3a4b6f4ccd008ee552d37cf327"
+    },
+    {
+      "path": "engine/src/rando/rando_rng.h",
+      "upstream_path": "src/rando/rando_rng.h",
+      "sha256": "ca1e43d5804fcc0cd4057c34897a50df5ca3bc87f166289f41508d563e8e3a76"
+    },
+    {
+      "path": "engine/src/rando/rando_save.c",
+      "upstream_path": "src/rando/rando_save.c",
+      "sha256": "900b22df8626869d548330d274508e06a40d85e5b81bdc5df52d47bc71a3a497"
+    },
+    {
+      "path": "engine/src/rando/rando_save.h",
+      "upstream_path": "src/rando/rando_save.h",
+      "sha256": "79351e97080967569269825e8a5c7a362d7079dcaf5932022c00be02a611d798"
+    },
+    {
+      "path": "engine/src/rando/rando_settings.c",
+      "upstream_path": "src/rando/rando_settings.c",
+      "sha256": "5a26d3f57c98efceed503d79d056a624396a289b0826c4dbd7e09601c41f9f50"
+    },
+    {
+      "path": "engine/src/rando/rando_settings.h",
+      "upstream_path": "src/rando/rando_settings.h",
+      "sha256": "b45eee6a4a46189c97f17e0630758bfcae8b1dffddff0f778adfc01e7617df11"
+    },
+    {
+      "path": "engine/src/rando/rando_share.c",
+      "upstream_path": "src/rando/rando_share.c",
+      "sha256": "5f63c4c4cb59b3f6f54eaa073b82178db150854b6446e8c15c3965016f4430ad"
+    },
+    {
+      "path": "engine/src/rando/rando_share.h",
+      "upstream_path": "src/rando/rando_share.h",
+      "sha256": "768a22e855cffb3e8065a2b9744de34691bf5ac4f8999c18fbd569d87b8f00b1"
+    },
+    {
+      "path": "engine/src/rando/rando_shuffles.c",
+      "upstream_path": "src/rando/rando_shuffles.c",
+      "sha256": "5ad408be2c1a6feaceb80fd038f2937fcb38e687a7417f0de64982dbe5574112"
+    },
+    {
+      "path": "engine/src/rando/rando_shuffles.h",
+      "upstream_path": "src/rando/rando_shuffles.h",
+      "sha256": "5c4e63ac8028c00c0c7b31d30881362fd59d64533efc2b6287b78f1fa87d50ca"
+    },
+    {
+      "path": "engine/src/rando/rando_snapshot_tail.c",
+      "upstream_path": "src/rando/rando_snapshot_tail.c",
+      "sha256": "1c736a2f9cb128f000aeb3528908aab56c74756afeb7b2e4880a75464929f93e"
+    },
+    {
+      "path": "engine/src/rando/rando_snapshot_tail.h",
+      "upstream_path": "src/rando/rando_snapshot_tail.h",
+      "sha256": "9ddc12c5ae1539c9e9dabc460f5a1fe53b8dd03ea12ba76e4581d07ef2aa8418"
+    },
+    {
+      "path": "engine/src/rando/rando_spoiler.c",
+      "upstream_path": "src/rando/rando_spoiler.c",
+      "sha256": "50e573ad95a005cb2f52c3eb956b73a6b281868fc9123c5f2e8db5b79cfbac5b"
+    },
+    {
+      "path": "engine/src/rando/rando_spoiler.h",
+      "upstream_path": "src/rando/rando_spoiler.h",
+      "sha256": "c96c25abc890bc6fcf912dcc7b0b224d23156652b68fc25def3dc1c6cb6fcaf6"
+    },
+    {
+      "path": "engine/src/rando/rando_textfield.c",
+      "upstream_path": "src/rando/rando_textfield.c",
+      "sha256": "f600f37d851cd8f66a6859b03a43ed08574ccfbf62a65c7ea84e5f9a103de531"
+    },
+    {
+      "path": "engine/src/rando/rando_textfield.h",
+      "upstream_path": "src/rando/rando_textfield.h",
+      "sha256": "0b4208d4e39a8c8509b6a9da05ad3595c847c7bdac2949fcf817fa31b626d96f"
+    },
+    {
+      "path": "engine/src/rando/seed_shape.c",
+      "upstream_path": "src/rando/seed_shape.c",
+      "sha256": "c3ea1a82521c1589784946c73484b708661ed980f756127d94e4e8fab281c703"
+    },
+    {
+      "path": "engine/src/rando/seed_shape.h",
+      "upstream_path": "src/rando/seed_shape.h",
+      "sha256": "29ad94f08a542f84611342a49dba88efb1f5290e6a938fab7ae563537eb4cf4a"
+    },
+    {
+      "path": "engine/src/rando/shuffle_boss.c",
+      "upstream_path": "src/rando/shuffle_boss.c",
+      "sha256": "a19ad508c2fe0d0cf028d52baaa54ed8279b33017f9035488b06a48f063e3f32"
+    },
+    {
+      "path": "engine/src/rando/shuffle_boss.h",
+      "upstream_path": "src/rando/shuffle_boss.h",
+      "sha256": "8dc6924bc76574d1029d9de923164f36f04ec60f6dceb1f030e2ef45cf634ff3"
+    },
+    {
+      "path": "engine/src/rando/shuffle_chains.c",
+      "upstream_path": "src/rando/shuffle_chains.c",
+      "sha256": "bce0b9613ec39532267317b57e9fa05fb77b05e32b816bc3432b4635abecb59b"
+    },
+    {
+      "path": "engine/src/rando/shuffle_chains.h",
+      "upstream_path": "src/rando/shuffle_chains.h",
+      "sha256": "1684879cdebeca78ecb76f6043f85017d7f9947d18665f5623bf19de461f1cbb"
+    },
+    {
+      "path": "engine/src/rando/shuffle_cosmetic.c",
+      "upstream_path": "src/rando/shuffle_cosmetic.c",
+      "sha256": "509ed18d20e075cf26af527493b45431da07a0f3b56466689c30974fb524718f"
+    },
+    {
+      "path": "engine/src/rando/shuffle_cosmetic.h",
+      "upstream_path": "src/rando/shuffle_cosmetic.h",
+      "sha256": "0d23ff7924e34a4146d996d21a329d7d293a2b48f5c6ffb93b34f5d00c7739c2"
+    },
+    {
+      "path": "engine/src/rando/shuffle_doors.c",
+      "upstream_path": "src/rando/shuffle_doors.c",
+      "sha256": "3f2685877683a987362f74dda332ed5421f38e8fb685dd772a169e3241c000f4"
+    },
+    {
+      "path": "engine/src/rando/shuffle_doors.h",
+      "upstream_path": "src/rando/shuffle_doors.h",
+      "sha256": "358657691431dfa0c5f584ada47b185933b410b79488175de1fb6e0a5b5f8c1a"
+    },
+    {
+      "path": "engine/src/rando/shuffle_drops.c",
+      "upstream_path": "src/rando/shuffle_drops.c",
+      "sha256": "fdb53f98610e6abf900a5ac4b008017770dbc560a7dbade9175db178952db857"
+    },
+    {
+      "path": "engine/src/rando/shuffle_drops.h",
+      "upstream_path": "src/rando/shuffle_drops.h",
+      "sha256": "5fef37beac996d3c7ed81b57372b2ad4e39c238deea5119394b6aa1a2f20bbe2"
+    },
+    {
+      "path": "engine/src/rando/shuffle_enemies.c",
+      "upstream_path": "src/rando/shuffle_enemies.c",
+      "sha256": "1cde09ddf08a149a1df0c2b99441d9e7291fef303cd6c3a9f4c98cb03fefc7ca"
+    },
+    {
+      "path": "engine/src/rando/shuffle_enemies.h",
+      "upstream_path": "src/rando/shuffle_enemies.h",
+      "sha256": "18158073300ab6350049c9f94266998ef51a300add2fe8f3c402fc7818263995"
+    },
+    {
+      "path": "engine/src/rando/shuffle_entrance.c",
+      "upstream_path": "src/rando/shuffle_entrance.c",
+      "sha256": "a5b34106833b3e61c2bc06cd8d14d2b5b4a4aebe0d456974c02e51935ddb7e8d"
+    },
+    {
+      "path": "engine/src/rando/shuffle_entrance.h",
+      "upstream_path": "src/rando/shuffle_entrance.h",
+      "sha256": "8913a16146f0b4d2499f3f82d29c99c8f18b539b3862c399b02c4d04f8520539"
+    },
+    {
+      "path": "engine/src/rando/shuffle_ow_warp.c",
+      "upstream_path": "src/rando/shuffle_ow_warp.c",
+      "sha256": "9edcc7f4586963a11c586c3af988ddc0c34a1cb2dec9892f7d6215d5742dc1e7"
+    },
+    {
+      "path": "engine/src/rando/shuffle_ow_warp.h",
+      "upstream_path": "src/rando/shuffle_ow_warp.h",
+      "sha256": "217738db6c706472bd8d5985d6b9816c2ecb36f086c99935d30c5f2cabecd2a5"
+    },
+    {
+      "path": "engine/src/rando/soul_tables.h",
+      "upstream_path": "src/rando/soul_tables.h",
+      "sha256": "d179a0a0d20759db9683acc9204c7c4b236dd404bb2831f249d903417c5e890d"
+    },
+    {
+      "path": "engine/src/rando/souls.c",
+      "upstream_path": "src/rando/souls.c",
+      "sha256": "2afe30de87abdc3e0710f796dcacd13c5cdc3cbc8a8011581977b6be713058a3"
+    },
+    {
+      "path": "engine/src/rando/souls.h",
+      "upstream_path": "src/rando/souls.h",
+      "sha256": "ceea7473484738d13a374d06af7303ea018a23d38a9953cd187afd38974ae890"
+    },
+    {
+      "path": "engine/src/rando/terrain_lookup.h",
+      "upstream_path": "src/rando/terrain_lookup.h",
+      "sha256": "7be0cdcc70e6f39e29988f2ce126573be331ff05e2fe218aae5ae255fae2c100"
+    },
+    {
+      "path": "engine/third_party/sha256/sha256.c",
+      "upstream_path": "third_party/sha256/sha256.c",
+      "sha256": "a6278563214f9d77b46dda07c6844b97bf4db795a8919bdb612ae20e8bff005f"
+    },
+    {
+      "path": "engine/third_party/sha256/sha256.h",
+      "upstream_path": "third_party/sha256/sha256.h",
+      "sha256": "c5b63dd51b522ff2792db4a996c4b555b9cb2b0596ef4754297089e9506fed1c"
+    }
+  ]
+}

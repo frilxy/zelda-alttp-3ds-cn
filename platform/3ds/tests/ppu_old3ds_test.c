@@ -16,7 +16,7 @@ void ref_ppu_saveload(Ppu *, SaveLoadFunc *, void *);
 void ref_PpuBeginDrawing(Ppu *, uint8_t *, size_t, uint32_t);
 
 enum { PITCH = 512, HEIGHT = 240, GUARD = 32 };
-static unsigned candidate_flags = kPpuRenderFlags_Old3DS;
+static unsigned candidate_flags = kPpuRenderFlags_Old3DS | kPpuRenderFlags_FastPaths;
 static uint32_t rng = 0x714a2bu;
 static uint32_t Random(void) {
   rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
@@ -150,7 +150,10 @@ static void LoadDump(Ppu *p, const char *directory) {
   // randomized suite separately exercises changing windows and math registers.
 }
 int main(int argc, char **argv) {
-  if (getenv("ZELDA_TEST_NEW_PROFILE")) candidate_flags = 0;
+  // New 3DS, Android and desktop take the fast paths without the Old 3DS
+  // profiling; ZELDA_TEST_BASE_PROFILE checks the per-pixel paths alone.
+  if (getenv("ZELDA_TEST_NEW_PROFILE")) candidate_flags = kPpuRenderFlags_FastPaths;
+  if (getenv("ZELDA_TEST_BASE_PROFILE")) candidate_flags = 0;
   unsigned scenes = argc > 1 ? (unsigned)strtoul(argv[1], NULL, 10) : 2048;
   Ppu *a = ref_ppu_init(), *b = ppu_init();
   if (getenv("ZELDA_TEST_NO_RETAIN")) b->retainedAttempted = true;
@@ -159,7 +162,8 @@ int main(int argc, char **argv) {
   if (!a || !b || !ra || !rb) return 2;
   uint32_t *oa = ra + GUARD, *ob = rb + GUARD;
   if (candidate_flags) PaletteUpdateTest(b, ob);
-  printf("PROFILE %s\n", candidate_flags ? "Old 3DS" : "New 3DS stable");
+  printf("PROFILE %s\n", (candidate_flags & kPpuRenderFlags_Old3DS) ? "Old 3DS" :
+         candidate_flags ? "New 3DS / Android / desktop" : "per-pixel paths");
   uint64_t pixels = 0;
   for (unsigned s = 0; s < scenes; s++) {
     Setup(b, s); CopyState(a, b);

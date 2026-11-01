@@ -1,0 +1,158 @@
+# DarkWorld/South.yaml — Inverted DarkWorld South (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/DarkWorld/South.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# NOTE on the Inverted start region: it is `LinksHouse_Inverted` (id 21), NOT
+# DarkWorld_South. The generated `kRandoStartRegionByWorldState` in
+# src/rando/logic_data.c is {0x14, 0x14, 0x15, 0x14} (Inverted = 0x15 = id 21).
+# DarkWorld_South is reached from the start through the Inverted RegionRemap
+# overlay (see tasks §6), not a static edge. Headless verification 2026-05-29:
+# every Inverted goal is goal_completable, so the start → dark-world routing
+# resolves correctly. This file still declares DarkWorld_South's locations as
+# part of the Inverted graph.
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `PegasusBoots` → registry-canonical `Boots`.
+#   - PHP `Bottle` → `HasABottle()` (via macros.yaml).
+#   - The Inverted/South.php class extends Standard/South.php.
+#     PHP's `initialize()` does NOT call `parent::initialize()`, so only the
+#     predicates declared in Inverted/South.php are active. Locations the
+#     parent set up (Stumpy, Digging Game, Hype Cave - NPC variants beyond
+#     what Inverted explicitly sets, etc.) inherit the framework default
+#     (TRUE) when not re-set. We list only the locations the Inverted
+#     class touches (the Hype Cave family at php:108-126); Stumpy and
+#     Digging Game default to TRUE() with citations to Standard/South.php
+#     for provenance.
+#   - The Inverted constructor (php:31) adds "Link's House" to this region;
+#     it has no setRequirements so its can_reach defaults to TRUE().
+#   - Dropped branches: canBootsClip, canFly+OWYBA+bottle (canOWYBA),
+#     canOneFrameClipOW, canSuperSpeed, canFakeFlipper, canBunnyRevive,
+#     canWaterWalk, region.cantTakeDamage — Phase B logic axes; Phase A
+#     pins logic=NoGlitches, tricks=none.
+#   - The Inverted/South.php class does NOT set `$this->can_enter`, so the
+#     start-region has no entry condition (this is the entry point for
+#     Inverted mode — Link starts here per ALTTPR's Inverted layout).
+#
+# Status: translated 2026-05-27. Awaiting review + codegen subdir-scan
+# integration (see ../README.md — codegen currently flat-scans logic_parts/).
+
+format_version: 1
+
+regions:
+  # Phase B Slice 2 §50 — `LinksHouse_Inverted` is the canonical
+  # Inverted start region (per the spec). Distinct from DarkWorld_South
+  # so the start can have its own edge graph: trivial Link's House →
+  # DarkWorld_South edge today, but the spec reserves room for future
+  # Inverted-specific entrance shuffles (Phase C).
+  # `kRandoStartRegionByWorldState[Inverted]` is updated to consult
+  # `LinksHouse_Inverted`.
+  - id: LinksHouse_Inverted
+    name: "Link's House (Inverted)"
+    source: "app/Region/Inverted/DarkWorld/South.php:31 (Inverted ctor adds Link's House)"
+
+  - id: DarkWorld_South
+    name: "Dark World - South (Inverted overworld south)"
+    source: "app/Region/Inverted/DarkWorld/South.php:13-130 (extends Standard/DarkWorld/South.php:14-160)"
+    notes: |
+      Inverted-mode overworld South. Reached from LinksHouse_Inverted via
+      a trivial edge (no entry condition). PHP base class is
+      `Region\Standard\DarkWorld\South`; Inverted/South.php adds Link's
+      House to its locations list (php:31) BUT for the Phase A graph we
+      model Link's House as its own region (LinksHouse_Inverted) and
+      DarkWorld_South as the overworld region — matches the Standard-
+      world Link's House / LightWorld_South split.
+      Inverted/South.php overrides predicates for the Hype Cave family +
+      dark Lake Hylia shops. No `$this->can_enter` is set → reachable
+      from LinksHouse_Inverted unconditionally.
+
+edges:
+  # Phase B Slice 2 §50 — trivial edge from the Inverted start to the
+  # DarkWorld South overworld. No predicate (TRUE).
+  - from: LinksHouse_Inverted
+    to: DarkWorld_South
+    predicate: "TRUE()"
+    source: "Phase A2 graph follow-up; mirrors Standard LinksHouse → LightWorld_South."
+
+locations:
+  # `Link's House` (Inverted/South.php:31): added in Inverted constructor;
+  # no setRequirements → defaults to TRUE(). Registry id 174.
+  # Moved to LinksHouse_Inverted region per §50.
+  - id: "Link's House"
+    region: LinksHouse_Inverted
+    can_reach: "TRUE()"
+    source: "app/Region/Inverted/DarkWorld/South.php:31"
+
+  # `Hype Cave - Top` (Inverted/South.php:108-110): canBombThings().
+  # Inverted drops the MoonPearl gate (no bunny-state in DW since Link is
+  # native there per Inverted world-state).
+  - id: "Hype Cave - Top"
+    region: DarkWorld_South
+    can_reach: "CanBombThings()"
+    source: "app/Region/Inverted/DarkWorld/South.php:108-110"
+
+  # `Hype Cave - Middle Right` (Inverted/South.php:112-114): canBombThings().
+  - id: "Hype Cave - Middle Right"
+    region: DarkWorld_South
+    can_reach: "CanBombThings()"
+    source: "app/Region/Inverted/DarkWorld/South.php:112-114"
+
+  # `Hype Cave - Middle Left` (Inverted/South.php:116-118): canBombThings().
+  - id: "Hype Cave - Middle Left"
+    region: DarkWorld_South
+    can_reach: "CanBombThings()"
+    source: "app/Region/Inverted/DarkWorld/South.php:116-118"
+
+  # `Hype Cave - Bottom` (Inverted/South.php:120-122): canBombThings().
+  - id: "Hype Cave - Bottom"
+    region: DarkWorld_South
+    can_reach: "CanBombThings()"
+    source: "app/Region/Inverted/DarkWorld/South.php:120-122"
+
+  # `Hype Cave - NPC` (Inverted/South.php:124-126): canBombThings().
+  - id: "Hype Cave - NPC"
+    region: DarkWorld_South
+    can_reach: "CanBombThings()"
+    source: "app/Region/Inverted/DarkWorld/South.php:124-126"
+
+  # `Stumpy` — not overridden in Inverted/South.php; parent::initialize() is
+  # NOT called, so the Standard/South.php:95-100 predicate does not apply.
+  # Default predicate: TRUE() (location_registry id 226).
+  - id: "Stumpy"
+    region: DarkWorld_South
+    can_reach: "TRUE()"
+    source: "app/Region/Inverted/DarkWorld/South.php (not overridden, parent::initialize() not called → default TRUE)"
+
+  # `Digging Game` — not overridden in Inverted/South.php; default TRUE.
+  # (location_registry id 228).
+  - id: "Digging Game"
+    region: DarkWorld_South
+    can_reach: "TRUE()"
+    source: "app/Region/Inverted/DarkWorld/South.php (not overridden, parent::initialize() not called → default TRUE)"
+
+  # Bomb Merchant — Inverted-only location (registry id 236, region
+  # DarkWorld_South per location_registry.yaml:371). PHP predicate at
+  # `Inverted/LightWorld/South.php:90-94`: `MoonPearl AND Crystal5 AND
+  # Crystal6`. Authored here (not in LightWorld/South.yaml) because the
+  # registry assigns the location to DarkWorld_South.
+  - id: "Bomb Merchant"
+    region: DarkWorld_South
+    can_reach: "HAS_ITEM(MoonPearl) AND OP_HAS_PRIZE(Prize_Crystal5) AND OP_HAS_PRIZE(Prize_Crystal6)"
+    source: "app/Region/Inverted/LightWorld/South.php:90-94"
+
+# NOTE on Inverted shops (Inverted/South.php:42-106):
+#   The "Bonk Fairy (Dark)" and three "Dark Lake Hylia Ledge ..." shops
+#   have Inverted-specific predicates, but our location_registry.yaml does
+#   not currently track shop entries as placement locations (shops are
+#   inventory-defining, not placement targets in Phase A). Their PHP
+#   predicates are documented here for future Phase B shop-placement work
+#   but DROPPED from this YAML because they have no corresponding ID:
+#     - "Bonk Fairy (Dark)" (Inverted/South.php:42-44): HAS_ITEM(Boots).
+#     - "Dark Lake Hylia Ledge Fairy" (Inverted/South.php:46-65):
+#         CanBombThings() AND (HAS_ITEM(Flippers) OR CanFly(world)).
+#         All glitch/trick branches drop.
+#     - "Dark Lake Hylia Ledge Hint" (Inverted/South.php:67-86):
+#         CanLiftRocks() AND (HAS_ITEM(Flippers) OR CanFly(world)).
+#     - "Dark Lake Hylia Ledge Spike Cave" (Inverted/South.php:88-106):
+#         CanLiftRocks() AND (HAS_ITEM(Flippers) OR CanFly(world)).

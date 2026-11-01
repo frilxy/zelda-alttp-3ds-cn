@@ -1,4 +1,5 @@
 #pragma once
+void SelectFile_NotifySlotWritten(int slot_index);
 
 
 bool Intro_CheckCksum(const uint8 *s);

@@ -1,0 +1,304 @@
+# logic.schema.yaml — schema for Phase A logic YAML files
+#
+# Pinned per `randomizer-logic / Logic YAML schema and worked examples` and
+# tasks.md §3.5a. This schema gates `logic.yaml` authoring (task 3.3); the
+# 3-5 worked examples under `assets/rando/logic_examples/` exercise the
+# full surface so schema gaps are caught before months of authoring.
+#
+# Changes to this schema (field renames, predicate-syntax changes, structural
+# shifts) are a `kGeneratorVersion` bump trigger (tasks.md §13.6).
+
+format_version: 1
+phase: A
+
+# ---------------------------------------------------------------------------
+# Top-level structure of a logic YAML file
+# ---------------------------------------------------------------------------
+top_level:
+  - regions:        # list of Region records (see below)
+  - edges:          # list of Edge records
+  - locations:      # list of Location records
+  - macros:         # list of named-macro definitions
+
+# ---------------------------------------------------------------------------
+# Region records
+# ---------------------------------------------------------------------------
+region_record:
+  required_fields:
+    id:
+      type: string
+      description: |
+        Stable canonical identifier (e.g., "EasternPalace_AfterArmos").
+        SHALL match the corresponding entry in `assets/rando/location_registry.yaml`.
+    name:
+      type: string
+      description: Human-readable name for spoilers/tracker.
+  optional_fields:
+    dungeon:
+      type: string
+      description: |
+        Dungeon identifier when the region is inside a dungeon
+        (one of: HyruleCastleEscape, EasternPalace, DesertPalace, TowerOfHera,
+        HyruleCastleTower, PalaceOfDarkness, SwampPalace, SkullWoods,
+        ThievesTown, IcePalace, MiseryMire, TurtleRock, GanonsTower).
+    parent:
+      type: string
+      description: Parent-region id (for nested regions). Default null.
+    world_state_filter:
+      type: enum
+      values: [open, standard, inverted, retro]
+      cardinality: list
+      description: |
+        If present, this region exists ONLY in the listed world-states. Omit
+        for regions present in all four world-states (the common case).
+    source:
+      type: string
+      description: |
+        Provenance citation for the upstream PHP file:line range this region
+        was translated from (per audit §0.10.1 attribution discipline).
+        Format: "app/Region/<Variant>/<File>.php:<L1>-<L2>".
+
+# ---------------------------------------------------------------------------
+# Edge records — connect regions
+# ---------------------------------------------------------------------------
+edge_record:
+  required_fields:
+    from:
+      type: string
+      description: source region id
+    to:
+      type: string
+      description: destination region id
+    predicate:
+      type: predicate_expression
+      description: |
+        can_traverse predicate. Evaluated against the simulated inventory
+        and settings; if true the edge is traversable.
+  optional_fields:
+    one_way:
+      type: bool
+      default: false
+      description: |
+        If true, traversal is one-way (from -> to). Default false (both directions).
+    cost:
+      type: int
+      default: 1
+      description: |
+        Logical traversal "cost" used by reachability-budget heuristics.
+        Unused in Phase A; reserved for Phase B route-quality scoring.
+    source:
+      type: string
+      description: Provenance citation, same shape as region_record.source.
+
+# ---------------------------------------------------------------------------
+# Location records
+# ---------------------------------------------------------------------------
+location_record:
+  required_fields:
+    id:
+      type: string
+      description: |
+        Stable canonical identifier (e.g., "EasternPalace_BigKeyChest").
+        SHALL match the corresponding entry in
+        `assets/rando/location_registry.yaml`. The location's numeric ID
+        comes from the registry, not from here.
+    name:
+      type: string
+      description: |
+        Human-readable name for spoilers/tracker. SHALL match the ALTTPR
+        canonical name when applicable (per audit §0.3.5 catalog).
+    region:
+      type: string
+      description: Region id this location belongs to.
+    type:
+      type: enum
+      values:
+        - Chest
+        - BigChest
+        - Npc
+        - Standing
+        - Pedestal
+        - Dash
+        - Dig
+        - Drop
+        - Fountain
+        - Trade
+        - Prize_Crystal
+        - Prize_Pendant
+        - Prize_Event
+        - Medallion
+        - Shop          # Phase B Slice 3a — Retro shop purchase slots
+        - ShopUpgrade   # Phase B Slice 3a — Capacity Upgrade slots (identity-placed)
+        - TakeAny       # Phase B Slice 3b — Retro take-any cave slots (per-seed active subset)
+        - Pot           # add-rando-pot-sanity — dungeon pot (per-tier active subset)
+        - EnemyDrop     # add-rando-enemy-drop-sanity — forced enemy key drop
+        - Enemy         # add-rando-dungeon-enemy-checks — ordinary dungeon enemy check
+        - Grass         # add-rando-grass-rock-shuffle — overworld bush/thick-grass check
+        - Rock          # add-rando-grass-rock-shuffle — overworld light/heavy rock check
+        - Bonk          # add-rando-bonk-sanity — placed OW bonk-item sprite check (bee hive / apple tree)
+      description: |
+        Location archetype. Mirrors ALTTPR's Location\* subclasses. Drives
+        §6 dispatch routing (chest path vs. NPC handler vs. synthesized hook).
+    vanilla_item:
+      type: string
+      description: |
+        Item registry id of the vanilla item at this location. Used as the
+        fall-back when the placement table lacks this location (per
+        `randomizer-placement / Dispatcher signature`).
+  optional_fields:
+    can_reach:
+      type: predicate_expression
+      default: "TRUE()"
+      description: |
+        Reachability predicate. True iff the location is reachable under
+        the given inventory snapshot. Corresponds to ALTTPR's setRequirements.
+    can_place:
+      type: predicate_expression
+      default: "TRUE()"
+      description: |
+        Placement restriction. True iff the candidate item is allowed at
+        this location. Corresponds to ALTTPR's setFillRules. May reference
+        OP_ITEM_IS(<item>) (the only context where that op is permitted).
+    always_allow:
+      type: predicate_expression
+      default: "FALSE()"
+      description: |
+        Override that permits placement even when can_place would reject.
+        Corresponds to ALTTPR's setAlwaysAllow. Common use: "this dungeon's
+        own compass/map IS allowed at the boss-fight slot even when general
+        fill rules would say no."
+    world_state_filter:
+      type: enum
+      values: [open, standard, inverted, retro]
+      cardinality: list
+      description: |
+        If present, this location exists ONLY in the listed world-states.
+        Examples: `Bomb Merchant` (inverted-only), `Pyramid Fairy - Left/Right`
+        (only when `region.swordsInPool=true`).
+    dungeon_item_class:
+      type: enum
+      values: [small_key, big_key, map, compass]
+      description: |
+        When set, this location holds a dungeon item of the given class
+        in vanilla. Drives dungeon_items.{class} mode wiring (Vanilla /
+        Dungeon / Wild) in the placer.
+    source:
+      type: string
+      description: Provenance citation, same shape as region_record.source.
+
+# ---------------------------------------------------------------------------
+# Macro records
+# ---------------------------------------------------------------------------
+macro_record:
+  required_fields:
+    name:
+      type: string
+      description: |
+        Macro identifier (PascalCase; e.g., "CanKillMostThings",
+        "CanShootArrows"). Referenced from predicates as `<Name>(args)`.
+    body:
+      type: predicate_expression
+      description: |
+        Predicate body using the parameters declared below. May reference
+        other macros (recursion is forbidden; codegen detects cycles).
+  optional_fields:
+    parameters:
+      type: list[string]
+      default: []
+      description: |
+        Formal parameter names. References in `body` like `world`, `min_level`.
+        Parameters are substituted at codegen time; the predicate VM has no
+        runtime parameter mechanism.
+    source:
+      type: string
+      description: |
+        ALTTPR PHP source citation: `app/Support/ItemCollection.php:<L1>-<L2>`.
+        Required for the 43 ALTTPR-derived macros per audit §0.10.1.
+    notes:
+      type: string
+      description: Free-form notes (translation oddities, behavior caveats).
+
+# ---------------------------------------------------------------------------
+# Predicate expression DSL
+# ---------------------------------------------------------------------------
+# Predicates are STRINGS using a small expression language parsed by the
+# codegen (`assets/rando_logic_gen.py`). The grammar:
+#
+#   predicate := or_expr
+#   or_expr   := and_expr ( "OR" and_expr )*
+#   and_expr  := not_expr ( "AND" not_expr )*
+#   not_expr  := "NOT" not_expr | atom
+#   atom      := op_call | macro_call | "TRUE()" | "FALSE()" | "(" predicate ")"
+#   op_call   := OP_NAME "(" arg_list? ")"
+#   macro_call:= MacroName "(" arg_list? ")"
+#   arg_list  := arg ("," arg)*
+#   arg       := identifier | int_literal | list_literal
+#   list_literal := "[" identifier ("," identifier)* "]"
+#
+# Operator precedence (highest to lowest): NOT > AND > OR.
+# Whitespace is insignificant outside identifiers.
+# Identifiers are bare (no quoting): item ids, region ids, macro args, etc.
+# Integer literals are base-10 unsigned (`0..255` for op operands).
+#
+# OP_ITEM_IS surface syntax: explicit `OP_ITEM_IS(<item_id>)` ONLY. The
+# sugar `(item IS X)` is NOT supported (chosen per `randomizer-logic /
+# Per-location can_place + always_allow predicates` "Pick at schema commit").
+#
+# Codegen-expanded macros (for swordless-mode wildcards etc.): when the
+# author writes `IS_ANY_OF_SWORDS(candidate)`, the codegen expands at YAML→
+# bytecode time into `OP_ITEM_IS(L1Sword) OR OP_ITEM_IS(L2Sword) OR
+# OP_ITEM_IS(L3Sword) OR OP_ITEM_IS(L4Sword) OR OP_ITEM_IS(ProgressiveSword)`.
+# The VM has no wildcard runtime feature; expansion is compile-time only.
+
+predicate_expression:
+  surface: string
+  example_simple: "HAS_ITEM(Hookshot)"
+  example_combined: "(HAS_ITEM(Lamp) OR HAS_ITEM(FireRod)) AND HAS_ITEM(BigKeyP1)"
+  example_with_macro: "CanShootArrows() AND NOT WORLDSTATE_EQ(inverted)"
+  example_can_place: "NOT OP_ITEM_IS(MirrorShield) AND NOT OP_ITEM_IS(SilverArrowUpgrade)"
+  example_has_any_count: "HAS_ANY_COUNT([PieceOfHeart, BossHeartContainer, StartingHeart], 12)"
+
+# ---------------------------------------------------------------------------
+# Inline-complexity check (enforced by codegen)
+# ---------------------------------------------------------------------------
+inline_complexity:
+  max_ops_in_inline_predicate: 6
+  description: |
+    Any single predicate that exceeds 6 OP-nodes WITHOUT going through a
+    named macro is rejected by codegen with the file/line. Authors SHALL
+    refactor into a named macro. The threshold mirrors ALTTPR's level of
+    factoring (`ItemCollection.php` has 43 named macros for this reason).
+
+# ---------------------------------------------------------------------------
+# Well-formedness checks (codegen build-time pass — task 3.10)
+# ---------------------------------------------------------------------------
+well_formedness:
+  - "Every referenced item ID exists in `assets/rando/item_registry.yaml`."
+  - "Every referenced location ID exists in `assets/rando/location_registry.yaml`."
+  - "Every referenced region ID exists in `regions:`."
+  - "Every referenced macro exists in `macros:` (or is a known codegen-expanded macro)."
+  - "OP_ITEM_IS appears ONLY inside can_place predicates."
+  - "No macro forms a recursive cycle."
+  - "Every location is reachable under a full-inventory mock (no orphan locations)."
+  - "Every region is reachable from the start under a full-inventory mock."
+  - "No predicate exceeds the inline-complexity threshold without macro factoring."
+  # Phase B Slice 4 §56: OP_TRICK / OP_DIFFICULTY_AT_LEAST /
+  # OP_GLITCH_LEVEL_AT_LEAST are now authored predicates. The codegen
+  # resolves OP_TRICK(<id>) operands via `tricks:` table in op_registry.yaml
+  # and the difficulty/glitch enums via DIFFICULTY_LEVELS / GLITCH_LEVELS
+  # in `rando_logic_gen.py`. Phase A defaults (tricks=0, logic=no_glitches,
+  # item_pool_difficulty=normal) cause these ops to evaluate to their
+  # zero-trick / zero-glitch branches — corpus-stable.
+
+# ---------------------------------------------------------------------------
+# Outputs produced by codegen (`assets/rando_logic_gen.py` — task 3.5)
+# ---------------------------------------------------------------------------
+codegen_outputs:
+  - path: src/rando/logic_data.c
+    contains: |
+      LocationDef[], RegionDef[], EdgeDef[], bytecode predicate streams
+      compiled from the YAML.
+  - path: src/rando/location_ids.h
+    contains: "#define LOC_<id> <numeric_id> per location_registry.yaml"
+  - path: src/rando/item_ids.h
+    contains: "#define ITEM_<id> <numeric_id> per item_registry.yaml"

@@ -38,6 +38,12 @@ typedef struct CartHeader {
   uint8_t cartType; // calculated type
 } CartHeader;
 
+// Alternative mapping probes can point into arbitrary ROM bytes. Ignore size
+// exponents that cannot be represented instead of shifting by an invalid count.
+static uint32_t headerSize(uint8_t exponent) {
+  return exponent <= 21 ? 0x400u << exponent : 0;
+}
+
 static void readHeader(uint8_t* data, int location, CartHeader* header);
 
 bool snes_loadRom(Snes* snes, uint8_t* data, int length) {
@@ -120,8 +126,8 @@ static void readHeader(uint8_t* data, int location, CartHeader* header) {
   header->type = data[location + 0x15] & 0xf;
   header->coprocessor = data[location + 0x16] >> 4;
   header->chips = data[location + 0x16] & 0xf;
-  header->romSize = 0x400 << data[location + 0x17];
-  header->ramSize = 0x400 << data[location + 0x18];
+  header->romSize = headerSize(data[location + 0x17]);
+  header->ramSize = headerSize(data[location + 0x18]);
   header->region = data[location + 0x19];
   header->maker = data[location + 0x1a];
   header->version = data[location + 0x1b];
@@ -151,8 +157,8 @@ static void readHeader(uint8_t* data, int location, CartHeader* header) {
       }
     }
     header->gameCode[4] = 0;
-    header->flashSize = 0x400 << data[location - 4];
-    header->exRamSize = 0x400 << data[location - 3];
+    header->flashSize = headerSize(data[location - 4]);
+    header->exRamSize = headerSize(data[location - 3]);
     header->specialVersion = data[location - 2];
     header->exCoprocessor = data[location - 1];
   } else if(data[location + 0x14] == 0) {

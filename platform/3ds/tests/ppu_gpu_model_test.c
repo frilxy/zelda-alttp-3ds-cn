@@ -6,8 +6,9 @@
 #include <assert.h>
 #include <time.h>
 #include "ppu_gpu_model.h"
+#include "snes/ppu_ui.h"
 enum { PITCH = 512, HEIGHT = 240, GUARD = 32 };
-static unsigned candidate_flags = kPpuRenderFlags_Old3DS;
+static unsigned candidate_flags = kPpuRenderFlags_Old3DS | kPpuRenderFlags_FastPaths;
 static uint32_t rng = 0x714a2bu;
 static uint32_t Random(void) {
   rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
@@ -22,6 +23,7 @@ static void Setup(Ppu *p, unsigned scene) {
   p->extraLeftCur = Random() % (p->extraLeftRight + 1);
   p->extraRightCur = Random() % (p->extraLeftRight + 1);
   p->extraBottomCur = scene % 17;
+  p->wideMarginRepeat = scene % 3 == 0;
   p->screenEnabled[0] = Random() & 0x17;
   p->screenEnabled[1] = Random() & 0x17;
   p->screenWindowed[0] = Random() & 0x17;
@@ -136,9 +138,16 @@ static bool Raster(void *ctx,unsigned group,const PicaQuad *q) {
  for(int y=q->y0;y<q->y1;y++) for(int x=q->x0;x<q->x1;x++) {
   assert(x>=0 && x<(int)width && y>=0 && y<240);
   unsigned i=y*512+x;
-  if(group>=4) {
-   output[i]=PicaComposeRgb5(Unpack(surface[0][i]),Unpack(surface[1][i]),
-     (surface[0][i]&255)==255,(surface[1][i]&255)==255,group-4);
+  if(group>=4 && group<PICA_UI_GROUP) {
+   // Composition samples the 512x256 main/sub surfaces at the quad's UV,
+   // as both texture units do on PICA; WIDE margin quads rely on that.
+   double u=q->u0+(q->u1-q->u0)*(x-q->x0+0.5)/(q->x1-q->x0);
+   double v=q->v0+(q->v1-q->v0)*(y-q->y0+0.5)/(q->y1-q->y0);
+   int sx=(int)(u/8),sy=(int)((4096-v)/16);
+   assert(sx>=0&&sx<(int)width&&sy>=0&&sy<240);
+   unsigned s=sy*512+sx;
+   output[i]=PicaComposeRgb5(Unpack(surface[0][s]),Unpack(surface[1][s]),
+     (surface[0][s]&255)==255,(surface[1][s]&255)==255,group-4);
   } else {
    // Integer rational interpolation at pixel centers, then PICA nearest texel.
    double u=q->u0+(q->u1-q->u0)*(x-q->x0+0.5)/(q->x1-q->x0);
@@ -149,6 +158,7 @@ static bool Raster(void *ctx,unsigned group,const PicaQuad *q) {
    uint32_t c=atlas[offset];
    unsigned a=(c&255)*q->a/255;
    if(!a) continue;
+   if(group==PICA_UI_GROUP) {output[i]=Unpack(c);continue;}
    unsigned sub=group/2;
    if(group&1) {if(stencil[sub][i])continue;stencil[sub][i]=1;}
    if(q->depth<=depth[sub][i])continue;
@@ -171,8 +181,42 @@ static void MathTest(void) {
  }
  puts("PASS 65,536 independent SNES color-math cases");
 }
+// The WIDE picture can be drawn up to extraLeftRight pixels beside the
+// game's camera (renderObjXOffset). Both sprite paths place a sprite at its
+// picture x anywhere in the 512 pixels around the picture, from its 9-bit
+// OAM x relative to the game's camera.
+static void ObjOffsetTest(void) {
+ Ppu *p=ppu_init();static uint32_t buf[512*240];unsigned checked=0;
+ for(unsigned path=0;path<2;path++)for(int dx=-72;dx<=72;dx+=24)for(int px=-216;px<440;px+=3) {
+  ppu_reset(p);p->forcedBlank=false;p->brightness=15;p->mode=1;p->objSize=0;
+  p->extraLeftRight=p->extraLeftCur=p->extraRightCur=72;p->screenEnabled[0]=0x10;
+  for(int i=0;i<256;i++)p->cgram[i]=0;
+  p->cgram[0x81]=0x7fff;
+  for(int i=0;i<8;i++){p->vram[0x4000+i]=0x00ff;p->vram[0x4008+i]=0;}
+  for(int i=0;i<0x100;i+=2){p->oam[i]=0xf000;p->oam[i+1]=0;}
+  for(int i=0x100;i<0x110;i++)p->oam[i]=0;
+  unsigned x9=(unsigned)(px-dx)&511;
+  p->oam[0]=(x9&0xff)|(100<<8);p->oam[0x100]=x9>>8;
+  memset(buf,0,sizeof(buf));
+  PpuBeginDrawing(p,(uint8_t*)buf,512*4,1|(path?kPpuRenderFlags_FastPaths:0));
+  p->renderObjXOffset=dx;
+  for(int y=0;y<240;y++)ppu_runLine(p,y+1);
+  int lo=400,hi=-1;
+  for(int y=0;y<240;y++)for(int x=0;x<400;x++)if(buf[y*512+x]&0xffffff){if(x<lo)lo=x;if(x>hi)hi=x;}
+  // The 512 pixels around the picture: -184 up to its right edge.
+  int at=((px+184)&511)-184,want_lo=72+at<0?0:72+at,want_hi=72+at+7>399?399:72+at+7;
+  if(want_lo>want_hi){assert(hi<0);}
+  else {
+   if(lo!=want_lo||hi!=want_hi){fprintf(stderr,"FAIL sprite path=%u dx=%d px=%d drawn %d..%d, expected %d..%d\n",path,dx,px,lo,hi,want_lo,want_hi);exit(1);}
+   checked++;
+  }
+ }
+ ppu_free(p);
+ printf("PASS %u sprites placed beside the game's camera, both sprite paths\n",checked);
+}
 int main(int argc,char **argv) {
  MathTest();
+ ObjOffsetTest();
  unsigned shared=0;unsigned long long vertices=0;
  Ppu *p=ppu_init(),*scratch=calloc(1,sizeof(Ppu));
  PicaAtlas *cache=calloc(1,sizeof(PicaAtlas));
@@ -185,6 +229,21 @@ int main(int argc,char **argv) {
    Setup(p,scene);p->mode=1;p->brightness=15;p->mosaicSize=1;p->mosaicEnabled=0;
    p->objSize=scene%8;
   } else LoadDump(p,argv[2+scene-scenes]);
+  // Exercise native UI as well as ordinary layers. In particular, the
+  // interface must survive rooms whose world has zero visible side space.
+  if (scene<scenes && scene%4==2) {
+    p->wideUi=1+(scene/4)%3;p->wideUiSaveX=32;p->wideUiSaveY=144;
+    p->extraLeftRight=72;p->extraLeftCur=p->extraRightCur=0;
+    p->screenEnabled[0]|=4;p->screenEnabled[1]&=~4;
+    p->screenWindowed[0]&=~4;p->mathEnabled&=~4;
+    p->bgLayer[2].hScroll=0;p->bgLayer[2].tilemapHigher=true;
+    p->bgLayer[2].vScroll=p->wideUi==kPpuUiInventory?280:0;
+    for (unsigned row=5;row<30;row++) {
+      unsigned address=p->bgLayer[2].tilemapAdr+(p->bgLayer[2].tilemapWider?0x800:0x400)+row*32;
+      p->vram[(address+1)&32767]=p->vram[(address+21)&32767]=0x28fc;
+      p->vram[(address+19)&32767]=p->vram[(address+30)&32767]=0x68fc;
+    }
+  }
   static int16_t wl[240],wr[240];
   p->windowExtLeft=p->windowExtRight=NULL;
   if(scene<scenes && scene%4==1) {
@@ -204,6 +263,8 @@ int main(int argc,char **argv) {
    p->colorMapDirty=true;
    PpuBeginDrawing(p,(uint8_t*)cpu,512*4,1|(scene&2?kPpuRenderFlags_NoSpriteLimits:0));
    p->renderObjYOffset=scene<scenes?scene%17:0;
+   // The fixed camera draws wide pictures up to 72 pixels beside the game's.
+   p->renderObjXOffset=scene<scenes&&p->extraLeftRight?(int)(scene*37%145)-72:0;
    for(unsigned y=0;y<240;y++) {
     if(scene<scenes && scene%3==0 && scene%4!=1 && y%31==0) {
      p->bgLayer[0].hScroll=(p->bgLayer[0].hScroll+7)&1023;

@@ -1,0 +1,128 @@
+# 23_thieves_town.yaml — Thieves' Town translation
+#
+# Mechanically translated from
+# `../alttp_vt_randomizer/app/Region/Standard/ThievesTown.php` (MIT, verified
+# per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# Phase A axis pins (per audit.md §0.10.2) collapse the PHP closures:
+#   - region.wildKeys / wildBigKeys / wildMaps / wildCompasses → false
+#   - region.bossNormalLocation → true
+#   - itemPlacement === 'advanced' / 'basic' → both false (standard mode)
+#   - mode.weapons === 'swordless' → false
+#   - accessibility === 'locations' → false (default accessibility=items)
+#   - canOWYBA / canBunnyRevive → all false (NoGlitches)
+#
+# PHP item-name remappings:
+#   KeyD4     → SmallKey_ThievesTown
+#   BigKeyD4  → BigKey_ThievesTown
+#   MapD4     → Map_ThievesTown
+#   CompassD4 → Compass_ThievesTown
+#
+# Boss: Blind — translated from `app/Boss.php:103-107`.
+
+format_version: 1
+
+regions:
+  # External parent — Thieves' Town's overworld region (Village of Outcasts).
+  # Stubbed.
+  - id: DarkWorld_NorthWest
+    name: "Dark World - North West (stub)"
+    source: "stub for cross-file region reference"
+
+  - id: ThievesTown
+    name: "Thieves' Town"
+    dungeon: ThievesTown
+    source: "app/Region/Standard/ThievesTown.php:15-63"
+
+edges:
+  # Thieves' Town can_enter (php:118-126). Phase A collapse:
+  #   has(RescueZelda)
+  #   && (itemPlacement!='basic' || <basic-mode gate>)       [TRUE]
+  #   && (MoonPearl || canOWYBA+bottle || (canBunnyRevive && canSpinSpeed))
+  #   && <NorthWestDarkWorld.canEnter>
+  # Phase A retained `RescuedZelda AND MoonPearl`. Phase B Slice 4 §7
+  # surfaces the pearl-bypass alternative; canBunnyRevive+spin lacks
+  # macros so that disjunct drops. Default `tricks=0` collapses
+  # CanPearlBypass to FALSE → Phase A shape.
+  - from: DarkWorld_NorthWest
+    to: ThievesTown
+    predicate: "HAS_ITEM(RescuedZelda) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass())"
+    source: "app/Region/Standard/ThievesTown.php:118-126 (can_enter closure)"
+
+locations:
+  # ===========================================================================
+  # Thieves' Town — predicates from ThievesTown.php:71-131
+  # ===========================================================================
+
+  # Big Key Chest (php:51) — no setRequirements; default TRUE.
+  - id: "Thieves' Town - Big Key Chest"
+    region: ThievesTown
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/ThievesTown.php:51"
+
+  # Map Chest (php:52) — no setRequirements; default TRUE.
+  - id: "Thieves' Town - Map Chest"
+    region: ThievesTown
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/ThievesTown.php:52"
+
+  # Compass Chest (php:53) — no setRequirements; default TRUE.
+  - id: "Thieves' Town - Compass Chest"
+    region: ThievesTown
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/ThievesTown.php:53"
+
+  # Ambush Chest (php:54) — no setRequirements; default TRUE.
+  - id: "Thieves' Town - Ambush Chest"
+    region: ThievesTown
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/ThievesTown.php:54"
+
+  # Attic (php:73-75): KeyD4 && BigKeyD4.
+  - id: "Thieves' Town - Attic"
+    region: ThievesTown
+    can_reach: "HAS_ITEM(SmallKey_ThievesTown) AND HAS_ITEM(BigKey_ThievesTown)"
+    source: "app/Region/Standard/ThievesTown.php:73-75"
+
+  # Blind's Cell (php:89-91): BigKeyD4.
+  - id: "Thieves' Town - Blind's Cell"
+    region: ThievesTown
+    can_reach: "HAS_ITEM(BigKey_ThievesTown)"
+    source: "app/Region/Standard/ThievesTown.php:89-91"
+
+  # Big Chest (php:77-87). Phase A collapse:
+  #   if hasItem(KeyD4) at this slot → Hammer && BigKeyD4   [self-ref / advanced; dropped]
+  #   else → Hammer && KeyD4 && BigKeyD4
+  # The advanced self-ref branch is dropped per audit; take the else branch.
+  # Always-allow / setFillRules accessibility != 'locations' branches vacuous.
+  - id: "Thieves' Town - Big Chest"
+    region: ThievesTown
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(SmallKey_ThievesTown) AND HAS_ITEM(BigKey_ThievesTown)"
+    source: "app/Region/Standard/ThievesTown.php:77-87"
+
+  # Boss (php:97-116): KeyD4 && BigKeyD4 && Blind.canBeat. canEnter enforced
+  # by the edge. wildCompasses/wildMaps clauses vacuous (Phase A pins false).
+  - id: "Thieves' Town - Boss"
+    region: ThievesTown
+    can_reach: "HAS_ITEM(SmallKey_ThievesTown) AND HAS_ITEM(BigKey_ThievesTown) AND CanKillBoss(ThievesTown)"
+    source: "app/Region/Standard/ThievesTown.php:97-116"
+
+  # Prize (php:59, 93-95, 128) — can_complete = Boss canAccess.
+  - id: "Thieves' Town - Prize"
+    region: ThievesTown
+    can_reach: "HAS_ITEM(SmallKey_ThievesTown) AND HAS_ITEM(BigKey_ThievesTown) AND CanKillBoss(ThievesTown)"
+    source: "app/Region/Standard/ThievesTown.php:59, 93-95, 128 (can_complete = Boss access)"
+
+macros:
+  # CanKillBlind — TT boss. Translated from app/Boss.php:103-107.
+  #   (itemPlacement!='basic' || swordless || (hasSword() && (Cape || CaneOfByrna)))
+  #   && (hasSword() || Hammer || CaneOfSomaria || CaneOfByrna)
+  # itemPlacement!='basic' → TRUE → leading clause collapses to TRUE.
+  - name: CanKillBlind
+    parameters: [world]
+    body: "(HasSword(1) OR HAS_ITEM(Hammer) OR HAS_ITEM(CaneOfSomaria) OR HAS_ITEM(CaneOfByrna)) AND NeedsBossSoul(Soul_Blind)"
+    source: "app/Boss.php:103-107 (Boss::canBeat for Blind)"
+    notes: |
+      Phase A: itemPlacement!='basic' → TRUE drops the leading
+      (basic-mode-requires-defensive-sword) gate; the body is the inner
+      "kill Blind" disjunction.

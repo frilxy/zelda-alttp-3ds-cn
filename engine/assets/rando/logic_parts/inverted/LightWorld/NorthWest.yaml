@@ -1,0 +1,211 @@
+# LightWorld/NorthWest.yaml — Inverted LightWorld North West (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/LightWorld/NorthWest.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `PegasusBoots` → registry-canonical `Boots`.
+#   - PHP `Powder` → `MagicPowder`.
+#   - PHP `PendantOfCourage/Wisdom/Power` → `OP_HAS_PRIZE(Prize_GreenPendant
+#     /Prize_BluePendant/Prize_RedPendant)`.
+#   - PHP `canBunnyRevive`/`canOWYBA`/`canSuperBunny`/`canBootsClip`/
+#     `canOneFrameClipOW`/`canWaterWalk`/`canFakeFlipper`/`canSuperSpeed`/
+#     `canMirrorClip`/`canMirrorWrap` are Phase B trick/glitch axes —
+#     DROPPED.
+#   - PHP `cantTakeDamage` and similar region.* configs DROPPED.
+#
+# Inverted regional context:
+#   - In Inverted, LW-NW is reached via LW-NE (`can_enter` delegates to NE).
+#   - "Bunny can pull pedestal" note in PHP (php:35) — bunny CAN interact
+#     with the pedestal in Inverted mode, so MoonPearl is NOT required for
+#     Master Sword Pedestal (just the three pendants).
+#   - Bottle Merchant inherits from Standard parent (no override) — Phase A
+#     translates inherited NO-requirements as TRUE(); but in Inverted as
+#     bunny, MoonPearl IS needed unless the parent class set TRUE. Standard
+#     parent NorthWest.php line 47 has no setRequirements call → default
+#     TRUE. In Inverted-as-bunny, however, NPC interactions like Bottle
+#     Merchant SHOULD require MoonPearl. We translate mechanically: PHP
+#     inherits TRUE so we emit TRUE. The actual Inverted-bunny gate is
+#     captured at the can_enter edge level (LW entry requires MoonPearl
+#     paths per NorthEast.yaml).
+#
+# DROPPED locations (not in location_registry.yaml):
+#   - Shops "Bush Covered House", "Bomb Hut" (php:20-33) — shop entities,
+#     not placement locations.
+#
+# Status: translated 2026-05-27. Awaiting review + codegen integration.
+
+format_version: 1
+
+regions:
+  - id: LightWorld_NorthWest
+    name: "Light World - North West (Inverted)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:10-223"
+
+edges:
+  # `can_enter` (php:217-219): delegates to LW-NE canEnter.
+  - from: LightWorld_NorthEast
+    to: LightWorld_NorthWest
+    predicate: "TRUE()"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:217-219 (can_enter delegates to NorthEast LW)"
+
+locations:
+  # `Master Sword Pedestal` (php:36-40): three pendants. "Bunny can pull
+  # pedestal" — MoonPearl NOT required.
+  - id: "Master Sword Pedestal"
+    region: LightWorld_NorthWest
+    can_reach: "OP_HAS_PRIZE(Prize_GreenPendant) AND OP_HAS_PRIZE(Prize_BluePendant) AND OP_HAS_PRIZE(Prize_RedPendant)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:36-40"
+
+  # `King's Tomb` (php:42-60):
+  #   PegasusBoots AND
+  #   (MoonPearl OR canBunnyRevive OR (canOWYBA AND bottle)) AND
+  #   (canLiftDarkRocks OR <complex mirror-clip + canBootsClip +
+  #    canOneFrameClipOW + canSuperSpeed cross-region chain>)
+  # Phase A retained `Boots AND MoonPearl AND canLiftDarkRocks`.
+  # Phase B Slice 4 §7 surfaces: pearl-bypass alternative to MoonPearl,
+  # boots-clip + OWG alternatives to canLiftDarkRocks. The complex
+  # mirror-clip / canSuperSpeed cross-region disjunct stays dropped
+  # (depends on macros not in our trick set).
+  - id: "King's Tomb"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(Boots) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND (CanLiftDarkRocks() OR CanBootsClip() OR CanOneFrameClipOW())"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:42-60"
+
+  # `Kakariko Tavern` (php:62-69): MoonPearl (superbunny/OWYBA branches drop).
+  - id: "Kakariko Tavern"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:62-69"
+
+  # `Chicken House` (php:71-76): MoonPearl.
+  - id: "Chicken House"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:71-76"
+
+  # `Kakariko Well - Top` (php:78-84): canBombThings AND MoonPearl.
+  - id: "Kakariko Well - Top"
+    region: LightWorld_NorthWest
+    can_reach: "CanBombThings() AND HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:78-84"
+
+  # `Kakariko Well - Left` (php:86-92): MoonPearl (superbunny/OWYBA/
+  # bunnyRevive branches drop).
+  - id: "Kakariko Well - Left"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:86-92"
+
+  # `Kakariko Well - Middle` (php:94-100).
+  - id: "Kakariko Well - Middle"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:94-100"
+
+  # `Kakariko Well - Right` (php:102-108).
+  - id: "Kakariko Well - Right"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:102-108"
+
+  # `Kakariko Well - Bottom` (php:110-116).
+  - id: "Kakariko Well - Bottom"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:110-116"
+
+  # `Blind's Hideout - Top` (php:118-124): canBombThings AND MoonPearl.
+  - id: "Blind's Hideout - Top"
+    region: LightWorld_NorthWest
+    can_reach: "CanBombThings() AND HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:118-124"
+
+  # `Blind's Hideout - Left` (php:126-132): MoonPearl (superbunny+MagicMirror
+  # / OWYBA / bunnyRevive branches drop).
+  - id: "Blind's Hideout - Left"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:126-132"
+
+  # `Blind's Hideout - Right` (php:134-140).
+  - id: "Blind's Hideout - Right"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:134-140"
+
+  # `Blind's Hideout - Far Left` (php:142-148).
+  - id: "Blind's Hideout - Far Left"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:142-148"
+
+  # `Blind's Hideout - Far Right` (php:150-156).
+  - id: "Blind's Hideout - Far Right"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:150-156"
+
+  # `Pegasus Rocks` (php:158-164): Boots AND MoonPearl.
+  - id: "Pegasus Rocks"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(Boots) AND HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:158-164"
+
+  # `Magic Bat` (php:166-177): MagicPowder AND MoonPearl AND Hammer. Reuse the
+  # shared pocket macro; its mirror-back arm is disabled in Inverted because
+  # the Inverted Mirror carries Light World -> Dark World.
+  # The (canBootsClip+Boots OR canOneFrameClipOW) AND (canFakeFlipper OR
+  # Flippers) alternative DROPPED — its only no-glitches survivor would
+  # require Flippers but the gate is gated by canBootsClip/canOneFrameClipOW
+  # which are FALSE in Phase A.
+  - id: "Magic Bat"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MagicPowder) AND HAS_ITEM(MoonPearl) AND CanReachSmithPegPocket()"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:166-177"
+
+  # `Sick Kid` (php:179-181): hasABottle().
+  - id: "Sick Kid"
+    region: LightWorld_NorthWest
+    can_reach: "HasABottle()"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:179-181"
+
+  # `Lumberjack Tree` (php:183-193): DefeatAgahnim AND Boots AND MoonPearl.
+  # The canOneFrameClipOW and canMirrorWrap+MagicMirror branches drop.
+  - id: "Lumberjack Tree"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(DefeatAgahnim) AND HAS_ITEM(Boots) AND HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:183-193"
+
+  # `Graveyard Ledge` (php:195-201):
+  #   (MoonPearl OR canBunnyRevive OR (canOWYBA AND bottle)) AND canBombThings
+  # (The standard `mirror-from-DW-NorthWest` route is implicit — in Inverted
+  # you're already in LW once the region is reached.)
+  # Phase B Slice 4 §7: surface the pearl-bypass alternative.
+  # canBunnyRevive lacks a first-class macro (Phase B reservation).
+  - id: "Graveyard Ledge"
+    region: LightWorld_NorthWest
+    can_reach: "(HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND CanBombThings()"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:195-201"
+
+  # `Mushroom` (php:203-208): MoonPearl.
+  - id: "Mushroom"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:203-208"
+
+  # `Lost Woods Hideout` (php:210-215): MoonPearl.
+  - id: "Lost Woods Hideout"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MoonPearl)"
+    source: "app/Region/Inverted/LightWorld/NorthWest.php:210-215"
+
+  # `Bottle Merchant` (inherited from Standard parent; no setRequirements
+  # override in Inverted/NorthWest.php) — Phase A inherits default TRUE().
+  - id: "Bottle Merchant"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:47 (inherited, no override in Inverted)"
+
+macros: []

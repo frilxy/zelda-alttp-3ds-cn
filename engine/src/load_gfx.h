@@ -12,6 +12,7 @@ enum {
 };
 
 extern uint16 kGlovesColor[2];
+const uint16 *Palette_GetLinkArmorColors(unsigned armor);
 extern int16 g_spotlight_ext_left[240];
 extern int16 g_spotlight_ext_right[240];
 extern bool g_spotlight_ext_active;
@@ -37,6 +38,12 @@ void LoadItemGFX_Auxiliary();
 void LoadFollowerGraphics();
 void WriteTo4BPPBuffer_at_7F4000(uint8 a);
 void DecodeAnimatedSpriteTile_variable(uint8 a);
+bool DecodeAnimatedSpriteTile_ToBuffer(uint8 a, uint8 *dst);
+// add-rando-field-item-sprites: gfx index currently in the receive-item VRAM
+// slot (chars 0x24/0x34); 0xFFFF = dirty. Invalidated by every slot repaint
+// (WriteTo4BPPBuffer_at_7F4000 / DecodeAnimatedSpriteTile_variable) and by
+// snapshot restore, so the field-item drawer re-DMAs.
+extern uint16 g_recv_item_slot_owner;
 void Expand3To4High(uint8 *dst, const uint8 *src, const uint8 *base, int num);
 void LoadTransAuxGFX();
 void LoadTransAuxGFX_sprite();
@@ -53,6 +60,8 @@ void LoadNewSpriteGFXSet();
 void InitializeTilesets();
 const uint8 *GetSpriteTilesetPacks(int idx);
 void LoadDefaultGraphics();
+// The HUD and menu lettering (BG3 characters), for the screens in use.
+void LoadHudGraphics();
 void Attract_LoadBG3GFX();
 void Graphics_LoadChrHalfSlot();
 void TransferFontToVRAM();
@@ -164,5 +173,10 @@ void Palette_LoadForFileSelect_Sword(int k, uint8 sword);
 void Palette_LoadForFileSelect_Shield(int k, uint8 shield);
 void Palette_LoadAgahnim();
 void HandleScreenFlash();
+
+// Decompress a 2bpp graphics pack into `vram_ptr` (8 words per tile). Exposed
+// so the rando icon-atlas builder can decompress the HUD item-icon packs into a
+// scratch buffer (state-immune, independent of live VRAM).
+void DecompAndUpload2bpp(uint16 *vram_ptr, uint8 pack);
 
 #endif // ZELDA3_LOAD_GFX_H_

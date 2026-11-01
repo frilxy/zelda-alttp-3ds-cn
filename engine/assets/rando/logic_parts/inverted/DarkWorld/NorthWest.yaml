@@ -1,0 +1,111 @@
+# DarkWorld/NorthWest.yaml — Inverted DarkWorld NorthWest (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/DarkWorld/NorthWest.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `PegasusBoots` → registry-canonical `Boots`.
+#   - PHP `Bottle` → `HasABottle()` via macro.
+#   - Inverted/NorthWest.php extends Standard/NorthWest.php. Its
+#     `initialize()` does NOT set `$this->can_enter` (compare Standard's
+#     php:143-164). Since child::initialize() does not call
+#     parent::initialize(), the can_enter from Standard does NOT apply in
+#     Inverted. The Inverted-mode entry to NorthWest is purely walkable
+#     from adjacent dark-world overworld regions (Link is native to DW
+#     in Inverted). We model this as a TRUE() edge from DarkWorld_South
+#     (the start region).
+#   - Dropped branches: canBootsClip, canOneFrameClipOW, canSuperSpeed,
+#     canFakeFlipper, canBunnyRevive, canOWYBA, canMirrorWrap — Phase B.
+#
+# Status: translated 2026-05-27. Awaiting review.
+
+format_version: 1
+
+regions:
+  - id: DarkWorld_NorthWest
+    name: "Dark World - North West (Inverted)"
+    source: "app/Region/Inverted/DarkWorld/NorthWest.php:10-80 (extends Standard/DarkWorld/NorthWest.php:14-167)"
+
+edges:
+  # Inverted/NorthWest.php does NOT set can_enter; we model an unconditional
+  # walk-edge from DarkWorld_South (the Inverted start region) to
+  # DarkWorld_NorthWest. The dark-world overworld is contiguous and Link
+  # is native to it in Inverted, so the walk is unobstructed.
+  - from: DarkWorld_South
+    to: DarkWorld_NorthWest
+    predicate: "TRUE()"
+    source: "app/Region/Inverted/DarkWorld/NorthWest.php (no can_enter override → walk from start)"
+
+locations:
+  # `Brewery` (Inverted/NorthWest.php:24-26): canBombThings.
+  - id: "Brewery"
+    region: DarkWorld_NorthWest
+    can_reach: "CanBombThings()"
+    source: "app/Region/Inverted/DarkWorld/NorthWest.php:24-26"
+
+  # `Hammer Pegs` (Inverted/NorthWest.php:28-40):
+  #   Hammer AND (canLiftDarkRocks OR
+  #               (MagicMirror AND NW_Light_World_reachable) OR
+  #               <glitch branches drop>)
+  # Surviving Phase A:
+  #   HAS_ITEM(Hammer) AND (CanLiftDarkRocks() OR
+  #                         (HAS_ITEM(MagicMirror) AND
+  #                          OP_REGION_REACHABLE(LightWorld_NorthWest)))
+  - id: "Hammer Pegs"
+    region: DarkWorld_NorthWest
+    can_reach: "HAS_ITEM(Hammer) AND (CanLiftDarkRocks() OR (HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(LightWorld_NorthWest)))"
+    source: "app/Region/Inverted/DarkWorld/NorthWest.php:28-40"
+
+  # `Bumper Cave` (Inverted/NorthWest.php:42-51):
+  #   (canLiftRocks AND Cape AND MoonPearl AND MagicMirror AND
+  #    NW_Light_World_reachable) OR
+  #   (canBootsClip AND PegasusBoots) OR canOneFrameClipOW
+  # Phase A retained the cross-region mirror path only. Phase B Slice 4
+  # §7 surfaces the boots-clip + OWG top-level bypasses.
+  - id: "Bumper Cave"
+    region: DarkWorld_NorthWest
+    can_reach: "(CanLiftRocks() AND HAS_ITEM(Cape) AND HAS_ITEM(MoonPearl) AND HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(LightWorld_NorthWest)) OR CanBootsClip() OR CanOneFrameClipOW()"
+    source: "app/Region/Inverted/DarkWorld/NorthWest.php:42-51"
+
+  # `Blacksmith` (Inverted/NorthWest.php:53-62):
+  #   (canLiftDarkRocks OR
+  #    (MagicMirror OR <canOWYBA+bottle+glitch dropped>))
+  #   AND NW_Light_World_reachable.
+  # The PHP grouping is a bit tangled; the surviving Phase A logic is:
+  #   (CanLiftDarkRocks() OR HAS_ITEM(MagicMirror))
+  #   AND OP_REGION_REACHABLE(LightWorld_NorthWest)
+  - id: "Blacksmith"
+    region: DarkWorld_NorthWest
+    can_reach: "(CanLiftDarkRocks() OR HAS_ITEM(MagicMirror)) AND OP_REGION_REACHABLE(LightWorld_NorthWest)"
+    source: "app/Region/Inverted/DarkWorld/NorthWest.php:53-62"
+
+  # `Purple Chest` (Inverted/NorthWest.php:64-76):
+  #   (canLiftDarkRocks OR MagicMirror OR <canOWYBA+glitch dropped>)
+  #   AND South_Light_World_reachable.
+  # Audit M3 fix: previous translation had a misplaced
+  # `OP_REGION_REACHABLE(LightWorld_NorthWest) AND` gate. Per PHP precedence
+  # (depth-2 inside the OWYBA-trick branch that was dropped), that clause
+  # disappears alongside the trick. Surviving Phase A:
+  #   (CanLiftDarkRocks() OR HAS_ITEM(MagicMirror))
+  #   AND OP_REGION_REACHABLE(LightWorld_South)
+  - id: "Purple Chest"
+    region: DarkWorld_NorthWest
+    can_reach: "(CanLiftDarkRocks() OR HAS_ITEM(MagicMirror)) AND OP_REGION_REACHABLE(LightWorld_South)"
+    source: "app/Region/Inverted/DarkWorld/NorthWest.php:64-76"
+
+  # `C-Shaped House` — not overridden in Inverted; default TRUE.
+  - id: "C-Shaped House"
+    region: DarkWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Inverted/DarkWorld/NorthWest.php (not overridden, default TRUE)"
+
+  # `Chest Game` — not overridden in Inverted; default TRUE.
+  - id: "Chest Game"
+    region: DarkWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Inverted/DarkWorld/NorthWest.php (not overridden, default TRUE)"
+
+# NOTE on the "Dark World Outcasts Shop" (Inverted/NorthWest.php:20-22):
+#   PHP: $items->has('Hammer') → HAS_ITEM(Hammer). DROPPED from this YAML
+#   because shops are not placement targets in Phase A.

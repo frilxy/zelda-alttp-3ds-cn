@@ -1,0 +1,306 @@
+# Reviewed pot-room region (+ optional gate) overrides — design D8.
+#
+# gen_pot_tables.py auto-resolves the region for pot rooms that flood cleanly from
+# a chest/boss anchor through reciprocal doors (147/164, cross-validated against
+# chest logic regions). The rooms here are the ones it CAN'T auto-resolve:
+# stair-only / one-way-drop dungeon rooms, dungeon-boundary conflicts, non-uniform
+# chest rooms (chests differ in gate), and overworld caves/houses. Each was
+# determined from EVIDENCE (door + vertical-stair connectivity, entrance names,
+# the chest predicates, ALTTP geography) — not memory — and is noted below.
+#
+# `room_can_reach` is the pot's reachability predicate (all pots in a room share
+# it). For a non-uniform chest room the pot inherits the ROOM-ENTRY (most
+# permissive chest) predicate — always >= the true room-entry, so it over-gates at
+# worst (safe; under-gating is the softlock risk). Omitted = TRUE() (freely
+# reachable once the region is).
+#
+# Authored 2026-06-19 (Phase 2c). VERIFY in the owner playtest (esp. 0x096).
+
+room_region:
+  # --- dungeon rooms (resolved by door / vertical-stair connectivity) ---
+  "016": SwampPalace           # Swamp Waterway. Engine-room alias: chest room 0x16 is Pyramid Fairy, but this pot room/drop is Swamp Palace.
+  "017": TowerOfHera_Lobby     # vstair: up 007 (boss) + down 027 (chest) both ToH — tower column
+  "031": TowerOfHera_Lobby     # room-id alias: the only liftable pots at 0x031 are Hera, not HCE sewers
+  "041": HyruleCastleEscape    # Hyrule Dungeon side; 0x031's liftable-pot alias is handled above.
+  "04b": PalaceOfDarkness      # PoD Jelly-Hall/Mimics loot pots (Arrow10 + HeartRefill).
+                               # Corrects grid-flood across the PoD/GT engine-room
+                               # boundary at 0x4b|0x4c. door_tables dungeon=5 (PoD),
+                               # reached lobby->warp-room->warp-hint key-FREE. Gate
+                               # below is the in-dungeon predicate.
+  "054": SwampPalace           # Swamp Attic (door_tables room=0x54, dungeon=6), not TT.
+  "056": SkullWoods            # Skull 2 West Lobby + West Lobby Pot Key, not Swamp.
+  # Rooms 0x43 + 0x53 are Desert Palace, not TT/HCE. The grid-flood binds
+  # 0x43->ThievesTown and the stale override bound 0x53->HCE, so keep the
+  # correction here where regeneration preserves it.
+  "043": DesertPalace_Lobby    # Desert Tiles 2 — was mislabeled ThievesTown (grid-flood)
+  "053": DesertPalace_Lobby    # Beamos Hall — was mislabeled HyruleCastleEscape (old override)
+  "05b": GanonsTower_Lobby     # GT Hidden Spikes (door_tables room=0x5b, dungeon=12), not PoD.
+  "064": ThievesTown           # Thieves Attic / Cricket Hall Left, not Desert.
+  "06b": GanonsTower_Lobby     # GT Crystal Paths / Dash Hall / Mimics shared physical room, not PoD.
+  "082": HyruleCastleEscape    # Hyrule Dungeon South Abyss, not Desert.
+  "091": MiseryMire_Lobby      # Mire Falling Foes, not Desert.
+  "092": MiseryMire_Lobby      # Mire Crystal / Shooter Rupees, not Desert.
+  "093": MiseryMire_Lobby      # Mire Dark Shooters / Key Rupees, not Desert.
+  "096": GanonsTower_Lobby     # GT Staredown / Torch Cross (8 loot/empty pots).
+                               # Corrects supertile-grid adjacency from 097->087;
+                               # it is not dungeon membership. door_tables dungeon=12
+                               # (GT), regions 559/561. Behind the GT big-key door.
+  "0b0": HyruleCastleTower     # HCT Circle-of-Pots / upper tower room (door_tables room=0xb0, dungeon=4), not Mire.
+  "0b4": TurtleRock_Lobby      # 2 of 3 grid neighbors TR (0c4 dn, 0b5 E); W 0b3 = MM. boundary — playtest
+  "0c0": HyruleCastleTower     # HCT dark upper-tower room (door_tables room=0xc0, dungeon=4), not Mire.
+  # --- non-uniform chest rooms (chests agree on region, differ on gate) ---
+  "01a": PalaceOfDarkness      # PoD Big Chest room (Big/Compass/Hellway chests)
+  "02a": PalaceOfDarkness      # PoD Arena (Ledge/Bridge chests)
+  "058": SkullWoods            # SW "Skull Woods 3 (Drop In)" — Map Chest is TRUE() -> freely enterable
+  "08c": GanonsTower_Lobby     # GT Hope Room — TRUE() chests -> freely enterable
+  # --- overworld caves/houses (bind to the overworld region of the entrance) ---
+  "0e4": LightWorld_DeathMountain_West   # DM Elder's (Old Man) Cave, lower — Old Man region = DM_West
+  "0e5": LightWorld_DeathMountain_West   # DM Elder's Cave, upper
+  "0eb": LightWorld_DeathMountain_East   # DM Cape Heart-Piece Cave — east cape (Paradox/Spiral = DM_East)
+  "0f1": LightWorld_DeathMountain_West   # DM Express, upper — west ascent
+  "101": LightWorld_NorthWest            # Snitch House (Kakariko)
+  "102": LightWorld_NorthWest            # Sick Kid's House; explicit 0x1xx cave binding so it never depends on cross-room flood.
+  "103": LightWorld_NorthWest            # Kakariko Tavern / Pub / Inn
+  "104": LinksHouse                      # Link's House; room-keyed special case, not a shuffled cave entrance
+  "105": LightWorld_NorthEast            # Sahasrahla's Hut
+  "106": DarkWorld_NorthWest             # Village of Outcasts Chest Game / Orphanage
+  "107": LightWorld_NorthWest            # Kakariko Storage Shed
+  # --- shared or special cave interiors that need explicit regions instead of flood output ---
+  "10c": LightWorld_DeathMountain_East   # Fairy Cave 2 pot side of the shared Mimic/Fairy interior; the Mimic chest gate does not apply to this pot.
+  "114": DarkWorld_Mire                  # Pond of Wishing, DW-mire side (entrance 0x62, F12: room 0x114, cached exit screen 0x70): pots reached from DW Mire behind the north bomb wall. (F12 on LW waterfall door 0x5C: room 0x114, cached exit screen 0x0F, pot-LESS fairy side; flood had wrongly said LinksHouse.)
+  "117": DarkWorld_DeathMountain_West    # Byrna Gauntlet / Spike Cave
+  "119": LightWorld_NorthWest            # Blind's Hideout (LIGHT Kakariko, entrance 0x61 screen 0x18) — corrected from a wrong DarkWorld_NorthWest override; back room 0x11D matches the fork's Blind's Hideout chests (LW_NW / TRUE)
+  "11a": DarkWorld_NorthEast             # storyteller_cave_4 (entrance 0x68, DW screen 0x1E) — same region/requirements as the Palace of Darkness entrance (fork enters PoD from DarkWorld_NorthEast). (flood had wrongly said LightWorld_South.)
+  "11d": LightWorld_NorthWest            # Blind's Hideout back room; explicit partner of 0x119.
+  "11f": LightWorld_NorthWest            # Lumberjack's House (entrance 0x6B, by the Sanctuary) — 2 pots; LIGHT, sphere-0 in Open / RescuedZelda in Standard (= the LW_NW access edge). The 0x46 Kakariko-shop side of this shared interior has no liftable pots. Corrected from DarkWorld_NorthWest.
+  "127": DarkWorld_NorthWest             # Hammer Pegs cave / Heart Piece Cave 3 (entrance 0x83). F12/playtest: DW_NW hammer-pegs cave; pots share the Hammer Pegs heart-piece access.
+
+room_can_reach:
+  # Non-uniform chest rooms whose room-entry is NOT free — the most-permissive
+  # (room-entry) chest predicate, copied verbatim from the chest logic:
+  "01a": "HAS_AMOUNT(SmallKey_PalaceOfDarkness, 3)"   # PoD Compass Chest (same room)
+  "02a": "CanShootArrowsL1()"                          # PoD Arena Ledge
+  # --- HCE sewers (gate-only: these rooms flood to HyruleCastleEscape fine, but
+  # are chest-LESS so they defaulted to TRUE; the dark-flag Lamp gate alone misses
+  # the world-state HCE combat rule and the SmallKey-locked sewer door).
+  # Grounded in the door graph + base predicates (logic.yaml): the locked doors sit
+  # at the key-room entrances (Secret Rooms 011, Sanctuary 012); the Dark Cross
+  # (032) is the no-key floor `HCE combat AND Lamp`. 002 is a dead-end reached only
+  # THROUGH the key-locked Sanctuary -> needs the key; 021 sits on the Dark-Cross
+  # side, before the locked door -> HCE combat+Lamp (021 was already Lamp-gated
+  # by the dark flag but missing combat). Room 031's liftable pots are ToH, not HCE.
+  # ---
+  "002": "CanKillHceThings(world) AND HAS_ITEM(SmallKey_HyruleCastleEscape) AND HAS_ITEM(Lamp)"
+  "021": "CanKillHceThings(world) AND HAS_ITEM(Lamp)"
+  # --- Eastern Palace: room 0x099 (Eastern Darkness / Eastern Rupees) is
+  # entered from room 0x0A9 through Eastern Courtyard N, the vanilla big-key
+  # door. The dark-room flag supplied only Lamp navigation, so pot sanity could
+  # otherwise put the Eastern big key behind itself here just like enemy checks.
+  "099": "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_EasternPalace)"
+  # --- ToH (gate-less region override above): room 0x017 is the stair floor
+  # between the Big-Key-gated Big Chest (0x027) and boss (0x007). Region-bound but
+  # un-gated (TRUE) -> 12 falsely-sphere-0 pots. Gate = the Big Chest's predicate. ---
+  "017": "HAS_ITEM(BigKey_TowerOfHera)"
+  # --- GT (region overrides above): room 0x096 is GT Staredown/Torch Cross, behind
+  # the GT big-key door (door-graph proven unreachable without it). The small-key
+  # economy is layered SEPARATELY by the POT_KEYS wrap (pot_key_depth.gen.yaml has
+  # the door-rando GT depths for room 0x96), so this base gate is the big key only.
+  # Was wrongly bound to ToH (region + gate) -> 8 pots gated on the wrong dungeon. ---
+  "096": "HAS_ITEM(BigKey_GanonsTower)"
+  # --- PoD (region override above): room 0x04b loot pots (Arrow10 + HeartRefill)
+  # sit in the Jelly-Hall/Mimics area past the bomb/boots wall; reached lobby ->
+  # warp-room -> warp-hint by the KEY-FREE route, so no key door gates room entry. ---
+  "04b": "(CanBombThings() OR HAS_ITEM(Boots))"
+  # --- Swamp interior (gate-only; flood to SwampPalace fine): water-locked, the
+  # Map/West/Waterfall side needs the small key (+ Hammer to drain). 0x026
+  # flooded as TRUE. (0x038 is reached from the FREE Entrance 0x028 per the door
+  # graph, so it is genuinely free — NOT gated.) ---
+  "026": "HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer)"
+  # --- Hammer Pegs cave (region override above): the pots are inside the same
+  # room as the Hammer Pegs freestanding heart piece, behind the peg field. ---
+  "127": "HAS_ITEM(Hammer) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)) AND (CanLiftDarkRocks() OR ((CanFakeFlippers() OR HAS_ITEM(Flippers)) AND (CanOneFrameClipOW() OR CanBootsClip())))"
+  # --- Pond of Wishing / Storyteller Cave 3 (region override above): the DW
+  # front room is walk-in once DarkWorld_Mire is reachable, but the six pots are
+  # behind the north bomb wall. The LW Waterfall Fairy side is pot-less. ---
+  "114": "CanBombThings() AND (HAS_ITEM(MoonPearl) OR CanPearlBypass())"
+
+  # ===========================================================================
+  # Phase 3 — the 21 chest-less TRUE() rooms the POT GUARD surfaced (sphere-0
+  # LEAK class: a pot room that flooded into a dungeon region but, being
+  # chest-LESS, defaulted to TRUE while actually reachable only past an
+  # in-dungeon gate). Each ENTER gate was traced from the door-shuffle compiled
+  # door tables (src/rando/door_tables.gen.c — REAL per-door SmallKey/BigKey
+  # flags + region graph, authoritative over the grid-adjacency pot_dump, whose
+  # listed edges are not always real doors) and cross-checked vs the ALTTPR PHP
+  # chest predicates. Of the 21, 11 are GENUINELY FREE (entrance/lobby rooms,
+  # free-fall-reachable IP descent rooms, or rooms one real door off a TRUE()
+  # chest the guard's direct-neighbor check missed) and are OMITTED below with a
+  # note. The 10 real gates follow the never-under-gate rule. Authored 2026-06-20.
+  #
+  # OMITTED (genuinely FREE — do NOT add an override; left at TRUE):
+  #   04a  PoD entrance/lobby room (room 0x4a = "Palace of Darkness" entrance);
+  #        you stand in it on entry. Big Key Chest neighbor (0x3a, 5 keys) is a
+  #        CHEST gate, not the room floor.
+  #   083  DP "Desert West Lobby" — a standalone overworld walk-in portal
+  #        (door_portals.yaml: DesertPalace_Lobby, NO predicate). Free on entry.
+  #   08c  GT Hope Room/Big Chest room — the Hope Room chests are TRUE() (already
+  #        region-bound, un-gated above). Room floor is free; only Big Chest/Bob's
+  #        need keys (chest gates).
+  #   09c  GT Invisible Catwalk — one real door (flag 0x300, no key) off the free
+  #        Hope/Big-Chest room 0x8c; the pot_dump's 0x9c<->0x9b/0x9d edges are
+  #        walls, not doors (door_tables.gen.c). Free on entry.
+  #   0b1  MM — reciprocally door-connected (real doors) to the TRUE() Bridge
+  #        Chest free zone via 0xa1; the guard only saw the gated Compass (0xc1)
+  #        exit and missed the free side. Free.
+  #   0c6  TR central Hub (0xd6/Compass area); the first small-key door is LEAVING
+  #        the hub toward Chain Chomps, so the hub itself is pre-key. Somaria is
+  #        already a TR-entry requirement (the lobby edge), so no extra gate.
+  #   0c7  TR Torches room — free from the Hub (door_tables.gen.c); the Roller
+  #        chests (0xb7, FireRod+Somaria) are one real door DEEPER, not here.
+  #   04f/05e/08e/09f  IP descent rooms — IP descends via one-way floor HOLES
+  #        that are FREE (no key to fall). The placer's IP logic proves the whole
+  #        bottom is key-free: Iced T Room (0xae) = TRUE() and Big Chest (0x9e) =
+  #        BigKey-only; the only small-key consumers are the boss (2 keys) and the
+  #        Spike/Map CHESTS. So these chest-less descent rooms are sphere-0 within
+  #        IP — INCLUDING 09f's small-key pot (reachable by the free fall, hence
+  #        no deadlock). Over-gating them would contradict Iced T = TRUE(). The
+  #        guard fired because each room's one chest NEIGHBOR is gated, but the
+  #        free-fall arrival (a hole, not a door) isn't in the pot_dump.
+  #        (door-shuffle ON re-models holes as 2-key stairs; irrelevant here.)
+  #
+  # --- TR interior route (Somaria already required to ENTER the TR lobby).
+  # 0x015 = Pipe Pit and 0x023 = Lazy Eyes both sit 3 small-key doors deep on the
+  # interior route (Hub NW -> Pokey1 NW -> Chain Chomps Down Stairs;
+  # door_tables.gen.c). 0x023 ("Mountainface 1") is interior-route-ONLY
+  # (door_portals.yaml: fork_region null — the ledge door never seeds entry). ---
+  "015": "HAS_AMOUNT(SmallKey_TurtleRock, 3)"   # TR Pipe Pit — 3 key-doors deep on interior route
+  "016": "HAS_ITEM(Hookshot) AND HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer)"   # Swamp Waterway engine-room alias
+  "023": "HAS_AMOUNT(SmallKey_TurtleRock, 3)"   # TR Lazy Eyes — interior-route-only, 3 key-doors deep
+  # --- PoD: room 0x01b's ONLY in-PoD entry is through the Map Chest room (0x2b,
+  # CanShootArrows — the eyeball-switch wing); it dead-ends to the dark 0x0b. ---
+  "01b": "CanShootArrowsL1()"                   # PoD: reached only via the arrow-gated Map Chest wing
+  # --- HCT: room 0x0b0 is the upper Castle Tower circle/pot room. It is reached
+  # after the first key door and dark tower traverse; use the same floor gate as
+  # "Castle Tower - Dark Maze" (room 0x0d0), where the route first enters that
+  # section. Corrects the grid-flood from neighboring Mire rooms. ---
+  "0b0": "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(SmallKey_HyruleCastleTower)"
+  # --- SW: from the "Skull Woods Boss Lair" drop (room 0x59), one small-key door
+  # ("Skull 3 Lobby NW", door_tables.gen.c) gates the 0x49 pocket; the FireRod
+  # fire-curtain is DEEPER (Vines->boss), so standing in 0x49 = 1 key, no FireRod.
+  # MoonPearl is auto-added by the DW-region rule. LOW CONFIDENCE (SW drop-in
+  # topology; 0x49 holds only empty/magic/heart pots, so a no-key over-estimate is
+  # harmless). ---
+  "049": "HAS_ITEM(SmallKey_SkullWoods)"        # SW: 1 key-door from the boss-lair drop. LOW CONFIDENCE
+  # --- Swamp: room 0x54 is Swamp Attic, reached by the West Block Path stairs.
+  # Match the Waterfall/Flooded-side threshold; this avoids exposing its loot
+  # pots before the deep Swamp route.
+  "054": "HAS_ITEM(Hookshot) AND HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer)"
+  # --- TT: room 0x64 is the Attic / Cricket Hall Left shared physical room.
+  "064": "HAS_ITEM(SmallKey_ThievesTown) AND HAS_ITEM(BigKey_ThievesTown)"
+  # --- DP back entrance: room 0x63 = "Desert Back Lobby", a standalone overworld
+  # walk-in portal gated by lifting a rock from the West-exit ledge
+  # (door_portals.yaml: predicate CanLiftRocks()). Its small-key POT sits on this
+  # FREE entrance floor, BEFORE the only locked door (Tiles 1 Up Stairs, which
+  # leads UP/out to 0x53) — so the key pot is reachable WITHOUT a DP key (no
+  # deadlock); the gate is just the back-door rock-lift. ---
+  "063": "CanLiftRocks()"                       # DP Back Lobby — overworld back-door rock-lift; key pot is pre-key-door
+  # Rooms 0x43/0x53 (Desert Palace, rebound to DesertPalace_Lobby above) are reached
+  # off the DP back/west rock-lift floor, same as 0x63 — CanLiftRocks(). Keep the
+  # canonical region/key/gate binding here so regeneration is faithful.
+  "043": "CanLiftRocks()"
+  "053": "CanLiftRocks()"
+  # --- GT Gauntlet hallways (chest-less transit 0x5d/0x6c/0x6d). Reached
+  # Lobby -> 0x6b -> Mimics (need a bow to kill them, CanShootArrows) -> one
+  # small-key door (door_tables.gen.c) into the gauntlet; all interior gauntlet
+  # doors are then free. These hold loot pots (no key). ---
+  "05d": "CanShootArrowsL1() AND HAS_AMOUNT(SmallKey_GanonsTower, 1)"   # GT Gauntlet: Bow (Mimics) + 1 key-door
+  "06c": "CanShootArrowsL1() AND HAS_AMOUNT(SmallKey_GanonsTower, 1)"   # GT Gauntlet: Bow (Mimics) + 1 key-door
+  "06d": "CanShootArrowsL1() AND HAS_AMOUNT(SmallKey_GanonsTower, 1)"   # GT Gauntlet: Bow (Mimics) + 1 key-door
+  "05b": "CanShootArrowsL1() AND HAS_AMOUNT(SmallKey_GanonsTower, 1)"   # GT Hidden Spikes lower route
+  "06b": "CanShootArrowsL1()"                                           # GT Crystal Paths / Dash Hall / Mimics shared room
+  # --- GT room 0x9b holds a small-key POT and sits in the Hookshot/Hammer wing
+  # behind a small-key door (Double Switch EN, door_tables.gen.c); its only chest
+  # neighbor (Map Chest 0x8b = Hammer+Hookshot+4keys) corroborates the wing +
+  # key. Trace minimum to STAND here = Hammer+Hookshot+1 key (the 4-key chest gate
+  # is deeper). The key pot is non-blocking: GT has 4 keys and the wing yields
+  # earlier keys, so the assumed-fill never needs THIS pot's key to reach it. ---
+  "09b": "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 1)"   # GT Hookshot wing key-pot room
+  # --- HCE: room 0x82 is Hyrule Dungeon South Abyss. The HCE key-depth table
+  # carries the small-key layer; the room floor still needs the escape combat gate.
+  "082": "CanKillHceThings(world)"
+  # --- Mire deep rooms: 0x91-0x93 are the Falling Foes / Crystal / Dark Shooters
+  # cluster, not Desert. Use the Big-Key/Compass-side torch + 3-key threshold.
+  "091": "CanLightTorches() AND HAS_AMOUNT(SmallKey_MiseryMire, 3)"
+  "092": "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND CanLightTorches() AND HAS_AMOUNT(SmallKey_MiseryMire, 3)"
+  "093": "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND CanLightTorches() AND HAS_AMOUNT(SmallKey_MiseryMire, 3)"
+  # --- TR: room 0x0b4 is Final Abyss, on the Eye Bridge path.
+  "0b4": "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(CaneOfSomaria) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_AMOUNT(SmallKey_TurtleRock, 3) AND (HAS_ITEM(Cape) OR HAS_ITEM(CaneOfByrna) OR CanBlockLasers())"
+  # --- HCT: room 0x0c0 is the dark upper-tower room adjacent to 0x0b0.
+  "0c0": "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(SmallKey_HyruleCastleTower)"
+
+# Reviewed-FREE rooms the leak guard would otherwise flag (full rationale in the
+# OMITTED block above the room_can_reach gates). Listed here so the guard skips
+# them and HARD-FAILS only on a NEW, un-triaged leak. room_hex -> one-line reason.
+room_free:
+  "04a": "PoD entrance/lobby floor (you stand in it on entry)"
+  "083": "DP West walk-in overworld portal (door_portals: no predicate)"
+  "08c": "GT Hope/Big-Chest room — floor free; only the chests are key-gated"
+  "09c": "GT Invisible Catwalk — one real free door off the free 0x8c"
+  "0b1": "MM — reciprocal doors to the TRUE() Bridge-Chest free zone via 0xa1"
+  "0c6": "TR central Hub — pre-key; Somaria already a TR-entry requirement"
+  "0c7": "TR Torches room — free from the Hub; Roller chests are one door deeper"
+  "04f": "IP descent room — reached by the free one-way floor holes"
+  "05e": "IP descent room — reached by the free one-way floor holes"
+  "08e": "IP descent room — reached by the free one-way floor holes"
+  "09f": "IP descent room w/ small-key pot — free fall, key-free (Iced T = TRUE)"
+
+# Per-cluster region/gate for SHARED cave interiors reached by DIFFERENT overworld
+# entrances with DIFFERENT logic. The room-level room_region can't carry two
+# reachability classes; each cluster lists its pos4 set + region + can_reach. The
+# generator HARD-FAILS if any pot in a listed room isn't covered by a cluster.
+pot_room_split:
+  # Swamp Palace room 0x036 - the top-right pair is reachable before the Hookshot
+  # gap; the other six pots share the Flooded Room / Waterfall Hookshot gate.
+  "036":
+    - region: SwampPalace
+      can_reach: "HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer)"
+      pos4: [0x046c, 0x0470]
+    - region: SwampPalace
+      can_reach: "HAS_ITEM(Hookshot) AND HAS_ITEM(SmallKey_SwampPalace) AND HAS_ITEM(Hammer)"
+      pos4: [0x05bc, 0x05c0, 0x0f9a, 0x0fde, 0x100a, 0x1072]
+
+  # refill_cave_1 (room 0x11b) — one shared interior split by entrance. The two
+  # halves are physically separate:
+  #   * 8 front pots (0x16-0x19 plane) reached from the GRAVEYARD-LEDGE mirror
+  #     spot (screen 0x14). They use the Graveyard Ledge cave-entry route; only
+  #     the freestanding item behind the bomb wall needs CanBombThings().
+  #   * 6 pots (0x35-0x38 plane) reached from CAVE 45 / the DW-south mirror spot
+  #     (screen 0x32). Gate = the fork's "Cave 45" (41_lightworld_south).
+  "11b":
+    - region: LightWorld_NorthWest
+      can_reach: "(HAS_ITEM(MagicMirror) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND OP_REGION_REACHABLE(DarkWorld_NorthWest)) OR CanBootsClip() OR CanOneFrameClipOW() OR (CanSuperSpeed() AND CanSpinSpeed())"
+      pos4: [0x165c, 0x1660, 0x175c, 0x1760, 0x185c, 0x1860, 0x195c, 0x1960]
+    - region: LightWorld_South
+      can_reach: "(HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(DarkWorld_South)) OR CanBootsClip() OR CanOneFrameClipOW()"
+      pos4: [0x3518, 0x3618, 0x3718, 0x381c, 0x3620, 0x3628]
+
+  # Room 0x124 is shared by the LightWorld_NorthWest Pegasus Rocks chest side
+  # and the south/desert path Heart Piece Cave 1 pot side. The liftable pots are
+  # on the south side, entered through entrance 0x6d after pulling the rock.
+  "124":
+    - region: LightWorld_South
+      can_reach: "CanLiftRocks()"
+      pos4: [0x1414, 0x1428, 0x1514, 0x1528, 0x1614, 0x1628, 0x1818, 0x181c, 0x1820, 0x1824]
+
+  # Room 0x125 is shared by LightWorld_South and DarkWorld_South rock caves at
+  # the same map location. F12 evidence: entrance 0x6f exits to LW screen 0x37;
+  # entrance 0x70 exits to DW screen 0x77. Both sides need the Power Glove rock.
+  # The light-side room has the four rupee pots; the dark-side room has the four
+  # heart-refill pots.
+  "125":
+    - region: LightWorld_South
+      can_reach: "CanLiftRocks()"
+      pos4: [0x1918, 0x191c, 0x1920, 0x1924]
+    - region: DarkWorld_South
+      can_reach: "CanLiftRocks() AND (HAS_ITEM(MoonPearl) OR CanPearlBypass())"
+      pos4: [0x1658, 0x1664, 0x1c58, 0x1c64]

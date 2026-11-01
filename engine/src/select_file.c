@@ -1,3 +1,5 @@
+#include "rando/rando.h"
+#include "rando/rando_save.h"
 #include "zelda_rtl.h"
 #include "variables.h"
 #include "load_gfx.h"
@@ -6,6 +8,42 @@
 #include "overworld.h"
 #include "messaging.h"
 #include "sprite.h"
+#include "localized.h"
+#include "mods.h"
+#include "language_cart.h"
+
+// The French Canadian cartridge draws these screens from its own stripe
+// lists, some longer than the USA ones, with BG3 at $7800 instead of $6000.
+// A translation built from the USA cartridge keeps its words at `us_addr`
+// (0 for the tables no translation changes).
+static const uint8 *SelectFile_Table(const uint8 *table, uint32 loc,
+                                     uint32 us_addr, size_t size) {
+  if (g_loc_rom)
+    return Loc_Rom(loc);
+  const uint8 *own = us_addr ? LanguageCart_Bytes(us_addr, size) : NULL;
+  return own ? own : table;
+}
+
+// A table of the file screens that the cartridge reads with the 16-bit
+// operand at `operand` ($0C:table - skip, X or Y from skip): a quest that
+// moves it gives the operand and the bytes at the new place.
+static const uint8 *SelectFile_MovableTable(const uint8 *table, size_t size,
+                                            uint32 loc, uint32 operand,
+                                            uint16 us_addr, int skip) {
+  if (g_loc_rom)
+    return Loc_Rom(loc);
+  // A translation built from the USA cartridge may move the table too: its
+  // own operand says where (language_cart.h). A quest's bytes still win.
+  if (LanguageCart_UsaLayout() && !Mods_Table(kModTable_RomBytes)) {
+    uint16 w;
+    LanguageCart_Words(&w, operand, 1);
+    const uint8 *moved = LanguageCart_Bytes(0x8c0000 | (uint16)(w + skip), size);
+    if (moved)
+      return moved;
+  }
+  uint16 a = Mods_RomWord(operand, us_addr - skip) + skip;
+  return (const uint8 *)Mods_RomTable(0x8c0000 | a, table, size);
+}
 
 #define selectfile_R16 g_ram[0xc8]
 #define selectfile_R17 g_ram[0xc9]
@@ -130,6 +168,7 @@ void SelectFile_Func16() {
       sound_effect_2 = 0x22;
       sound_effect_1 = 0x0;
       int k = subsubmodule_index;
+      if (!RandoSave_EraseFileSlot(k)) { sound_effect_1 = 0x3c; return; }
       selectfile_arr1[k] = 0;
       memset(g_zenv.sram + k * 0x500, 0, 0x500);
       memset(g_zenv.sram + k * 0x500 + 0xf00, 0, 0x500);
@@ -169,10 +208,18 @@ void LoadFileSelectGraphics() {  // 80e4e9
   Decomp_spr(&g_ram[0x14000], 0x5f);
   Do3To4High(&g_zenv.vram[0x5400], &g_ram[0x14000]);
 
-  TransferFontToVRAM();
+  // The French Canadian cartridge loads the first half of its font from
+  // $0C:D078 to $6000, and the menu graphics after it ($80:E4BD).
+  uint16 *bg3 = &g_zenv.vram[0x7000];
+  if (g_loc_rom) {
+    bg3 = &g_zenv.vram[0x6000];
+    Loc_Words(bg3, Loc_FontAddr(), 0x800);
+  } else {
+    TransferFontToVRAM();
+  }
 
   Decomp_spr(&g_ram[0x14000], 0x6b);
-  memcpy(&g_zenv.vram[0x7800], &g_ram[0x14000], 0x300 * sizeof(uint16));
+  memcpy(bg3 + 0x800, &g_ram[0x14000], 0x300 * sizeof(uint16));
 }
 
 void Intro_ValidateSram() {  // 828054
@@ -191,7 +238,28 @@ void Intro_ValidateSram() {  // 828054
   memset(&g_ram[0xd00], 0, 256 * 3);
 }
 
+#if defined(__3DS__) || defined(ZELDA3_TEST_NATIVE_FILE_MENU)
+#include "native_menu.h"
+static bool FileSelect_HandleNativeInput(bool can_cancel) {
+  if (can_cancel && NativeMenu_CancelPressed(filtered_joypad_H)) {
+    ReturnToFileSelect();
+    irq_flag = 0xff;
+    sound_effect_1 = 0x2c;
+    return true;
+  }
+  NativeMenu_FilterConfirmation(&filtered_joypad_L, &filtered_joypad_H);
+  return false;
+}
+#else
+static bool FileSelect_HandleNativeInput(bool can_cancel) {
+  (void)can_cancel;
+  return false;
+}
+#endif
+
 void Module01_FileSelect() {  // 8ccd7d
+  if (Rando_IsActive()) Rando_DeactivateSlot();
+  FileSelect_HandleNativeInput(false);
   BG3HOFS_copy2 = 0;
   BG3VOFS_copy2 = 0;
   switch (submodule_index) {
@@ -260,8 +328,11 @@ void Module_EraseFile_1() {  // 8cce53
        0,    1, 0x93, 0x35, 0x13, 0x43, 0x40, 0x32, 0x95, 0x35, 0x13, 0x5d,    0,    1, 0x94, 0x35,
   };
   uint16 *dst = SelectFile_Func1();
-  memcpy(dst, kSelectFile_Gfx0, 224);
-  dst += 224 / 2;
+  int gfx0_size = 224;
+  const uint8 *gfx0 = g_loc_rom ? Loc_FileSelectStripes(&gfx0_size) :  // $8E:8D5A
+      SelectFile_MovableTable(kSelectFile_Gfx0, sizeof(kSelectFile_Gfx0), 0x8ea0be, 0x8cce5f, 0xe1c8, 0);
+  memcpy(dst, gfx0, gfx0_size);
+  dst += gfx0_size / 2;
   uint16 t = 0x1103;
   for (int i = 17; i >= 0; i--) {
     *dst++ = swap16(t);
@@ -299,7 +370,7 @@ void FileSelect_TriggerNameStripesAndAdvance() {  // 8cceb1
     0xa9, 0x18, 0xa9, 0x18, 0xa9, 0x18, 0xa9, 0x18, 0xa9, 0x18, 0xa9, 0x18, 0xa9, 0x18, 0xa9, 0x18,
     0xa9, 0x18, 0xa9, 0x18, 0xa9, 0x18, 0xa9, 0x18, 0xa9, 0x18, 0xa9, 0x18, 0xff,
   };
-  memcpy(vram_upload_data, kSelectFile_Func3_Data, 253);
+  memcpy(vram_upload_data, SelectFile_MovableTable(kSelectFile_Func3_Data, sizeof(kSelectFile_Func3_Data), 0x8ea293, 0x8cced0, 0xe359, 1), 253);
   INIDISP_copy = 0xf;
   nmi_disable_core_updates = 0;
   submodule_index++;
@@ -346,10 +417,31 @@ void FileSelect_Main() {  // 8ccebd
         submodule_index = 0;
         subsubmodule_index = 0;
       } else {
+        RandoSidecarFileState sidecar_state = Rando_SidecarFileState();
+        RandoSidecarSlot sidecar;
+        if (sidecar_state == kRandoSidecarFile_Unreadable) {
+          sound_effect_1 = 0x3c;
+          return;
+        }
+        if (sidecar_state == kRandoSidecarFile_Ok &&
+            Rando_LoadSidecarSlot(selectfile_R16, &sidecar) &&
+            sidecar.header.slot_kind == kSlotKind_Randomizer) {
+          if (Rando_DetectChecksumDrift(&sidecar.header,
+                g_zenv.sram + selectfile_R16 * 0x500, 0x500)) {
+            sound_effect_1 = 0x3c;
+            return;
+          }
+          Rando_ActivateSidecarSlot(&sidecar);
+          if (!Rando_IsActive()) { sound_effect_1 = 0x3c; return; }
+        } else {
+          if (RandoSave_SeedStorageActive()) { sound_effect_1 = 0x3c; return; }
+          Rando_DeactivateSlot();
+        }
         music_control = 0xf1;
         srm_var1 = selectfile_R16 * 2 + 2;
         WORD(g_ram[0]) = selectfile_R16 * 0x500;
         CopySaveToWRAM();
+        Rando_ApplyLoadedSaveRuntimeSettings();
       }
     } else if (selectfile_arr1[0] | selectfile_arr1[1] | selectfile_arr1[2]) {
       main_module_index = (selectfile_R16 == 3) ? 2 : 3;
@@ -363,6 +455,8 @@ void FileSelect_Main() {  // 8ccebd
 }
 
 void Module02_CopyFile() {  // 8cd053
+  if (FileSelect_HandleNativeInput(submodule_index >= 3))
+    return;
   selectfile_var2 = 0;
   switch (submodule_index) {
   case 0: FileSelect_EraseTriforce(); break;
@@ -438,7 +532,7 @@ void CopyFile_SelectionAndBlinker() {  // 8cd13f
   static const uint8 kCopyFile_SelectionAndBlinker_FaerieY[4] = {87, 111, 135, 191};
 
   vram_upload_offset = 0xac;
-  memcpy(vram_upload_data, kCopyFile_SelectionAndBlinker_Tab, 173);
+  memcpy(vram_upload_data, SelectFile_MovableTable(kCopyFile_SelectionAndBlinker_Tab, sizeof(kCopyFile_SelectionAndBlinker_Tab), 0x8ea5f7, 0x8cd148, 0xe68d, 0), 173);
 
   for (int k = 0; k != 3; k++) {
     if (selectfile_arr1[k] & 1) {
@@ -452,7 +546,8 @@ void CopyFile_SelectionAndBlinker() {  // 8cd13f
       }
     }
   }
-  FileSelect_DrawFairy(kCopyFile_SelectionAndBlinker_FaerieX[selectfile_R16], kCopyFile_SelectionAndBlinker_FaerieY[selectfile_R16]);
+  FileSelect_DrawFairy(SelectFile_Table(kCopyFile_SelectionAndBlinker_FaerieX, 0x8e8fe9, 0, 0)[selectfile_R16],
+                       kCopyFile_SelectionAndBlinker_FaerieY[selectfile_R16]);
 
   uint8 a = (filtered_joypad_L & 0xc0 | filtered_joypad_H) & 0xfc;
   if (a & 0x2c) {
@@ -480,11 +575,11 @@ void CopyFile_SelectionAndBlinker() {  // 8cd13f
       return;
     }
     selectfile_R20 = selectfile_R16 * 2;
-    memcpy(vram_upload_data + 26, kCopyFile_SelectionAndBlinker_Tab1, 73);
+    memcpy(vram_upload_data + 26, SelectFile_Table(kCopyFile_SelectionAndBlinker_Tab1, 0x8e8ff1, 0, 0), 73);
     if (selectfile_R16 != 2) {
       uint16 *dst = vram_upload_data + selectfile_R16 * 6;
-      dst[26] = 0x2762;
-      dst[29] = 0x4762;
+      dst[26] = g_loc_rom ? 0x267a : 0x2762;  // $8E:9119
+      dst[29] = g_loc_rom ? 0x467a : 0x4762;
     }
     submodule_index++;
     selectfile_R16 = 0;
@@ -528,14 +623,14 @@ void CopyFile_TargetSelectionAndBlink() {  // 8cd27b
   static const uint8 kCopyFile_TargetSelectionAndBlink_FaerieY[3] = {0x67, 0x7f, 0xbf};
   static const uint16 kCopyFile_TargetSelectionAndBlink_Dst[2] = {0x38, 0x60};
   static const uint16 kCopyFile_TargetSelectionAndBlink_Tab1[3] = {0x18e7, 0x18e8, 0x18e9};
-  memcpy(vram_upload_data, kCopyFile_TargetSelectionAndBlink_Tab0, 133);
+  memcpy(vram_upload_data, SelectFile_MovableTable(kCopyFile_TargetSelectionAndBlink_Tab0, sizeof(kCopyFile_TargetSelectionAndBlink_Tab0), 0x8ea6a4, 0x8cd292, 0xe73a, 0), 133);
 
   for (int k = 0, j = 0; k != 3; k++) {
     if (k * 2 == selectfile_R20)
       continue;
 
     uint16 *dst = vram_upload_data + kCopyFile_TargetSelectionAndBlink_Dst[j++] / 2;
-    uint16 t = kCopyFile_TargetSelectionAndBlink_Tab1[k];
+    uint16 t = g_loc_rom ? WORD(Loc_Rom(0x8e9184)[k * 2]) : kCopyFile_TargetSelectionAndBlink_Tab1[k];
     dst[0] = t;
     dst[10] = t + 0x10;
     dst += 2;
@@ -552,7 +647,8 @@ void CopyFile_TargetSelectionAndBlink() {  // 8cd27b
 
   vram_upload_offset = 132;
 
-  FileSelect_DrawFairy(kCopyFile_TargetSelectionAndBlink_FaerieX[selectfile_R16], kCopyFile_TargetSelectionAndBlink_FaerieY[selectfile_R16]);
+  FileSelect_DrawFairy(SelectFile_Table(kCopyFile_TargetSelectionAndBlink_FaerieX, 0x8e917a, 0, 0)[selectfile_R16],
+                       kCopyFile_TargetSelectionAndBlink_FaerieY[selectfile_R16]);
 
   uint8 a = (filtered_joypad_L & 0xc0 | filtered_joypad_H) & 0xfc;
   if (a & 0x2c) {
@@ -574,11 +670,12 @@ void CopyFile_TargetSelectionAndBlink() {  // 8cd27b
       return;
     }
     selectfile_R18 = selectfile_arr2[selectfile_R16];
-    memcpy(vram_upload_data + 26, kCopyFile_TargetSelectionAndBlink_Tab2, 49);
+    const uint8 *tab2 = SelectFile_Table(kCopyFile_TargetSelectionAndBlink_Tab2, 0x8e913d, 0x8cd23a, sizeof(kCopyFile_TargetSelectionAndBlink_Tab2));
+    memcpy(vram_upload_data + 26, tab2, g_loc_rom ? Loc_StripesSize(tab2, 128) : 49);  // $8E:9252
     if (selectfile_R16 == 0) {
       uint16 *dst = vram_upload_data;
-      dst[26] = 0x1462;
-      dst[29] = 0x3462;
+      dst[26] = g_loc_rom ? 0x137a : 0x1462;  // $8E:9261
+      dst[29] = g_loc_rom ? 0x337a : 0x3462;
     }
     submodule_index++;
     selectfile_R16 = 0;
@@ -602,6 +699,11 @@ void CopyFile_HandleConfirmation() {  // 8cd371
   } else if (a != 0) {
     sound_effect_1 = 0x2c;
     if (selectfile_R16 == 0) {
+      if (!RandoSave_CopyFileSlot(selectfile_R20 >> 1, selectfile_R18 >> 1)) {
+        sound_effect_1 = 0x3c; return;
+      }
+      memcpy(g_zenv.sram + (selectfile_R18 >> 1) * 0x500 + 0xf00,
+             g_zenv.sram + (selectfile_R20 >> 1) * 0x500, 0x500);
       memcpy(g_zenv.sram + (selectfile_R18 >> 1) * 0x500, g_zenv.sram + (selectfile_R20 >> 1) * 0x500, 0x500);
       selectfile_arr1[(selectfile_R18 >> 1)] = 1;
       ZeldaWriteSram();
@@ -612,6 +714,8 @@ void CopyFile_HandleConfirmation() {  // 8cd371
 }
 
 void Module03_KILLFile() {  // 8cd485
+  if (FileSelect_HandleNativeInput(submodule_index >= 3))
+    return;
   switch (submodule_index) {
   case 0: FileSelect_EraseTriforce(); break;
   case 1: Module_EraseFile_1(); break;
@@ -673,7 +777,7 @@ void KILLFile_ChooseTarget() {  // 8cd4ba
   };
   static const uint8 kKILLFile_ChooseTarget_FaerieX[4] = {36, 36, 36, 28};
   static const uint8 kKILLFile_ChooseTarget_FaerieY[4] = {103, 127, 151, 191};
-  memcpy(vram_upload_data, kKILLFile_ChooseTarget_Tab, 253);
+  memcpy(vram_upload_data, SelectFile_MovableTable(kKILLFile_ChooseTarget_Tab, sizeof(kKILLFile_ChooseTarget_Tab), 0x8ea481, 0x8cd4c0, 0xe53f, 1), 253);
   for (int k = 0; k < 3; k++) {
     if (selectfile_arr1[k])
       SelectFile_Func17(k);
@@ -709,12 +813,13 @@ void KILLFile_ChooseTarget() {  // 8cd4ba
       return;
     }
 
-    memcpy(vram_upload_data, kKILLFile_ChooseTarget_Tab2, 101);
+    const uint8 *tab2 = SelectFile_Table(kKILLFile_ChooseTarget_Tab2, 0x8e932d, 0x8cd41e, sizeof(kKILLFile_ChooseTarget_Tab2));
+    memcpy(vram_upload_data, tab2, g_loc_rom ? Loc_StripesSize(tab2, 128) : 101);  // $8E:9452
     submodule_index++;
     if (selectfile_R16 != 2) {
       uint16 *dst = vram_upload_data + selectfile_R16 * 6;
-      dst[0] = 0x6762;
-      dst[3] = 0x8762;
+      dst[0] = g_loc_rom ? 0x677a : 0x6762;  // $8E:9469
+      dst[3] = g_loc_rom ? 0x877a : 0x8762;
     }
     subsubmodule_index = selectfile_R16;
     selectfile_R16 = 0;
@@ -726,6 +831,8 @@ void FileSelect_DrawFairy(uint8 x, uint8 y) {  // 8cd7a5
 }
 
 void Module04_NameFile() {  // 8cd88a
+  if (FileSelect_HandleNativeInput(submodule_index >= 3))
+    return;
   switch (submodule_index) {
   case 0: NameFile_EraseSave(); break;
   case 1: Module_NamePlayer_1(); break;
@@ -736,6 +843,8 @@ void Module04_NameFile() {  // 8cd88a
 
 void NameFile_EraseSave() {  // 8cd89c
   FileSelect_EraseTriforce();
+  if (g_loc_rom)
+    BG3SC_copy = 0x79;  // the keyboard is 64x32 ($8E:9793)
   irq_flag = 1;
   selectfile_var3 = 0;
   selectfile_var4 = 0;
@@ -822,20 +931,27 @@ void NameFile_DoTheNaming() {  // 8cda4d
       return;
 
     sound_effect_1 = 0x2b;
-    uint8 t = kNamePlayer_Tab3[selectfile_var3 + selectfile_var5 * 0x20];
-    if (t == 0x5a) {
+    // The French Canadian keyboard ($8E:982C) holds the font tiles themselves
+    // and has its own codes for the arrows and for Fin ($8E:9A4D).
+    int key = selectfile_var3 + selectfile_var5 * 0x20;
+    uint8 t = g_loc_rom ? Loc_Rom(0x8e982c)[key] :
+              SelectFile_Table((const uint8 *)kNamePlayer_Tab3, 0, 0x8cd935, sizeof(kNamePlayer_Tab3))[key];
+    uint8 key_left = g_loc_rom ? 0xbf : 0x5a;
+    uint8 key_right = g_loc_rom ? 0x84 : 0x44;
+    uint8 key_end = g_loc_rom ? 0x8a : 0x6f;
+    if (t == key_left) {
       if (!selectfile_var4)
         selectfile_var4 = 5;
       else
         selectfile_var4--;
       return;
-    } else if (t == 0x44) {
+    } else if (t == key_right) {
       if (++selectfile_var4 == 6)
         selectfile_var4 = 0;
       return;
-    } else if (t != 0x6f) {
+    } else if (t != key_end) {
       int p = selectfile_var4 * 2 + attract_legend_ctr;
-      uint16 chr = (t & 0xfff0) * 2 + (t & 0xf);
+      uint16 chr = g_loc_rom ? t : (t & 0xfff0) * 2 + (t & 0xf);
       WORD(g_zenv.sram[p + kSrmOffs_Name]) = chr;
       NameFile_DrawSelectedCharacter(selectfile_var4, chr);
       if (++selectfile_var4 == 6)
@@ -855,6 +971,15 @@ void NameFile_DoTheNaming() {  // 8cda4d
   }
   srm_var1 = selectfile_R16 * 2 + 2;
   uint8 *sram = &g_zenv.sram[selectfile_R16 * 0x500];
+  if (RandoSave_SeedStorageActive()) {
+    uint8 name[12]; memcpy(name,sram+kSrmOffs_Name,sizeof(name));
+    if (!RandoSave_CreateNamedFileSlot(selectfile_R16,name)) {
+      sound_effect_1=0x3c; return;
+    }
+    SelectFile_NotifySlotWritten(selectfile_R16);
+    ReturnToFileSelect(); irq_flag=0xff; sound_effect_1=0x2c;
+    return;
+  }
   WORD(sram[0x3e5]) = 0x55aa;
   WORD(sram[0x20c]) = 0xf000;
   WORD(sram[0x20e]) = 0xf000;
@@ -916,7 +1041,7 @@ void NameFile_CheckForScrollInputY() {  // 8cdcbf
 void NameFile_DrawSelectedCharacter(int k, uint16 chr) {  // 8cdd30
   static const uint16 kNameFile_DrawSelectedCharacter_Tab[6] = {0x84, 0x86, 0x88, 0x8a, 0x8c, 0x8e};
   uint16 *dst = vram_upload_data;
-  uint16 a = kNameFile_DrawSelectedCharacter_Tab[k] | 0x6100;
+  uint16 a = kNameFile_DrawSelectedCharacter_Tab[k] | (g_loc_rom ? 0x7900 : 0x6100);  // $8E:9C29
   dst[0] = swap16(a);
   dst[1] = 0x100;
   dst[2] = 0x1800 | chr;
@@ -927,3 +1052,7 @@ void NameFile_DrawSelectedCharacter(int k, uint16 chr) {  // 8cdd30
   nmi_load_bg_from_vram = 1;
 }
 
+
+void SelectFile_NotifySlotWritten(int slot_index) {
+  if (slot_index >= 0 && slot_index < 3) selectfile_arr1[slot_index] = 1;
+}

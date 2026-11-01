@@ -1,0 +1,971 @@
+# entrance_registry.yaml — Cave-interior registry for entrance shuffle (Phase C)
+#
+# GROUND-TRUTH DATA ARTIFACT. Do not hand-edit numeric room ids / entrance ids
+# without re-deriving from the cited sources below.
+#
+# Purpose
+# -------
+# Entrance shuffle permutes overworld cave doors. The runtime redirect chain is:
+#   overworld door-slot  --kOverworld_Entrance_Id[lx]-->  entrance-id
+#   entrance-id          --kEntranceData_rooms[i]------->  room (0x1xx)
+# (See src/overworld.c:3342 `which_entrance = kOverworld_Entrance_Id[lx];` and
+#  src/dungeon.c:8448 `dungeon_room_index = kEntranceData_rooms[i];`.)
+#
+# A "cave interior" is usually one single-screen room in [0x100,0x180). The shuffleable
+# cave entrance-ids are 0x3C..0x72 and 0x83..0x84 (57 ids) backing rooms
+# 0x100..0x127. Several entrance-ids load the SAME room (e.g. 0x42/0x43/0x44 ->
+# 0x103), so the 57 ids collapse to 38 distinct cave interiors that carry an
+# overworld entrance. Linked subrooms reached from one of those interiors, such
+# as Blind's Hideout back room 0x11D, are bound to the parent entrance row.
+# Link's House 0x104 holds a chest but has no cave entrance-id and is NOT
+# shuffled here (see `excluded:` block).
+#
+# The CLOSED FORM this file serves: under cave permutation, a cave location's
+# new effective logic region = the vanilla `region` of whichever cave-interior
+# *slot* it lands on, AND its reachability is additionally gated by that slot's
+# `can_enter` predicate. So each interior records {rooms, entrance_ids, region,
+# can_enter, locations}.
+#
+# Provenance of each column
+# --------------------------
+#  - entrance_id -> room : assets/tables.py `kEntranceNames` (the authoritative
+#      vanilla US-ROM entrance-id -> room table; index = entrance-id, the
+#      `[Room #NNN]` decimal prefix = room id). Verified entrance-id range
+#      0x3C..0x72,0x83..0x84.
+#  - chest location -> room : decoded (one-time, during authoring) from the
+#      vanilla US chest room-words joined to assets/chest_data.py
+#      `CHEST_NAME_BY_ROM_ADDR`. room = room_word & 0x7FFF. The room values are
+#      baked into this file; at codegen time the table is read from the
+#      gitignored assets/rando/chest_table.gen.bin (a generated artifact).
+#  - region : assets/rando/location_registry.yaml (our 31-region canonical set,
+#      enumerated in src/rando/logic_data.c `kRandoRegionNames[31]`). When a
+#      cave's chest locations carry a region, that region is used verbatim and
+#      cross-checked against the location's overworld area.
+#  - locations: [ids] : numeric ids from location_registry.yaml.
+#
+# Region values are the LOGIC-GRAPH regions actually used by our placer
+# (location_registry.yaml is the source of truth, NOT ALTTPR PHP, per the
+# project's claim-grounding discipline). Note that location_registry uses the
+# OVERWORLD-AREA region for cave locations (e.g. Hype Cave chests = DarkWorld_
+# South), not a per-cave region — there is no per-cave region in the 31-region
+# set. That is exactly the behaviour entrance shuffle needs: the "vanilla
+# region of the slot" is the overworld area the cave door sits in.
+#
+# Schema
+# ------
+# interiors:
+#   - interior_id : stable string id (append-only; never renumber)
+#     name        : human label (vanilla cave name)
+#     rooms       : [room ids] (hex). Usually one; listed as a list for caves
+#                   that span >1 room id (none currently — kept for forward-compat)
+#     entrance_ids: [hex] overworld entrance-ids that load this interior
+#     door_rows   : [hex] overworld DOOR ROW indices (kOverworld_Entrance_Id
+#                   subscripts) that lead here. DERIVED — regenerate with
+#                   assets/scripts/gen_entrance_door_rows.py, never hand-edit.
+#                   The door row, NOT the entrance id, is the pool's identity
+#                   unit: four Dark World shop doors share entrance id 0x60 and
+#                   two share 0x58, so an entrance-id lookup cannot tell them
+#                   apart. ALTTPR's `PreviousOverworldDoor` = row + 1.
+#     region      : one of the 31 canonical regions (vanilla logic region of
+#                   the overworld door). null/omitted only for caves whose
+#                   region is ambiguous (flagged in notes).
+#     can_enter   : optional source-slot predicate that gates entering this cave
+#                   door. Omitted/TRUE() means the region alone is enough.
+#     locations   : [location_registry ids] resident in this interior. May be []
+#                   for "empty" caves (still shuffle as slots).
+#     shop_loc_base: optional location_registry id of this door's shop slot 0
+#                   (slots are base..base+2). EMITTED into kCaveInteriors and
+#                   read at runtime: a shop travels with its DESTINATION pool
+#                   entry, so the resolver goes door row -> source entry ->
+#                   installed permutation -> destination entry -> this base.
+#                   An entry declaring a base MUST also list base..base+2 in
+#                   `locations` (asserted by gen_entrance_table.py) — that is
+#                   what makes Entrance_ApplyRegionOverrides rebind the three
+#                   slots to whichever door now reaches them, and what brings
+#                   the entry under Entrance_SelfCheck (2)'s registry<->logic
+#                   region cross-validation.
+#     upstream_regions: DERIVED — regenerate with
+#                   assets/scripts/gen_entrance_upstream_regions.py --emit,
+#                   never hand-edit. Required on every entry with NO locations,
+#                   because Entrance_SelfCheck (2) cross-validates `region`
+#                   against an entry's own locations and therefore leaves the
+#                   location-less entries unverified — this closes that gap.
+#                   One row per door that ALTTPR declares a Shop/TakeAny/Upgrade
+#                   for, carrying that declaration's region, door id and
+#                   file:line. `[]` means upstream declares nothing for any of
+#                   this entry's doors.
+#                   gen_entrance_door_rows.py --check ENFORCES `region` against
+#                   it only when every door is covered AND the rows agree; see
+#                   is_pinnable() in the generator for why partial or split
+#                   coverage cannot decide (a pool entry deliberately groups
+#                   doors that may sit in different regions, and an upstream
+#                   take-any is a repurposing of one door rather than a claim
+#                   about the interior's primary entrance).
+#     notes       : provenance / ambiguity flags.
+#
+# DO NOT use assets/rando/ow_graph.gen.yaml's `zone` to decide an entry's
+# region. It is screen-granular, and a screen can straddle a region boundary:
+# dark screen 0x29 carries both the Archery Game (upstream DarkWorld_South) and
+# the Frog area (upstream DarkWorld_NorthWest) yet is labelled NorthWest
+# throughout, and light screen 0x29 is labelled NorthWest while everything
+# upstream and location_registry place on it is LightWorld_South. That method
+# produced three false "drift" flags (archery_game, kakariko_library,
+# mimic_cave — all three correct) and missed the one real one
+# (chest_shell_game). Use upstream_regions.
+#
+# ORDERING IS LOAD-BEARING — APPEND ONLY, NEVER INSERT OR REORDER. Three
+# separate structures are keyed by an interior's POSITION in this list:
+# `kRandoCaveSourcePreds` (emitted from `can_enter` by assets/rando_logic_gen.py,
+# a DIFFERENT generator than the C interior table), the hard-coded interior
+# indices in `Entrance_SelfCheck` check (6), and `kCaveInteriors` itself, whose
+# indices are the permutation's index space. (The baked cave-arrival table used
+# to be positional too and silently misaligned when two entries were inserted
+# mid-list; it is now keyed by `interior_id`.) Splitting an entry therefore
+# leaves the original at its index and APPENDS the remainder at the end.
+#
+# Coverage: all 38 entranced cave interiors, listed as 46 pool entries (the four
+# shop-hosting interiors are split per overworld door row). 57 entrance-ids and
+# 70 door rows total.
+
+format_version: 1
+phase: C
+
+interiors:
+  # --- Light World North West / Kakariko ---------------------------------
+  - interior_id: treasure_shell_game
+    name: "Treasure Shell Game"
+    rooms: [0x100]
+    entrance_ids: [0x3C]
+    door_rows: [0x3B]
+    region: LightWorld_NorthWest
+    locations: []
+    upstream_regions:
+      - { region: LightWorld_NorthWest, door: 0x3C, shop: "Lost Woods Gamble", src: "app/Region/Standard/LightWorld/NorthWest.php:61" }
+    notes: "Lost Woods Gamble take-any host in Retro; no vanilla item location."
+
+  - interior_id: snitch_house
+    name: "Snitch House"
+    rooms: [0x101]
+    entrance_ids: [0x3E, 0x3F]
+    door_rows: [0x3D, 0x3E]
+    region: LightWorld_NorthWest
+    locations: []
+    upstream_regions:
+      - { region: LightWorld_NorthWest, door: 0x3E, shop: "Snitch Lady East", src: "app/Region/Standard/LightWorld/NorthWest.php:63" }
+      - { region: LightWorld_NorthWest, door: 0x3F, shop: "Snitch Lady West", src: "app/Region/Standard/LightWorld/NorthWest.php:64" }
+    notes: "Two entrance-ids (Snitch House 1/2) -> same room 0x101."
+
+  - interior_id: sickboy_house
+    name: "Sick Kid's House"
+    rooms: [0x102]
+    entrance_ids: [0x40]
+    door_rows: [0x3F]
+    region: LightWorld_NorthWest
+    locations: [168]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Sick Kid (id 168) Npc grant lives in this interior. Not in chest table (Npc pickup); room from kEntranceNames 0x40."
+
+  - interior_id: kakariko_tavern
+    name: "Kakariko Tavern / Pub / Inn"
+    rooms: [0x103]
+    entrance_ids: [0x42, 0x43, 0x44]
+    door_rows: [0x41, 0x42, 0x43]
+    region: LightWorld_NorthWest
+    locations: [153]
+    upstream_regions:
+      - { region: LightWorld_NorthWest, door: 0x44, shop: "Bush Covered House", src: "app/Region/Standard/LightWorld/NorthWest.php:60" }
+    notes: "Three entrance-ids (Pub South/North, Inn) -> room 0x103. Chest 'Kakariko Tavern' (id 153) decoded to 0x103 via chest table."
+
+  - interior_id: sahasrahla_hut
+    name: "Sahasrahla's Hut"
+    rooms: [0x105]
+    entrance_ids: [0x45]
+    door_rows: [0x44]
+    region: LightWorld_NorthEast
+    locations: [142, 143, 144]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Three chests decoded to room 0x105. The 'Sahasrahla' NPC (id 145) is an OVERWORLD-surface grant outside the hut — NOT placed in this interior; see excluded notes."
+
+  - interior_id: kakariko_library
+    name: "Kakariko Library / Storage Shed"
+    rooms: [0x107]
+    entrance_ids: [0x49, 0x4A]
+    door_rows: [0x48, 0x49]
+    region: LightWorld_South
+    locations: []
+    upstream_regions:
+      - { region: LightWorld_NorthWest, door: 0x4A, shop: "Bomb Hut", src: "app/Region/Standard/LightWorld/NorthWest.php:65" }
+    notes: "Empty interior. FLAG: the 'Library' location (id 186) is the book pulled from UNDER the library building on the overworld surface via Pegasus Boots — it is NOT inside room 0x107. Listed in overworld_surface_not_caves. Two entrance-ids -> 0x107. Region nominal."
+
+  - interior_id: chicken_house
+    name: "Chicken House (Kakariko Sweeper Lady's House)"
+    rooms: [0x108]
+    entrance_ids: [0x4B]
+    door_rows: [0x4A]
+    region: LightWorld_NorthWest
+    locations: [154]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Chest 'Chicken House' (id 154) decoded to 0x108. Vanilla entrance name for 0x4B is 'Kakariko Sweeper Lady's House' (same room/interior)."
+
+  - interior_id: potion_shop
+    name: "Potion Shop (Witch's Hut)"
+    rooms: [0x109]
+    entrance_ids: [0x4C]
+    door_rows: [0x4B]
+    region: LightWorld_NorthEast
+    locations: [147]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Potion Shop (id 147) Npc = the Witch trade. Region LightWorld_NorthEast per registry. Not in chest table; room from kEntranceNames 0x4C."
+
+  # --- Dark World North West / Village of Outcasts -----------------------
+  - interior_id: village_chest_game
+    name: "Village of Outcasts Chest Game / Orphanage"
+    rooms: [0x106]
+    entrance_ids: [0x47, 0x48]
+    door_rows: [0x46, 0x47]
+    region: DarkWorld_NorthWest
+    can_enter: "HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)"
+    locations: [215, 217]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Chest 'Brewery' (id 215) decoded to room 0x106. Chest Game (id 217) is the minigame first-win chest dispatched by OpenMiniGameChest instead of the normal chest table, but F12 after opening it confirms room 0x106, cached exit screen 0x58, and DW state. Bind both locations here so they follow entrances 0x47/0x48 under cave shuffle."
+
+  - interior_id: bomb_shop
+    name: "The Bomb Shop / Retirement Center"
+    rooms: [0x11C]
+    entrance_ids: [0x53, 0x54]
+    door_rows: [0x52, 0x53]
+    region: DarkWorld_NorthWest
+    can_enter: "HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)"
+    locations: [216]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Chest 'C-Shaped House' (id 216) decoded to 0x11C. Two entrance-ids -> 0x11C."
+
+  # --- Light World South -------------------------------------------------
+  - interior_id: aginah_cave
+    name: "Aginah's Cave"
+    rooms: [0x10A]
+    entrance_ids: [0x4D]
+    door_rows: [0x4C, 0x70]
+    region: LightWorld_South
+    can_enter: "CanBombThings()"
+    locations: [175]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Chest 'Aginah's Cave' (id 175) decoded to 0x10A."
+
+  - interior_id: watergate
+    name: "Floodgate / Watergate"
+    rooms: [0x10B]
+    entrance_ids: [0x4E]
+    door_rows: [0x4D]
+    region: LightWorld_South
+    locations: [173]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Chest 'Floodgate Chest' (id 173) decoded to 0x10B."
+
+  - interior_id: ice_rod_cave
+    name: "Ice Rod Cave / Good Bee Cave"
+    rooms: [0x120]
+    entrance_ids: [0x56, 0x84]
+    door_rows: [0x6A, 0x7F]
+    region: LightWorld_South
+    locations: [180]
+    upstream_regions:
+      - { region: LightWorld_South, door: 0x6B, shop: "Good Bee Cave", src: "app/Region/Standard/LightWorld/South.php:61" }
+    notes: "Chest 'Ice Rod Cave' (id 180) decoded to 0x120. Entrance 0x56 'Good Bee Cave' and 0x84 'Ice Rod Cave' BOTH load room 0x120 — they are the SAME interior in vanilla room terms. 'Good Bee' (id NOT in registry as separate chest) is a take-any/bee location; flagged."
+
+  - interior_id: mini_moldorm_cave
+    name: "Mini Moldorm Cave"
+    rooms: [0x123]
+    entrance_ids: [0x6C]
+    door_rows: [0x7C]
+    region: LightWorld_South
+    can_enter: "CanBombThings()"
+    locations: [176, 177, 178, 179, 185]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Four chests (176-179) decoded to 0x123. 'Mini Moldorm Cave - NPC' (id 185) is the same interior (NPC pickup, not in chest table) — bound by name/room."
+
+  # --- Death Mountain ----------------------------------------------------
+  - interior_id: mimic_cave
+    name: "Mimic Cave / DM Maze 0011 / Fairy Cave 2"
+    rooms: [0x10C]
+    entrance_ids: [0x4F, 0x50]
+    door_rows: [0x4E, 0x4F]
+    region: LightWorld_DeathMountain_East
+    locations: [197]
+    upstream_regions:
+      - { region: LightWorld_DeathMountain_East, door: 0x50, shop: "Hookshot Fairy", src: "app/Region/Standard/LightWorld/DeathMountain/East.php:47" }
+    notes: "Chest 'Mimic Cave' (id 197) decoded to 0x10C. Two entrance-ids -> 0x10C."
+
+  - interior_id: byrna_gauntlet
+    name: "Byrna Gauntlet (Spike Cave)"
+    rooms: [0x117]
+    entrance_ids: [0x41]
+    door_rows: [0x40]
+    region: DarkWorld_DeathMountain_West
+    can_enter: "HAS_ITEM(MoonPearl) AND HAS_ITEM(Hammer) AND CanLiftRocks()"
+    locations: [229]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Chest 'Spike Cave' (id 229) decoded to 0x117. Vanilla entrance name is 'Byrna Gauntlet'."
+
+  # --- Dark World Mire ---------------------------------------------------
+  - interior_id: mire_shed
+    name: "Mire Shed (Swamp of Evil Heart Piece Hall)"
+    rooms: [0x10D]
+    entrance_ids: [0x5F]
+    door_rows: [0x5E]
+    region: DarkWorld_Mire
+    can_enter: "HAS_ITEM(MoonPearl) OR CanPearlBypass()"
+    locations: [206, 207]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Two chests (Mire Shed L/R, 206/207) decoded to 0x10D."
+
+  # --- Dark World South --------------------------------------------------
+  - interior_id: hype_cave
+    name: "Hype Cave (Storyteller 1 / Fairy Cave 3)"
+    rooms: [0x11E]
+    entrance_ids: [0x3D, 0x55]
+    door_rows: [0x3C, 0x54]
+    region: DarkWorld_South
+    can_enter: "HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)"
+    locations: [222, 223, 224, 225, 227]
+    upstream_regions:
+      - { region: LightWorld_NorthEast, door: 0x55, shop: "Long Fairy Cave", src: "app/Region/Standard/LightWorld/NorthEast.php:44" }
+    notes: "Four chests (222-225) decoded to 0x11E. 'Hype Cave - NPC' (id 227) same interior (NPC). Two entrance-ids -> 0x11E."
+
+  # --- Light World North West (King's Tomb) ------------------------------
+  - interior_id: hall_of_invisibility_cape
+    name: "Hall of the Invisibility Cape (King's Tomb)"
+    rooms: [0x113]
+    entrance_ids: [0x5B]
+    door_rows: [0x5A]
+    region: LightWorld_NorthWest
+    can_enter: "HAS_ITEM(Boots) AND (CanLiftDarkRocks() OR CanBootsClip() OR CanOneFrameClipOW() OR (CanSuperSpeed() AND CanSpinSpeed()))"
+    locations: [152]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Chest \"King's Tomb\" (id 152) decoded to 0x113. Vanilla entrance name is 'Hall of the Invisibility Cape'; the King's Tomb chest sits inside it (reached via graveyard cape/boots route)."
+
+  # --- Light World NW (Pegasus Rocks / Thief Hideout) --------------------
+  - interior_id: thief_hideout
+    name: "Thief Hideout (Pegasus Rocks)"
+    rooms: [0x124]
+    entrance_ids: [0x6D, 0x6E]
+    door_rows: [0x78, 0x79]
+    region: LightWorld_NorthWest
+    can_enter: "HAS_ITEM(Boots) OR (OP_REGION_REACHABLE(LightWorld_South) AND CanLiftRocks())"
+    locations: [165]
+    upstream_regions:
+      - { region: LightWorld_South, door: 0x79, shop: "50 Rupee Cave", src: "app/Region/Standard/LightWorld/South.php:58" }
+    notes: "Chest 'Pegasus Rocks' (id 165) decoded to 0x124. Two entrance-ids (Thief Hideout 2, Heart Piece Cave 1) -> 0x124. Pegasus Rocks is a dash-rock pickup (registry flags type Chest but interaction differs)."
+
+  # --- Empty / no-location cave interiors (still shuffle as slots) --------
+  - interior_id: general_store_1
+    name: "General Store 1 (Dark World Forest Shop door)"
+    rooms: [0x110]
+    entrance_ids: [0x57]
+    door_rows: [0x74]
+    region: DarkWorld_NorthWest
+    shop_loc_base: 240
+    locations: [240, 241, 242]
+    upstream_regions:
+      - { region: DarkWorld_NorthWest, door: 0x75, shop: "Dark World Forest Shop", src: "app/Region/Standard/DarkWorld/NorthWest.php:42" }
+    notes: >
+      Empty (shop only). Single door row 0x74 = ALTTPR door 0x75, dark screen
+      0x1A, so this interior needed no split. Hosts the Dark World Forest Shop
+      (240-242). No can_enter: the DarkWorld_NorthWest region edge already
+      carries HAS_ITEM(MoonPearl) (logic_parts/43_darkworld.yaml).
+
+  # --- Room 0x112 split by door row (was one entry spanning three doors) -----
+  # Rows 0x57 / 0x59 / 0x6D all load room 0x112 but sit in three different
+  # regions across both worlds, so the pre-split entry claimed a single nominal
+  # LightWorld_NorthWest region for all three. Rows 0x59 and 0x6D are appended
+  # at the end of the list (indices 40/41) — see the append-only note above.
+  - interior_id: general_store_2
+    name: "General Store 2 — Light World Lake Hylia shop door"
+    rooms: [0x112]
+    entrance_ids: [0x58]
+    door_rows: [0x57]
+    region: LightWorld_South
+    shop_loc_base: 261
+    locations: [261, 262, 263]
+    upstream_regions:
+      - { region: LightWorld_South, door: 0x58, shop: "Light World Lake Hylia Shop", src: "app/Region/Standard/LightWorld/South.php:54" }
+    notes: >
+      Door row 0x57 (ALTTPR door 0x58), light screen 0x35 = Lake Hylia. Hosts
+      the Light World Lake Hylia Shop (261-263), whose upstream access is the
+      region alone (app/Region/Standard/LightWorld/South.php:54, no callback),
+      so no can_enter. Retro TakeAny host room. The pre-split entry declared
+      LightWorld_NorthWest for this door; the split gives it its real region.
+
+  - interior_id: archery_game
+    name: "Archery Game"
+    rooms: [0x111]
+    entrance_ids: [0x59]
+    door_rows: [0x58]
+    region: DarkWorld_South
+    can_enter: "HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)"
+    locations: []
+    upstream_regions:
+      - { region: DarkWorld_South, door: 0x59, shop: "Archery Game", src: "app/Region/Standard/DarkWorld/South.php:44" }
+    notes: "Empty (minigame)."
+
+  # --- Room 0x10F split by door row (was one entry spanning four doors) ------
+  # All four rows carry entrance id 0x60 — the exact ambiguity that made an
+  # entrance-id lookup unable to tell the four Dark World shop doors apart. They
+  # sit in three different regions. Rows 0x5F / 0x6E / 0x73 are appended at the
+  # end of the list (indices 42/43/44).
+  - interior_id: general_store_3
+    name: "General Store 3 — Dark World Lumberjack Hut shop door"
+    rooms: [0x10F]
+    entrance_ids: [0x60]
+    door_rows: [0x56]
+    region: DarkWorld_NorthWest
+    can_enter: "HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)"
+    shop_loc_base: 243
+    locations: [243, 244, 245]
+    upstream_regions:
+      - { region: DarkWorld_NorthWest, door: 0x57, shop: "Dark World Lumberjack Hut Shop", src: "app/Region/Standard/DarkWorld/NorthWest.php:43" }
+    notes: >
+      Door row 0x56 (ALTTPR door 0x57), dark screen 0x02. Hosts the Dark World
+      Lumberjack Hut Shop (243-245), which has no upstream callback
+      (app/Region/Standard/DarkWorld/NorthWest.php:42) — the pearl gate here is
+      the CAVE-door gate (whatever the shuffle puts behind this door may hold a
+      chest a bunny could not open), not the shop's. Retro TakeAny host room.
+
+  - interior_id: pond_of_wishing
+    name: "Pond of Wishing / Storyteller Cave 3"
+    rooms: [0x114]
+    entrance_ids: [0x5C, 0x62]
+    door_rows: [0x5B, 0x61]
+    region: LightWorld_NorthEast
+    can_enter: "HAS_ITEM(Flippers) OR (OP_REGION_REACHABLE(DarkWorld_Mire) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass()))"
+    locations: [149, 150]
+    upstream_regions:
+      - { region: DarkWorld_Mire, door: 0x62, shop: "Dark Desert Hint", src: "app/Region/Standard/DarkWorld/Mire.php:38" }
+    notes: "Fairy fountain. The Waterfall/Pyramid bottle Fountain-type locs 140/141 were RETIRED — see location_registry.yaml; each fairy pond has exactly its two Left/Right checks. F12 on the Light World Waterfall Fairy side: room 0x114, cached exit screen 0x0F, light world. Bind Waterfall Fairy Left/Right (149/150) here so they follow entrances 0x5C/0x62 under cave shuffle."
+
+  - interior_id: pond_of_happiness
+    name: "Pond of Happiness / Fairy Cave 4"
+    rooms: [0x115]
+    entrance_ids: [0x5D, 0x5E]
+    door_rows: [0x55, 0x5C, 0x5D, 0x6B, 0x6C, 0x6F, 0x71, 0x80]
+    region: LightWorld_South
+    locations: []
+    upstream_regions:
+      - { region: DarkWorld_Mire, door: 0x56, shop: "Dark Desert Fairy", src: "app/Region/Standard/DarkWorld/Mire.php:37" }
+      - { region: LightWorld_South, door: 0x5D, shop: "Capacity Upgrade", src: "app/Region/Standard/LightWorld/South.php:55" }
+      - { region: LightWorld_NorthEast, door: 0x5E, shop: "Lake Hylia Fairy", src: "app/Region/Standard/LightWorld/NorthEast.php:45" }
+      - { region: LightWorld_South, door: 0x6C, shop: "Light Hype Fairy", src: "app/Region/Standard/LightWorld/South.php:63" }
+      - { region: DarkWorld_NorthEast, door: 0x6D, shop: "Dark Lake Hylia Fairy", src: "app/Region/Standard/DarkWorld/NorthEast.php:47" }
+      - { region: DarkWorld_DeathMountain_West, door: 0x70, shop: "Dark Death Mountain Fairy", src: "app/Region/Standard/DarkWorld/DeathMountain/West.php:36" }
+      - { region: LightWorld_South, door: 0x72, shop: "Desert Fairy", src: "app/Region/Standard/LightWorld/South.php:60" }
+      - { region: DarkWorld_South, door: 0x81, shop: "Dark Lake Hylia Ledge Fairy", src: "app/Region/Standard/DarkWorld/South.php:46" }
+    notes: "Empty (upgrade fountain). Two entrance-ids -> 0x115."
+
+  - interior_id: warped_pond_of_wishing
+    name: "Warped Pond of Wishing"
+    rooms: [0x116]
+    entrance_ids: [0x63]
+    door_rows: [0x62]
+    region: DarkWorld_NorthEast
+    can_enter: "HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)"
+    locations: []
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Empty (fairy/fountain)."
+
+  - interior_id: chest_shell_game
+    name: "Chest Shell Game 2"
+    rooms: [0x118]
+    entrance_ids: [0x67]
+    door_rows: [0x66]
+    region: LightWorld_South
+    locations: []
+    upstream_regions:
+      - { region: LightWorld_South, door: 0x67, shop: "Kakariko Gamble Game", src: "app/Region/Standard/LightWorld/South.php:64" }
+    notes: >
+      Empty (minigame). Kakariko Gamble Game take-any host (dest 0x46/0x11F) in
+      Retro. REGION CORRECTED from LightWorld_NorthWest, three agreeing sources:
+      (1) upstream declares this door in LightWorld/South.php:64 ("Kakariko
+      Gamble Game", door 0x67 = row 0x66 + 1); (2) its ONLY door sits on light
+      screen 0x29, whose sole ow_graph component is shared with
+      kakariko_library's door — and that entry declares LightWorld_South, so the
+      two could not both be right; (3) the Library location on that same screen
+      is bound to LightWorld_South in location_registry.yaml. The outlier is
+      ow_graph's zone for screen 0x29 (LightWorld_NorthWest), which is the same
+      screen-granularity unreliability that made design D9's sweep flag
+      archery_game and mimic_cave as drift when both are correct.
+
+  - interior_id: blinds_old_hideout
+    name: "Blind's Old Hideout (Thieves' Town overworld door)"
+    rooms: [0x119, 0x11D]
+    entrance_ids: [0x61]
+    door_rows: [0x60]
+    region: LightWorld_NorthWest
+    locations: [160, 161, 162, 163, 164]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Light-world Kakariko Blind's Hideout chain, not the Dark World NW Thieves' Town dungeon entrance. F12 in back room: current room 0x11D, previous room 0x119, cached exit screen 0x18. The front room has four chests; the bomb-wall back room has one chest and six pots. All Blind's Hideout chests are bound here so they follow entrance 0x61 under cave shuffle."
+
+  - interior_id: storyteller_cave_4
+    name: "Storyteller Cave 4"
+    rooms: [0x11A]
+    entrance_ids: [0x68]
+    door_rows: [0x67]
+    region: DarkWorld_NorthEast
+    can_enter: "HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)"
+    locations: []
+    upstream_regions:
+      - { region: DarkWorld_NorthEast, door: 0x68, shop: "Palace of Darkness Hint", src: "app/Region/Standard/DarkWorld/NorthEast.php:49" }
+    notes: "Empty. Palace of Darkness Hint take-any host (dest 0x60) in Retro."
+
+  # The two halves of split room 0x11B. Their entrance ids were CROSSED until
+  # 2026-07-26: this entry claimed 0x51 and the Cave 45 entry claimed 0x52, which
+  # is backwards. Four independent sources agree on the corrected binding —
+  # (a) kOverworld_Entrance_Id/Area: id 0x51's door is on light screen 0x32
+  #     (south-west, the Cave 45 spot), id 0x52's on 0x14 (the graveyard, where
+  #     King's Tomb's own door also sits);
+  # (b) ALTTPR: "Graveyard Ledge" is mirror-from-North-West-Dark-World,
+  #     "Cave 45" is mirror-from-South-Dark-World — matching each entry's own
+  #     can_enter, region and location, which were always right;
+  # (c) OWNER PLAYTEST 2026-07-26 (debug warp by raw entrance id, seed with
+  #     Graveyard Ledge = glove and Cave 45 = rupee): entrance 0x51 loaded the
+  #     Cave 45 room and gave the rupee; entrance 0x52 loaded the Graveyard
+  #     Ledge room and gave the glove. Walking in from the overworld gave the
+  #     correct item at both, confirming only this file was wrong;
+  # (d) the door_rows column added by gen_entrance_door_rows.py, which is what
+  #     surfaced the contradiction in the first place.
+  # The old notes claimed F12 evidence for the opposite. They were wrong about
+  # the ID specifically — the screens they recorded (0x14 graveyard, 0x32 Cave
+  # 45) were correct, so the id was almost certainly inferred from the
+  # kEntranceNames label order ("Refill Cave 0001"/"0002") rather than read.
+  # Only the ids and rows moved; region, can_enter, locations and names stay.
+  - interior_id: refill_cave_1_graveyard
+    name: "Refill Cave (Graveyard Ledge side)"
+    rooms: [0x11B]
+    entrance_ids: [0x52]
+    door_rows: [0x51]
+    region: LightWorld_NorthWest
+    can_enter: "(HAS_ITEM(MagicMirror) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND OP_REGION_REACHABLE(DarkWorld_NorthWest)) OR CanBootsClip() OR CanOneFrameClipOW() OR (CanSuperSpeed() AND CanSpinSpeed())"
+    locations: [171]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: >
+      Split room. Entrance 0x52 (door row 0x51, light screen 0x14 = the
+      graveyard) loads the Graveyard Ledge side, playtest-confirmed. The
+      standing item is behind this side's bomb wall; its base location predicate
+      keeps CanBombThings().
+
+  - interior_id: refill_cave_1_cave_45
+    name: "Refill Cave (Cave 45 side)"
+    rooms: [0x11B]
+    entrance_ids: [0x51]
+    door_rows: [0x50]
+    region: LightWorld_South
+    can_enter: "(HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(DarkWorld_South)) OR CanBootsClip() OR CanOneFrameClipOW()"
+    locations: [183]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: >
+      Split room. Entrance 0x51 (door row 0x50, light screen 0x32) loads the
+      Cave 45 side, playtest-confirmed. Split from the Graveyard Ledge side so
+      entrance shuffle binds each standing location to the correct physical
+      side — which only works if the ids are the right way round (they were not,
+      see above).
+
+  # --- Room 0x11F split by door row (was one entry spanning two doors) -------
+  # Row 0x75 is appended at the end of the list (index 45).
+  - interior_id: kakariko_lame_shop
+    name: "Kakariko's Lame Shop — Light World Kakariko shop door"
+    rooms: [0x11F]
+    entrance_ids: [0x46]
+    door_rows: [0x45]
+    region: LightWorld_NorthWest
+    shop_loc_base: 258
+    locations: [258, 259, 260]
+    upstream_regions:
+      - { region: LightWorld_NorthWest, door: 0x46, shop: "Light World Kakariko Shop", src: "app/Region/Standard/LightWorld/NorthWest.php:57" }
+    notes: >
+      Door row 0x45 (ALTTPR door 0x46), light screen 0x18 = Kakariko. Hosts the
+      Light World Kakariko Shop (258-260); no upstream callback
+      (app/Region/Standard/LightWorld/NorthWest.php:57) so no can_enter. Retro
+      TakeAny host room (dest 0x46). ALTTPR declares a shop for THIS door only —
+      the room's other door (row 0x75, entry 45) keeps vanilla shop behavior.
+
+  - interior_id: chez_smithies
+    name: "Chez Smithies (Blacksmith Hut)"
+    rooms: [0x121]
+    entrance_ids: [0x64]
+    door_rows: [0x63]
+    region: LightWorld_NorthWest
+    locations: []
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Empty interior. The 'Blacksmith' (id 220) and 'Purple Chest' (id 221) grants are OVERWORLD-surface NPC interactions, NOT inside this room — excluded."
+
+  - interior_id: fortune_teller
+    name: "Fortune Teller 1/2"
+    rooms: [0x122]
+    entrance_ids: [0x65, 0x66]
+    door_rows: [0x64, 0x65, 0x72]
+    region: LightWorld_NorthWest
+    locations: []
+    upstream_regions:
+      - { region: LightWorld_NorthWest, door: 0x65, shop: "Fortune Teller (Light)", src: "app/Region/Standard/LightWorld/NorthWest.php:59" }
+      - { region: DarkWorld_NorthWest, door: 0x66, shop: "Fortune Teller (Dark)", src: "app/Region/Standard/DarkWorld/NorthWest.php:47" }
+      - { region: LightWorld_South, door: 0x73, shop: "Lake Hylia Fortune Teller", src: "app/Region/Standard/LightWorld/South.php:62" }
+    notes: "Empty (fortune teller). Two entrance-ids -> 0x122."
+
+  - interior_id: storyteller_cave_5
+    name: "Storyteller Cave 5/6"
+    rooms: [0x10E]
+    entrance_ids: [0x69, 0x6A]
+    door_rows: [0x68, 0x69]
+    region: DarkWorld_NorthEast
+    can_enter: "HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)"
+    locations: []
+    upstream_regions:
+      - { region: DarkWorld_NorthEast, door: 0x69, shop: "East Dark World Hint", src: "app/Region/Standard/DarkWorld/NorthEast.php:48" }
+      - { region: DarkWorld_South, door: 0x6A, shop: "Dark Lake Hylia Ledge Hint", src: "app/Region/Standard/DarkWorld/South.php:47" }
+    notes: "Empty. Two entrance-ids -> 0x10E."
+
+  - interior_id: thief_hideout_3
+    name: "Thief Hideout 3 / Refill Cave 3"
+    rooms: [0x125]
+    entrance_ids: [0x6F, 0x70]
+    door_rows: [0x7A, 0x7B]
+    region: LightWorld_South
+    can_enter: "CanLiftRocks() OR (OP_REGION_REACHABLE(DarkWorld_South) AND CanLiftRocks() AND (HAS_ITEM(MoonPearl) OR CanPearlBypass()))"
+    locations: []
+    upstream_regions:
+      - { region: LightWorld_South, door: 0x7B, shop: "20 Rupee Cave", src: "app/Region/Standard/LightWorld/South.php:57" }
+      - { region: DarkWorld_South, door: 0x7C, shop: "Dark Lake Hylia Ledge Spike Cave", src: "app/Region/Standard/DarkWorld/South.php:48" }
+    notes: "Empty. F12 evidence: entrance 0x6F is Light World South under a Power Glove rock; entrance 0x70 is the same map location in Dark World South."
+
+  - interior_id: fairy_cave_5_link_house
+    name: "Fairy Cave 5 (Link's House side)"
+    rooms: [0x126]
+    entrance_ids: [0x71]
+    door_rows: [0x76, 0x77]
+    region: LightWorld_South
+    can_enter: "HAS_ITEM(Boots)"
+    locations: []
+    upstream_regions:
+      - { region: LightWorld_South, door: 0x77, shop: "Bonk Fairy (Light)", src: "app/Region/Standard/LightWorld/South.php:59" }
+      - { region: DarkWorld_South, door: 0x78, shop: "Bonk Fairy (Dark)", src: "app/Region/Standard/DarkWorld/South.php:45" }
+    notes: "Split room. Entrance 0x71 is the Link's House-area fairy side behind a Pegasus Boots dash rock (F12: room 0x126, cached exit screen 0x2B, light world). No randomized location is on this side."
+
+  - interior_id: fairy_cave_5_checkerboard
+    name: "Fairy Cave 5 (Checkerboard Cave side)"
+    rooms: [0x126]
+    entrance_ids: [0x72]
+    door_rows: [0x7D]
+    region: LightWorld_South
+    can_enter: "CanLiftRocks() AND HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(DarkWorld_Mire)"
+    locations: [184]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Split room. Entrance 0x72 is the Checkerboard Cave side on screen 0x30, reached by mirroring down from DarkWorld_Mire after lifting the rock. Split from the Link's House fairy side so entrance shuffle binds Checkerboard Cave to the correct physical side."
+
+  - interior_id: heart_piece_cave_3
+    name: "Heart Piece Cave 3 / Hammer Pegs Cave"
+    rooms: [0x127]
+    entrance_ids: [0x83]
+    door_rows: [0x7E]
+    region: DarkWorld_NorthWest
+    can_enter: "HAS_ITEM(Hammer) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)) AND (CanLiftDarkRocks() OR ((CanFakeFlippers() OR HAS_ITEM(Flippers)) AND (CanOneFrameClipOW() OR CanBootsClip())))"
+    locations: [218]
+    upstream_regions: []   # upstream declares no shop/take-any at this door
+    notes: "Walk-in cave behind the Dark World NW hammer-pegs field. Holds the Hammer Pegs freestanding heart piece (id 218); pots share that access."
+
+  # =========================================================================
+  # APPENDED (indices 40-45): the remaining door rows of the three multi-door
+  # shop-hosting interiors split above. These are NOT new physical rooms —
+  # each shares its room (and entrance id) with the entry it was split from,
+  # because they ARE the same room reached through a different overworld door.
+  # They are appended rather than inserted so every pre-existing index keeps
+  # its meaning; see the append-only note in the header.
+  #
+  # `can_enter` here is the CAVE-DOOR gate — "can the player reach this door
+  # and act on whatever the shuffle put behind it" — which is not the same
+  # question as the shop's own access predicate (a bunny can buy from a shop
+  # but cannot open a chest). Where the two differ, the stricter cave gate is
+  # used. Each dark-world door carries the pearl triple; for
+  # DarkWorld_DeathMountain_East that is load-bearing rather than redundant,
+  # because that region's only inbound edge is CanLiftDarkRocks() with no
+  # pearl arm (logic_parts/43_darkworld.yaml), i.e. it is bunny-reachable.
+  # =========================================================================
+  - interior_id: general_store_2_dark_sanctuary
+    name: "General Store 2 — Dark Sanctuary door"
+    rooms: [0x112]
+    entrance_ids: [0x5A]
+    door_rows: [0x59]
+    region: DarkWorld_NorthWest
+    can_enter: "HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)"
+    locations: []
+    upstream_regions:
+      - { region: DarkWorld_NorthWest, door: 0x5A, shop: "Dark Sanctuary Hint", src: "app/Region/Standard/DarkWorld/NorthWest.php:46" }
+    notes: >
+      Split from general_store_2. Door row 0x59 (ALTTPR door 0x5A), dark screen
+      0x13 — the Dark World counterpart of the Sanctuary/Graveyard screen.
+      Upstream declares this door as the "Dark Sanctuary Hint" TakeAny in
+      app/Region/Standard/DarkWorld/NorthWest.php:46, which is what pins the
+      region to DarkWorld_NorthWest. NO SHOP: it is a hint cave, so it has no
+      shop_loc_base and stays a plain empty pool slot.
+
+  - interior_id: general_store_2_dw_death_mountain
+    name: "General Store 2 — Dark World Death Mountain shop door"
+    rooms: [0x112]
+    entrance_ids: [0x58]
+    door_rows: [0x6D]
+    region: DarkWorld_DeathMountain_East
+    can_enter: "HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)"
+    shop_loc_base: 252
+    locations: [252, 253, 254]
+    upstream_regions:
+      - { region: DarkWorld_DeathMountain_East, door: 0x6E, shop: "Dark World Death Mountain Shop", src: "app/Region/Standard/DarkWorld/DeathMountain/East.php:41" }
+    notes: >
+      Split from general_store_2; shares its entrance id 0x58 (same room 0x112,
+      different overworld door). Door row 0x6D (ALTTPR door 0x6E), dark screen
+      0x05. Hosts the Dark World Death Mountain Shop (252-254), declared in
+      app/Region/Standard/DarkWorld/DeathMountain/East.php:41 with no callback —
+      deliberately bunny-BUYABLE upstream. The pearl gate above is therefore the
+      cave-door gate only; it does not model the shop.
+
+  - interior_id: general_store_3_outcasts
+    name: "General Store 3 — Village of Outcasts shop door"
+    rooms: [0x10F]
+    entrance_ids: [0x60]
+    door_rows: [0x5F]
+    region: DarkWorld_NorthWest
+    can_enter: "HAS_ITEM(Hammer) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world))"
+    shop_loc_base: 246
+    locations: [246, 247, 248]
+    upstream_regions:
+      - { region: DarkWorld_NorthWest, door: 0x60, shop: "Dark World Outcasts Shop", src: "app/Region/Standard/DarkWorld/NorthWest.php:44" }
+    notes: >
+      Split from general_store_3. Door row 0x5F (ALTTPR door 0x60), dark screen
+      0x18 = Village of Outcasts. Hosts the Dark World Outcasts Shop (246-248),
+      whose upstream callback (NorthWest.php:72-76) is Hammer AND the pearl
+      triple — the shop sits past the hammer-peg field, so the Hammer term is
+      load-bearing for reaching the DOOR, not just the purchase. Strictly
+      stronger than the gate the pre-split entry applied to this door.
+
+  - interior_id: general_store_3_potion
+    name: "General Store 3 — Dark World Potion Shop door"
+    rooms: [0x10F]
+    entrance_ids: [0x60]
+    door_rows: [0x6E]
+    region: DarkWorld_NorthEast
+    can_enter: "CanBunnyRevival(world) OR ((HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND (CanOneFrameClipOW() OR CanBootsClip() OR HAS_ITEM(Hammer) OR HAS_ITEM(Flippers) OR CanLiftRocks()))"
+    shop_loc_base: 237
+    locations: [237, 238, 239]
+    upstream_regions:
+      - { region: DarkWorld_NorthEast, door: 0x6F, shop: "Dark World Potion Shop", src: "app/Region/Standard/DarkWorld/NorthEast.php:45" }
+    notes: >
+      Split from general_store_3. Door row 0x6E (ALTTPR door 0x6F), dark screen
+      0x16. Hosts the Dark World Potion Shop (237-239); predicate mirrors
+      NorthEast.php:74-80 verbatim (see logic_parts/50_shops.yaml). Load-bearing
+      rather than conservative: the DarkWorld_NorthEast region edge admits a
+      pearl-less bunny via the DefeatAgahnim arm, and the traversal term is what
+      actually crosses to this door.
+
+  - interior_id: general_store_3_lake_hylia
+    name: "General Store 3 — Dark World Lake Hylia shop door"
+    rooms: [0x10F]
+    entrance_ids: [0x60]
+    door_rows: [0x73]
+    region: DarkWorld_South
+    can_enter: "HAS_ITEM(MoonPearl) OR CanPearlBypass() OR CanBunnyRevival(world)"
+    shop_loc_base: 249
+    locations: [249, 250, 251]
+    upstream_regions:
+      - { region: DarkWorld_South, door: 0x74, shop: "Dark World Lake Hylia Shop", src: "app/Region/Standard/DarkWorld/South.php:42" }
+    notes: >
+      Split from general_store_3. Door row 0x73 (ALTTPR door 0x74), dark screen
+      0x35. Hosts the Dark World Lake Hylia Shop (249-251), no upstream callback
+      (DarkWorld/South.php:42); the pearl triple is the cave-door gate, matching
+      the other DarkWorld_South entries (hype_cave, archery_game).
+
+  - interior_id: kakariko_lame_shop_lumberjack_house
+    name: "Kakariko's Lame Shop — Lumberjack House door"
+    rooms: [0x11F]
+    entrance_ids: [0x6B]
+    door_rows: [0x75]
+    region: LightWorld_NorthWest
+    locations: []
+    upstream_regions:
+      - { region: LightWorld_NorthWest, door: 0x76, shop: "Lumberjack House", src: "app/Region/Standard/LightWorld/NorthWest.php:62" }
+    notes: >
+      Split from kakariko_lame_shop. Door row 0x75 (ALTTPR door 0x76), light
+      screen 0x02 (Lost Woods / Lumberjack House). NO SHOP — upstream declares a
+      shop for room 0x11F's OTHER door only, so this one keeps vanilla shop
+      behavior and has no shop_loc_base. Freely reachable in the light world, so
+      no can_enter (same as the entry it split from).
+
+# ===========================================================================
+# Caves with chests/locations but NO cave entrance-id (NOT shuffled as caves)
+# ===========================================================================
+excluded:
+  - room: 0x104
+    name: "Link's House"
+    reason: "Special dungeon-style room-keyed exit, excluded from cave shuffle per verified entrance-table facts. Holds chest 'Link's House' (id 174, region LightWorld_South / DarkWorld_South in Inverted)."
+    locations: [174]
+
+# ===========================================================================
+# Locations frequently mis-classified as directly bindable cave-interior checks.
+# Some are true overworld-surface checks; others are standing checks on one side
+# of a split room. They must NOT be bound to a combined cave-interior row unless
+# the entrance-shuffle table is split per entrance-id.
+# ===========================================================================
+overworld_surface_not_caves:
+  - { id: 145, name: "Sahasrahla",        region: LightWorld_NorthEast,          note: "Overworld NPC outside the hut" }
+  - { id: 166, name: "Bottle Merchant",   region: LightWorld_NorthWest,          note: "Overworld NPC" }
+  - { id: 167, name: "Magic Bat",         region: LightWorld_NorthWest,          note: "Powder-thrown grant in a sub-room reached via Magic Bat cave; ALTTPR ties to overworld access, no cave entrance-id of its own" }
+  - { id: 169, name: "Lost Woods Hideout", region: LightWorld_NorthWest,         note: "Overworld standing item (stump)" }
+  - { id: 186, name: "Library",          region: LightWorld_South,              note: "Book pulled from under the Library building on the overworld via Pegasus Boots; the building interior (room 0x107) is empty" }
+  - { id: 193, name: "Spectacle Rock Cave", region: LightWorld_DeathMountain_West, note: "DM heart-piece cave (entrance 0x16/0x17 family, OUTSIDE 0x3C-0x72 cave-id range) — not in this registry's shuffle set" }
+  - { id: 195, name: "Spectacle Rock",    region: LightWorld_DeathMountain_West, note: "Overworld standing item" }
+  # ids 210/211 (Pyramid Fairy - Sword/Bow) retired — chest model, see change
+  # add-rando-fairy-chest-model. These were doc-only (never emitted to the
+  # entrance shuffle set); Left/Right remain as the pond's two checks.
+  - { id: 213, name: "Pyramid Fairy - Left",  region: DarkWorld_NorthEast,       note: "Pyramid Fairy chest (room not in cave-id set)" }
+  - { id: 214, name: "Pyramid Fairy - Right", region: DarkWorld_NorthEast,       note: "Pyramid Fairy chest" }
+  - { id: 219, name: "Bumper Cave",       region: DarkWorld_NorthWest,           note: "Overworld traverse/ledge heart piece, not a single-screen cave interior" }
+  - { id: 220, name: "Blacksmith",        region: DarkWorld_NorthWest,           note: "Overworld NPC (rescued frog)" }
+  - { id: 221, name: "Purple Chest",      region: DarkWorld_NorthWest,           note: "Overworld NPC (Gary)" }
+  - { id: 196, name: "Spiral Cave",       region: LightWorld_DeathMountain_East, note: "DM cave; entrance OUTSIDE 0x3C-0x72 range (DM mountainface family). Verify room if DM caves are added to shuffle." }
+  - { id: 230, name: "Superbunny Cave - Top",    region: DarkWorld_DeathMountain_East, note: "DM cave, entrance outside 0x3C-0x72 range" }
+  - { id: 231, name: "Superbunny Cave - Bottom", region: DarkWorld_DeathMountain_East, note: "DM cave, entrance outside 0x3C-0x72 range" }
+  - { id: 232, name: "Hookshot Cave - Top Right",    region: DarkWorld_DeathMountain_East, note: "DM cave, entrance outside 0x3C-0x72 range" }
+  - { id: 233, name: "Hookshot Cave - Top Left",     region: DarkWorld_DeathMountain_East, note: "DM cave, entrance outside 0x3C-0x72 range" }
+  - { id: 234, name: "Hookshot Cave - Bottom Left",  region: DarkWorld_DeathMountain_East, note: "DM cave, entrance outside 0x3C-0x72 range" }
+  - { id: 235, name: "Hookshot Cave - Bottom Right", region: DarkWorld_DeathMountain_East, note: "DM cave, entrance outside 0x3C-0x72 range" }
+  - { id: 198, name: "Paradox Cave Lower - Far Left",  region: LightWorld_DeathMountain_East, note: "Paradox Cave; DM entrance family outside 0x3C-0x72" }
+  - { id: 199, name: "Paradox Cave Lower - Left",      region: LightWorld_DeathMountain_East, note: "Paradox Cave" }
+  - { id: 200, name: "Paradox Cave Lower - Right",     region: LightWorld_DeathMountain_East, note: "Paradox Cave" }
+  - { id: 201, name: "Paradox Cave Lower - Far Right", region: LightWorld_DeathMountain_East, note: "Paradox Cave" }
+  - { id: 202, name: "Paradox Cave Lower - Middle",    region: LightWorld_DeathMountain_East, note: "Paradox Cave" }
+  - { id: 203, name: "Paradox Cave Upper - Left",      region: LightWorld_DeathMountain_East, note: "Paradox Cave" }
+  - { id: 204, name: "Paradox Cave Upper - Right",     region: LightWorld_DeathMountain_East, note: "Paradox Cave" }
+
+# ===========================================================================
+# Dungeon-interior registry for entrance shuffle (Phase C, Stage 2).
+#
+# Same redirect chain as caves, but DUNGEON interiors are rooms < 0x100:
+#   overworld door-slot --kOverworld_Entrance_Id[lx]--> entrance-id
+#   entrance-id         --kEntranceData_rooms[i]------> room (< 0x100)
+# Dungeon entrance-ids are a DISJOINT lower set (0x08..0x34); none fall in the
+# cave range 0x3C..0x72,0x83..0x84 (verified).
+#
+# Provenance: assets/tables.py kEntranceNames (index = entrance-id; [Room #NNN]
+# decimal prefix = room). entry_region cross-checked vs src/rando/logic_data.c
+# kRandoEdges door-edges.
+#
+# v1 SHUFFLED SET = the 6 cleanly single-overworld-entrance dungeons whose entry
+# region is the to_region of exactly one door-edge. Multi-entrance (Skull Woods,
+# Desert Palace) and 2-region (Eastern Palace) are recorded as `deferred` — they
+# need coordinated multi-door / multi-region handling (Stage 2b).
+#
+# Schema: dungeon_id, name, rooms:[entry room hex <0x100], entrance_ids:[hex],
+#   region (overworld area, informational), entry_region (logic region — the
+#   edge-overlay key).
+# ===========================================================================
+dungeons:
+  - dungeon_id: palace_of_darkness
+    name: "Palace of Darkness"
+    rooms: [0x04A]
+    entrance_ids: [0x26]
+    region: DarkWorld_NorthEast
+    entry_region: PalaceOfDarkness
+  - dungeon_id: swamp_palace
+    name: "Swamp Palace"
+    rooms: [0x028]
+    entrance_ids: [0x25]
+    region: DarkWorld_South
+    entry_region: SwampPalace
+  - dungeon_id: thieves_town
+    name: "Thieves' Town"
+    rooms: [0x0DB]
+    entrance_ids: [0x34]
+    region: DarkWorld_NorthWest
+    entry_region: ThievesTown
+  - dungeon_id: ice_palace
+    name: "Ice Palace"
+    rooms: [0x00E]
+    entrance_ids: [0x2D]
+    region: DarkWorld_South
+    entry_region: IcePalace_Lobby
+  - dungeon_id: tower_of_hera
+    name: "Tower of Hera"
+    rooms: [0x077]
+    entrance_ids: [0x33]
+    region: LightWorld_DeathMountain_West
+    entry_region: TowerOfHera_Lobby
+  - dungeon_id: hyrule_castle_tower
+    name: "Hyrule Castle Tower (Agahnim's Tower)"
+    rooms: [0x0E0]
+    entrance_ids: [0x24]
+    region: LightWorld_NorthEast
+    entry_region: HyruleCastleTower
+  - dungeon_id: eastern_palace
+    name: "Eastern Palace"
+    rooms: [0x0C9]
+    entrance_ids: [0x08]
+    region: LightWorld_NorthEast
+    entry_region: EasternPalace_Lobby
+    notes: >
+      Single overworld door. All EP locations bind to EasternPalace_Lobby (9) +
+      EasternPalace_PastArmos (10, child of 9), reached via the one door-edge
+      0x11->9. Region 8 ("EasternPalace") is an empty vestigial structural region
+      (no locations / no outbound edges), so the real entry region is the Lobby
+      (9) and EP fits the single-region model.
+  # Multi-entrance dungeons — MAIN door only (extras are "contained": they lead
+  # back into the same dungeon, so leaving them vanilla while shuffling the front
+  # door is safe). TR + GT entry regions have two inbound overworld edges; the
+  # edge-override remaps both together.
+  - dungeon_id: desert_palace
+    name: "Desert Palace (main)"
+    rooms: [0x084]
+    entrance_ids: [0x09]
+    region: LightWorld_South
+    entry_region: DesertPalace_Lobby
+    notes: "Main door 0x09 only; East 0x0A / West 0x0B / Boss 0x0C stay vanilla."
+  - dungeon_id: turtle_rock
+    name: "Turtle Rock (main)"
+    rooms: [0x0D6]
+    entrance_ids: [0x35]
+    region: DarkWorld_DeathMountain_East
+    entry_region: TurtleRock_Entrance
+    notes: >
+      Main door 0x35 only; mountainface doors stay vanilla. Entry region has two
+      inbound edges (LW+DW Death Mountain) — override remaps both. Medallion gate
+      lives in the door predicate (kept with the door).
+  - dungeon_id: ganons_tower
+    name: "Ganon's Tower (advanced opt-in)"
+    rooms: [0x00C]
+    entrance_ids: [0x37]
+    region: DarkWorld_DeathMountain_East
+    entry_region: GanonsTower_Lobby
+    notes: >
+      ADVANCED OPT-IN ONLY (shuffle_ganons_tower_entrance; default off). GT joins
+      the pool as the 11th dungeon. Its crystal-tower gate lives in the door-edge
+      predicate, so under the shuffle it gates whatever lands behind GT's door
+      behind crystals.tower crystals — circular at high crystals when that's a
+      crystal-bearing dungeon. The full-reachability retry gate rejects circular
+      permutations (never ships an unreachable seed); at crystals.tower=7 the retry
+      finds a clean permutation in testing, at 0 it always works. Two inbound
+      overworld edges (override remaps both); Pyramid Sanctum entrances stay vanilla.
+  - dungeon_id: misery_mire
+    name: "Misery Mire"
+    rooms: [0x098]
+    entrance_ids: [0x27]
+    region: DarkWorld_Mire
+    entry_region: MiseryMire_Entrance
+    notes: >
+      Single overworld door, single entry region (one inbound edge 0x02->0x16).
+      Medallion gate is in the door-edge predicate (kept with the door by the
+      override) — ALTTPR-consistent: MM's tablet is tapped at MM's overworld spot
+      to open the door regardless of what's behind it.
+
+# Deferred (NOT shuffled): only Skull Woods remains — unlike DP/TR/GT, its
+# multiple entrances are NOT "contained" (they open into genuinely separate
+# interior rooms), so the main-door-only approach doesn't apply; it needs a real
+# multi-entrance "move-as-a-unit" (or per-door) mechanism.
+#  - skull_woods: multi-entrance (front 0x28; secondaries 0x29/0x2A/0x2B + drop-ins).
+#  - desert_palace: multi-entrance (front 0x09; East 0x0A / West 0x0B / Boss 0x0C).
+#  - turtle_rock: multi-entrance (Main 0x35 + mountainface) + medallion + 2 sources.
+#  - ganons_tower: two overworld sources + goal region + crystal gate.

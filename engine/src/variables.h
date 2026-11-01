@@ -1112,6 +1112,13 @@
 #define link_has_crystals (*(uint8*)(g_ram+0xF37A))
 #define link_magic_consumption (*(uint8*)(g_ram+0xF37B))
 #define link_keys_earned_per_dungeon ((uint8*)(g_ram+0xF37C))
+// Retro genericKeys shared small-key counter. Reuses link_keys_earned_per_dungeon
+// index 15 (0xF38B): game-side dungeon indices only reach 13 (Ganon's Tower), so
+// indices 14/15 are unused by the per-dungeon array, and 0xF38B is exactly
+// ALTTPR's CurrentGenericKeys ($7EF38B). Lives inside the SRAM save block
+// (0xF000..0xF4FF) so it persists across save-and-quit for free. Read/written
+// only under Rando_IsGenericKeysActive() — see src/rando/rando.h.
+#define link_generic_keys (link_keys_earned_per_dungeon[15])
 #define sram_progress_indicator (*(uint8*)(g_ram+0xF3C5))
 #define sram_progress_flags (*(uint8*)(g_ram+0xF3C6))
 #define savegame_map_icons_indicator (*(uint8*)(g_ram+0xF3C7))
@@ -1476,8 +1483,6 @@ typedef struct OwScrollVars {
 
 extern const uint8 kLayoutQuadrantFlags[];
 extern const uint8 kVariousPacks[16];
-extern const uint8 kMaxBombsForLevel[];
-extern const uint8 kMaxArrowsForLevel[];
 extern const uint8 kReceiveItem_Tab1[76];
 extern const uint8 kHealthAfterDeath[21];
 extern const uint8 kReceiveItemGfx[76];

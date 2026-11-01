@@ -1,0 +1,174 @@
+# 10_desert_palace.yaml — Desert Palace dungeon (task 3.3 partial)
+#
+# Mechanically translated from
+# `../alttp_vt_randomizer/app/Region/Standard/DesertPalace.php` (MIT,
+# verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# Translation discipline (audit.md §0.10.2):
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `KeyP2` / `BigKeyP2` / `CompassP2` / `MapP2` → registry-canonical
+#     `SmallKey_DesertPalace` / `BigKey_DesertPalace` / `Compass_DesertPalace`
+#     / `Map_DesertPalace`.
+#   - PHP `PegasusBoots` → our `Boots`; PHP `RescueZelda` → registry-canonical
+#     `RescuedZelda`.
+#   - Phase B branches dropped:
+#       * canBootsClip / canSuperSpeed / canOneFrameClipOW → all FALSE
+#       * MagicMirror+Mire->canEnter Boss reroute (96-107, 122-128) — Phase B
+#         cross-region path requiring medallion + Mire dungeon graph; we drop
+#         it here and re-add when Mire/medallions land.
+#       * `region.wildCompasses` / `region.wildMaps` → false → those guards
+#         collapse to TRUE in the Boss predicate.
+#       * `region.bossNormalLocation` → true → the setFillRules dungeon-item
+#         restriction at Boss is unreachable; can_place defaults to TRUE.
+
+format_version: 1
+
+regions:
+  # External parent region — DP's overworld parent. Stubbed here for
+  # cross-file region reference; codegen's "last wins" merge handles
+  # collisions with the eventual full definition in LightWorld/South.
+  - id: LightWorld_South
+    name: "Light World - South (stub)"
+    source: "stub for cross-file region reference"
+
+  - id: DesertPalace_Lobby
+    name: "Desert Palace - Lobby"
+    dungeon: DesertPalace
+    source: "app/Region/Standard/DesertPalace.php:15-66"
+
+  - id: DesertPalace_PastLanmolas
+    name: "Desert Palace - Past Lanmolas"
+    dungeon: DesertPalace
+    parent: DesertPalace_Lobby
+    source: "app/Region/Standard/DesertPalace.php:60-62 (Boss + Prize past the Lanmolas room)"
+
+edges:
+  # DP `can_enter` (php:122-128):
+  #   RescueZelda
+  #   && (BookOfMudora
+  #        || canBootsClip+PegasusBoots                 -- Phase B (dropped)
+  #        || canOneFrameClipOW                          -- Phase B (dropped)
+  #        || (MagicMirror && Mire->canEnter))           -- cross-region; dropped
+  # Phase A collapses to RescuedZelda && BookOfMudora.
+  # Phase B Slice 4 §7: ALTTPR adds `canBootsClip && PegasusBoots` and
+  # `canOneFrameClipOW` as alternatives to BookOfMudora. Defaults
+  # (tricks=0, logic=NoGlitches) collapse both new branches to FALSE.
+  - from: LightWorld_South
+    to: DesertPalace_Lobby
+    predicate: "HAS_ITEM(RescuedZelda) AND (HAS_ITEM(BookOfMudora) OR CanBootsClip() OR CanOneFrameClipOW())"
+    source: "app/Region/Standard/DesertPalace.php:122-128 (can_enter closure)"
+
+  # Boss-room access: PHP boss predicate carries an inline gate that's the
+  # "past Lanmolas / over the rocks-or-mire-mirror barrier" → light torches
+  # → BigKey+SmallKey → boss kill. We split the spatial component (canLiftRocks)
+  # onto this edge; per-location predicates below carry the rest.
+  # The Phase B reroutes (BootsClip / SpinSpeed / OneFrameClipOW / Mirror+Mire)
+  # are dropped per audit §0.10.2.
+  # Phase B Slice 4 §7: ALTTPR's spatial gate to the Boss past Lanmolas is
+  # `canLiftRocks || (canBootsClip && PegasusBoots) || canSuperSpeed+spin ||
+  # canOneFrameClipOW || (MagicMirror && Mire->canEnter)`. We surface
+  # boots-clip + OWG; canSuperSpeed lacks a macro and the Mirror+Mire
+  # cross-region disjunct is dropped per audit §0.10.2.
+  - from: DesertPalace_Lobby
+    to: DesertPalace_PastLanmolas
+    predicate: "CanLiftRocks() OR CanBootsClip() OR CanOneFrameClipOW() OR (CanSuperSpeed() AND CanSpinSpeed())"
+    source: "app/Region/Standard/DesertPalace.php:96-102 (Boss spatial gate)"
+
+locations:
+  # DP - Big Chest (php:76-78): has(BigKeyP2).
+  - id: "Desert Palace - Big Chest"
+    name: "Desert Palace - Big Chest"
+    region: DesertPalace_Lobby
+    type: BigChest
+    vanilla_item: BigKey_DesertPalace
+    can_reach: "HAS_ITEM(BigKey_DesertPalace)"
+    source: "app/Region/Standard/DesertPalace.php:76-78"
+
+  # DP - Map Chest (php:56) — no setRequirements; default TRUE.
+  - id: "Desert Palace - Map Chest"
+    name: "Desert Palace - Map Chest"
+    region: DesertPalace_Lobby
+    type: Chest
+    vanilla_item: Map_DesertPalace
+    dungeon_item_class: map
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/DesertPalace.php:56"
+
+  # DP - Torch (php:88-90): has(PegasusBoots) → our Boots.
+  # Location\Dash type — requires the pegasus-boots dash to grab; the
+  # vanilla reward is Desert Palace's small key.
+  - id: "Desert Palace - Torch"
+    name: "Desert Palace - Torch"
+    region: DesertPalace_Lobby
+    type: Dash
+    vanilla_item: SmallKey_DesertPalace
+    can_reach: "HAS_ITEM(Boots)"
+    source: "app/Region/Standard/DesertPalace.php:88-90"
+
+  # DP - Big Key Chest (php:80-82): has(KeyP2) && canKillMostThings.
+  # CanKillMostThings takes an `enemies` arg (default 5 in PHP); call site
+  # passes only $world so the default applies.
+  - id: "Desert Palace - Big Key Chest"
+    name: "Desert Palace - Big Key Chest"
+    region: DesertPalace_Lobby
+    type: Chest
+    vanilla_item: BigKey_DesertPalace
+    dungeon_item_class: big_key
+    can_reach: "HAS_ITEM(SmallKey_DesertPalace) AND CanKillMostThings(world, 5)"
+    source: "app/Region/Standard/DesertPalace.php:80-82"
+
+  # DP - Compass Chest (php:84-86): has(KeyP2).
+  - id: "Desert Palace - Compass Chest"
+    name: "Desert Palace - Compass Chest"
+    region: DesertPalace_Lobby
+    type: Chest
+    vanilla_item: Compass_DesertPalace
+    dungeon_item_class: compass
+    can_reach: "HAS_ITEM(SmallKey_DesertPalace)"
+    source: "app/Region/Standard/DesertPalace.php:84-86"
+
+  # DP - Boss (php:96-107):
+  #   canEnter                                            -- modeled at edge above
+  #   && (canLiftRocks || clip/mirror reroutes)            -- canLiftRocks on edge above; reroutes dropped
+  #   && canLightTorches
+  #   && has(BigKeyP2) && has(KeyP2)
+  #   && boss->canBeat(items, locations)                   -- Lanmolas: HasSword(1) || Hammer || arrows || FireRod || IceRod || Byrna || Somaria
+  #   && (!wildCompasses || ...)                           -- collapses to TRUE (wildCompasses=false)
+  #   && (!wildMaps || ...)                                -- collapses to TRUE (wildMaps=false)
+  # Region edge handles canEnter + canLiftRocks; this predicate carries the rest.
+  - id: "Desert Palace - Boss"
+    name: "Desert Palace - Boss"
+    region: DesertPalace_PastLanmolas
+    type: Drop
+    vanilla_item: BossHeartContainer
+    can_reach: "CanLightTorches() AND HAS_ITEM(BigKey_DesertPalace) AND HAS_ITEM(SmallKey_DesertPalace) AND CanKillBoss(DesertPalace)"
+    # setFillRules (php:108-116):
+    #   if (!bossNormalLocation && item is dungeon-item-class) return false
+    #   return !in_array(item, [KeyP2, BigKeyP2])
+    # Phase A pins bossNormalLocation=true so the first clause is unreachable;
+    # the second clause forbids placing DP's own small-key/big-key here.
+    can_place: "NOT OP_ITEM_IS(SmallKey_DesertPalace) AND NOT OP_ITEM_IS(BigKey_DesertPalace)"
+    # setAlwaysAllow (php:117-120): when bossNormalLocation=true (default),
+    # DP's own compass/map are allowed at the boss slot.
+    always_allow: "OP_ITEM_IS(Compass_DesertPalace) OR OP_ITEM_IS(Map_DesertPalace)"
+    source: "app/Region/Standard/DesertPalace.php:96-120"
+
+  # DP - Prize (php:62, 130): can_complete = Boss canAccess. Same predicate.
+  - id: "Desert Palace - Prize"
+    name: "Desert Palace - Prize"
+    region: DesertPalace_PastLanmolas
+    type: Prize_Pendant
+    vanilla_item: Prize_RedPendant
+    can_reach: "CanLightTorches() AND HAS_ITEM(BigKey_DesertPalace) AND HAS_ITEM(SmallKey_DesertPalace) AND CanKillBoss(DesertPalace)"
+    source: "app/Region/Standard/DesertPalace.php:62, 92-94, 130 (can_complete = Boss access)"
+
+macros:
+  # CanKillLanmolas — DP boss kill predicate.
+  # PHP (Boss.php:75-79):
+  #   hasSword() || Hammer || canShootArrows($world) || FireRod || IceRod
+  #     || CaneOfByrna || CaneOfSomaria
+  # Phase A: canShootArrows($world) defaults to min_level=1.
+  - name: CanKillLanmolas
+    parameters: [world]
+    body: "(HasSword(1) OR HAS_ITEM(Hammer) OR CanShootArrowsL1() OR HAS_ITEM(FireRod) OR HAS_ITEM(IceRod) OR HAS_ITEM(CaneOfByrna) OR HAS_ITEM(CaneOfSomaria)) AND NeedsBossSoul(Soul_Lanmolas)"
+    source: "app/Boss.php:75-79 (Boss::canBeat for Lanmolas)"

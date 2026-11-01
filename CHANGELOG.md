@@ -1,12 +1,32 @@
 # Changelog
 
+## v4.0
+
+- Added English, Spanish, Portuguese, Italian, French, German and Russian game and menu translations.
+- Added a startup home with an animated title, automatic system language, Mods and Quality of Life settings.
+- Reworked menus, touch navigation, item grids, equipment icons and the bottom-screen HUD; hearts resize and fill in Zelda-style rows.
+- Added character skin mods with previews, automatic SD discovery and separate quest saves.
+- Added on-device randomizer generation with Open, Standard, Inverted, Retro and Triforce Hunt presets, saved seeds and separate progress.
+- Added exact ALttPR full-spoiler JSON imports for supported rules and goals.
+- Added L/R item cycling, improved Pegasus Boots, sword pickups and repeated block pushing.
+- Added reduced flashes, muted low-health beeps, brighter dark rooms and eight-heart fairies.
+- Added 99-bomb/arrow limits, a 9,999-rupee wallet, expanded inventory, permanent shovel, two-way Mirror and the Kakariko shortcut.
+- Extended WIDE menus and dungeon scenery with neighboring room tiles and matching floor patterns.
+- Fixed room-transition walls, scrolling seams, duplicated sprites, palette mismatches and bottom-edge gaps; disconnected cave chambers now fade between views.
+- Fixed map transitions, camera alignment and returning from dungeon and overworld maps.
+- Fixed lingering lamp masks when leaving illuminated dark rooms.
+- Added coordinated startup, Continue and Triforce fades; removed loading screens and added a missing-ROM notice with the required SD folder.
+- Added title-animation and menu sound effects, preserved stereo panning and stopped previous music carrying into restarted intros.
+- Fixed Game Over fairy behavior and synchronized bottom-screen death colors and fades.
+- Fixed translated file menus, confirmation/cancellation and startup or language-switch input handling.
+- Improved save recovery, autosave eligibility and isolation between normal games, mods and randomizer seeds.
+- Fixed bottom-screen buffer corruption and refresh issues during uploads, restarts and menu changes.
+- Expanded diagnostic dumps with complete screen/memory captures and reloadable checkpoints; updated dump progress presentation.
+- Disabled developer test controls and B+L scenario cycling in release builds.
+
 ## v3.2
 
 - Optimized update downloads and installation.
-- Fixed black screens and missing audio after Restart and ROM reselection.
-
-## v3.2-E1
-
 - Fixed black screens and missing audio after Restart and ROM reselection.
 
 ## v3.1
@@ -17,55 +37,6 @@
 - Simplified Settings and combined Restart with ROM selection.
 - Fixed stale world colors after mirror and portal transitions.
 - Added touch history to diagnostic dumps.
-
-## v3.1-E5
-
-- Fixed touch press and release detection with residual coordinates.
-- Added recent touch inputs to diagnostic dumps.
-- Fixed shifted bottom-screen touch coordinates.
-- Improved bottom-tab touch targets and reduced navigation delay.
-- Added GitHub updates with Stable and Pre-release channels.
-- Added verified downloads and in-game update installation.
-- Added paginated changelogs with matching top and bottom menu styles.
-- Combined Restart and ROM selection and simplified Settings.
-- Fixed Update touch controls and blank bottom-screen startup.
-- Fixed stale overworld colors after mirror and portal transitions.
-
-## v3.1-E4
-
-- Fixed shifted bottom-screen touch coordinates.
-- Improved bottom-tab touch targets and reduced navigation delay.
-- Added GitHub updates with Stable and Pre-release channels.
-- Added verified downloads and in-game update installation.
-- Added paginated changelogs with matching top and bottom menu styles.
-- Combined Restart and ROM selection and simplified Settings.
-- Fixed Update touch controls and blank bottom-screen startup.
-- Fixed stale overworld colors after mirror and portal transitions.
-
-## v3.1-E3
-
-- Improved bottom-tab touch targets and reduced navigation delay.
-- Added GitHub updates with Stable and Pre-release channels.
-- Added verified downloads and in-game update installation.
-- Added paginated changelogs with matching top and bottom menu styles.
-- Combined Restart and ROM selection and simplified Settings.
-- Fixed Update touch controls and blank bottom-screen startup.
-- Fixed stale overworld colors after mirror and portal transitions.
-
-## v3.1-E2 (local experimental)
-
-- Fixed unresponsive Update controls on Old and New 3DS.
-- Fixed missed touch navigation and blank bottom-screen startup on Old 3DS.
-- Moved Update above Restart and enlarged the settings buttons evenly.
-- Fixed unreadable update hints and matched top-screen changelogs to the menu style.
-
-## v3.1-E1 (local experimental)
-
-- Added GitHub updates with Stable and Pre-release channels.
-- Added startup update checks, verified downloads and in-app installation.
-- Added release changelogs on the top screen with page controls.
-- Combined Restart and ROM selection; removed Remap Buttons from settings.
-- Fixed stale overworld colors after mirror and portal world transitions.
 
 ## v3.0
 

@@ -1,0 +1,81 @@
+# 12_hyrule_castle_tower.yaml — Hyrule Castle Tower (Agahnim 1) dungeon
+# (task 3.3 partial)
+#
+# Mechanically translated from
+# `../alttp_vt_randomizer/app/Region/Standard/HyruleCastleTower.php` (MIT,
+# verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# Translation discipline (audit.md §0.10.2):
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `KeyA1` / `BigKeyA1` / `CompassA1` / `MapA1` → registry-canonical
+#     `SmallKey_HyruleCastleTower` (HCT has no big key / map / compass in
+#     vanilla; the region_items list at php:18-27 is the registry-shape
+#     declaration only).
+#   - PHP `RescueZelda` → `RescuedZelda`.
+#   - PHP item.require.Lamp default = 1; PHP `Lamp` → `Lamp` (no remap).
+#   - Phase B branches dropped:
+#       * `mode.weapons == 'swordless'` disjuncts in can_enter (php:75) and
+#         can_complete (php:65) — swordless not modeled in Phase A. The
+#         `Hammer / BugCatchingNet` branches that only apply in swordless
+#         are dropped here; they re-enter when swordless mode lands.
+#   - Entry parent region: LightWorld_NorthEast (already declared in
+#     `assets/rando/logic.yaml`); HCT is entered via the corrupted castle
+#     tower entrance on the LWNE overworld.
+
+format_version: 1
+
+regions:
+  - id: HyruleCastleTower
+    name: "Hyrule Castle Tower"
+    dungeon: HyruleCastleTower
+    source: "app/Region/Standard/HyruleCastleTower.php:14-48"
+
+edges:
+  # HCT `can_enter` (php:70-76):
+  #   canKillMostThings($world, 8)
+  #   && has(RescueZelda)
+  #   && (has(Cape) || hasSword(2) || (swordless && Hammer))
+  # §4 swordless: the swordless disjunct is now wired (inert under randomized).
+  - from: LightWorld_NorthEast
+    to: HyruleCastleTower
+    predicate: "CanKillMostThings(world, 8) AND HAS_ITEM(RescuedZelda) AND (HAS_ITEM(Cape) OR HasSword2() OR (OP_MODEWEAPONS_EQ(swordless) AND HAS_ITEM(Hammer)))"
+    source: "app/Region/Standard/HyruleCastleTower.php:70-76 (can_enter closure)"
+
+locations:
+  # HCT - Room 03 (php:41) — no setRequirements; default TRUE within region.
+  - id: "Castle Tower - Room 03"
+    name: "Castle Tower - Room 03"
+    region: HyruleCastleTower
+    type: Chest
+    vanilla_item: SmallKey_HyruleCastleTower
+    dungeon_item_class: small_key
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/HyruleCastleTower.php:41"
+
+  # HCT - Dark Maze (php:58-60):
+  #   has(Lamp, item.require.Lamp default 1) AND has(KeyA1)
+  - id: "Castle Tower - Dark Maze"
+    name: "Castle Tower - Dark Maze"
+    region: HyruleCastleTower
+    type: Chest
+    vanilla_item: SmallKey_HyruleCastleTower
+    dungeon_item_class: small_key
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(SmallKey_HyruleCastleTower)"
+    source: "app/Region/Standard/HyruleCastleTower.php:58-60"
+
+  # HCT - Agahnim (php:62-68): can_complete; prize_location uses same predicate.
+  #   canEnter
+  #   && has(KeyA1, 2)
+  #   && has(Lamp, item.require.Lamp default 1)
+  #   && (hasSword() || (swordless && (Hammer || BugCatchingNet)))
+  # canEnter is on the entry edge above. §4 swordless: Agahnim 1 is defeatable
+  # with Hammer OR BugCatchingNet under swordless (runtime: the energy-ball
+  # reflection accepts hammer/net — see Rando_IsSwordlessActive). Inert under the
+  # default (randomized) → reduces to HasSword(1), default-digest-preserving.
+  - id: "Agahnim"
+    name: "Agahnim"
+    region: HyruleCastleTower
+    type: Prize_Event
+    vanilla_item: DefeatAgahnim
+    can_reach: "HAS_AMOUNT(SmallKey_HyruleCastleTower, 2) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND (HasSword(1) OR (OP_MODEWEAPONS_EQ(swordless) AND (HAS_ITEM(Hammer) OR HAS_ITEM(BugCatchingNet)))) AND NeedsBossSoul(Soul_Agahnim)"
+    source: "app/Region/Standard/HyruleCastleTower.php:62-68 (can_complete + prize)"

@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/EstebanPdN/zelda-alttp-3ds/releases/tag/v3.2"><img src="docs/badges/version.svg" alt="Stable release: v3.2" height="22"></a>
+  <a href="https://github.com/EstebanPdN/zelda-alttp-3ds/releases/tag/v4.0"><img src="docs/badges/version.svg" alt="Stable release: v4.0" height="22"></a>
   <a href="#download-and-installation"><img src="docs/badges/platform.svg" alt="Nintendo 3DS" height="22"></a>
   <a href="#updates"><img src="docs/badges/updater.svg" alt="Updates: built in" height="22"></a>
   <a href="#license-and-legal-notice"><img src="docs/badges/license.svg" alt="Component-specific licenses" height="22"></a>
@@ -43,6 +43,11 @@ This project is based on open-source work from:
 No ROM or extracted game asset package is distributed in this repository. Each
 user must provide their own legally obtained USA, unheadered ROM on their own
 3DS SD card.
+
+Version [4.0](docs/v4.0.md) adds seven languages, character mods, a native
+randomizer, fifteen quality-of-life options and refined dual-screen presentation.
+See [development and build boundaries](docs/development.md) for source organization
+and the disabled developer scenarios.
 
 ## Features
 
@@ -91,11 +96,11 @@ user must provide their own legally obtained USA, unheadered ROM on their own
 ## Download and installation
 
 <p>
-  <a href="https://github.com/EstebanPdN/zelda-alttp-3ds/releases/download/v3.2/zelda3-3ds-v3.2.cia"><img src="docs/images/download-cia.svg" alt="Download A Link to the Past 3DS CIA" width="210" height="46"></a>
-  <a href="https://github.com/EstebanPdN/zelda-alttp-3ds/releases/download/v3.2/zelda3-3ds-v3.2.3dsx"><img src="docs/images/download-3dsx.svg" alt="Download Homebrew Launcher 3DSX" width="210" height="46"></a>
+  <a href="https://github.com/EstebanPdN/zelda-alttp-3ds/releases/download/v4.0/zelda3-3ds-v4.0.cia"><img src="docs/images/download-cia.svg" alt="Download A Link to the Past 3DS CIA" width="210" height="46"></a>
+  <a href="https://github.com/EstebanPdN/zelda-alttp-3ds/releases/download/v4.0/zelda3-3ds-v4.0.3dsx"><img src="docs/images/download-3dsx.svg" alt="Download Homebrew Launcher 3DSX" width="210" height="46"></a>
 </p>
 
-**Stable: [v3.2](https://github.com/EstebanPdN/zelda-alttp-3ds/releases/tag/v3.2).**
+**Stable: [v4.0](https://github.com/EstebanPdN/zelda-alttp-3ds/releases/tag/v4.0).**
 
 Install the CIA, then create this directory on the SD card:
 
@@ -134,7 +139,7 @@ GitHub supplies automatic source-code archives for each tag.
 The release page shows the QR code, a short changelog and bug-report instructions.
 Detailed development notes are preserved inside the source snapshot.
 
-Latest stable release: [v3.2](https://github.com/EstebanPdN/zelda-alttp-3ds/releases/tag/v3.2)
+Latest stable release: [v4.0](https://github.com/EstebanPdN/zelda-alttp-3ds/releases/tag/v4.0)
 
 See [CHANGELOG.md](CHANGELOG.md) for the changes since v2.8.
 
@@ -207,13 +212,11 @@ read its changelog on the top screen, with Prev/Next below for more pages.
 Choose Download Update and confirm installation, then reopen the game.
 Save in-game before installing. Startup checks also indicate newer releases.
 
-Version [v3.2](https://github.com/EstebanPdN/zelda-alttp-3ds/releases/tag/v3.2)
-is the latest stable release. Select the Stable channel to install it. It fixes Restart retaining stale game RAM after ROM
-reselection, which could leave gameplay black and silent. It also batches updater
-SD transfers and prevents downloads from being starved by rendering.
+Version [v4.0](https://github.com/EstebanPdN/zelda-alttp-3ds/releases/tag/v4.0)
+is the latest stable release. Select the Stable channel to install it.
 
-Settings is Screen, Turbo Speed, Developer, Update, Restart. Restart opens
-the ROM selector and starts the selected ROM fresh; existing saves remain.
+Settings is Screen, Turbo Speed, Developer, Update, Restart. Restart returns to
+the startup home and starts the game fresh; existing saves remain.
 
 Version 3.1 uses the native HID contact flag for touch press and release detection,
 including startup and releases with residual coordinates. Physical coordinates

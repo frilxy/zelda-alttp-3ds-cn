@@ -1,0 +1,265 @@
+_generated_by: assets/scripts/gen_chain_boss_entrances.py
+base_index: 133
+count: 9
+entries:
+- entrance_index: 133
+  name: Chain Boss Entrance - Eastern Palace
+  rando_dungeon: 1
+  rando_dungeon_enum: kRandoDungeon_EasternPalace
+  home_entrance: 8
+  main_exit_room: 201
+  room: 200
+  scroll_xy:
+  - 256
+  - 272
+  player_xy:
+  - 376
+  - 424
+  camera_xy:
+  - 383
+  - 391
+  blockset: 5
+  music: Palace
+  palace: East
+  doorway_orientation: 0
+  plane: 0
+  ladder_level: 0
+  quadrants:
+  - single_x
+  - single_y
+  - lower_right
+  floor: 0
+  house_exit_door:
+  - none
+- entrance_index: 134
+  name: Chain Boss Entrance - Desert Palace
+  rando_dungeon: 2
+  rando_dungeon_enum: kRandoDungeon_DesertPalace
+  home_entrance: 9
+  main_exit_room: 132
+  room: 51
+  scroll_xy:
+  - 0
+  - 272
+  player_xy:
+  - 120
+  - 424
+  camera_xy:
+  - 127
+  - 391
+  blockset: 18
+  music: Palace
+  palace: Desert
+  doorway_orientation: 0
+  plane: 0
+  ladder_level: 0
+  quadrants:
+  - single_x
+  - single_y
+  - lower_left
+  floor: -1
+  house_exit_door:
+  - none
+- entrance_index: 135
+  name: Chain Boss Entrance - Tower of Hera
+  rando_dungeon: 3
+  rando_dungeon_enum: kRandoDungeon_TowerOfHera
+  home_entrance: 51
+  main_exit_room: 119
+  room: 7
+  scroll_xy:
+  - 256
+  - 35
+  player_xy:
+  - 432
+  - 144
+  camera_xy:
+  - 383
+  - 154
+  blockset: 5
+  music: Palace
+  palace: Tower
+  doorway_orientation: 0
+  plane: 0
+  ladder_level: 0
+  quadrants:
+  - double_x
+  - double_y
+  - upper_right
+  floor: 1
+  house_exit_door:
+  - none
+- entrance_index: 136
+  name: Chain Boss Entrance - Palace of Darkness
+  rando_dungeon: 5
+  rando_dungeon_enum: kRandoDungeon_PalaceOfDarkness
+  home_entrance: 38
+  main_exit_room: 74
+  room: 90
+  scroll_xy:
+  - 256
+  - 272
+  player_xy:
+  - 376
+  - 424
+  camera_xy:
+  - 383
+  - 391
+  blockset: 7
+  music: Dungeon
+  palace: Dark
+  doorway_orientation: 0
+  plane: 0
+  ladder_level: 0
+  quadrants:
+  - single_x
+  - single_y
+  - lower_right
+  floor: 0
+  house_exit_door:
+  - none
+- entrance_index: 137
+  name: Chain Boss Entrance - Swamp Palace
+  rando_dungeon: 6
+  rando_dungeon_enum: kRandoDungeon_SwampPalace
+  home_entrance: 37
+  main_exit_room: 40
+  room: 6
+  scroll_xy:
+  - 0
+  - 272
+  player_xy:
+  - 120
+  - 424
+  camera_xy:
+  - 127
+  - 391
+  blockset: 8
+  music: Dungeon
+  palace: Water
+  doorway_orientation: 0
+  plane: 0
+  ladder_level: 0
+  quadrants:
+  - single_x
+  - single_y
+  - lower_left
+  floor: 0
+  house_exit_door:
+  - none
+- entrance_index: 138
+  name: Chain Boss Entrance - Thieves Town
+  rando_dungeon: 8
+  rando_dungeon_enum: kRandoDungeon_ThievesTown
+  home_entrance: 52
+  main_exit_room: 219
+  room: 172
+  scroll_xy:
+  - 256
+  - 272
+  player_xy:
+  - 376
+  - 424
+  camera_xy:
+  - 383
+  - 391
+  blockset: 10
+  music: Dungeon
+  palace: Town
+  doorway_orientation: 0
+  plane: 0
+  ladder_level: 0
+  quadrants:
+  - single_x
+  - single_y
+  - lower_right
+  floor: -1
+  house_exit_door:
+  - none
+- entrance_index: 139
+  name: Chain Boss Entrance - Ice Palace
+  rando_dungeon: 9
+  rando_dungeon_enum: kRandoDungeon_IcePalace
+  home_entrance: 45
+  main_exit_room: 14
+  room: 222
+  scroll_xy:
+  - 256
+  - 41
+  player_xy:
+  - 376
+  - 150
+  camera_xy:
+  - 383
+  - 160
+  blockset: 11
+  music: Dungeon
+  palace: Ice
+  doorway_orientation: 0
+  plane: 0
+  ladder_level: 0
+  quadrants:
+  - single_x
+  - single_y
+  - upper_right
+  floor: 0
+  house_exit_door:
+  - none
+- entrance_index: 140
+  name: Chain Boss Entrance - Misery Mire
+  rando_dungeon: 10
+  rando_dungeon_enum: kRandoDungeon_MiseryMire
+  home_entrance: 39
+  main_exit_room: 152
+  room: 144
+  scroll_xy:
+  - 0
+  - 272
+  player_xy:
+  - 120
+  - 424
+  camera_xy:
+  - 127
+  - 391
+  blockset: 12
+  music: Dungeon
+  palace: Mud
+  doorway_orientation: 0
+  plane: 0
+  ladder_level: 0
+  quadrants:
+  - single_x
+  - single_y
+  - lower_left
+  floor: 0
+  house_exit_door:
+  - none
+- entrance_index: 141
+  name: Chain Boss Entrance - Turtle Rock
+  rando_dungeon: 11
+  rando_dungeon_enum: kRandoDungeon_TurtleRock
+  home_entrance: 53
+  main_exit_room: 214
+  room: 164
+  scroll_xy:
+  - 0
+  - 272
+  player_xy:
+  - 120
+  - 424
+  camera_xy:
+  - 127
+  - 391
+  blockset: 13
+  music: Dungeon
+  palace: Mountain
+  doorway_orientation: 0
+  plane: 0
+  ladder_level: 0
+  quadrants:
+  - single_x
+  - single_y
+  - lower_left
+  floor: 0
+  house_exit_door:
+  - none

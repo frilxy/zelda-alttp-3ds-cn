@@ -1,0 +1,189 @@
+# 40_lightworld_northwest.yaml — Light World North West region
+#
+# Mechanically translated from ALTTPR PHP closures at
+# `../alttp_vt_randomizer/app/Region/Standard/LightWorld/NorthWest.php`
+# (MIT, verified per CLAUDE.md "Claim-grounding discipline").
+#
+# Phase A translation discipline (audit.md §0.10.2):
+#   - All glitch/trick branches (canBootsClip, canOneFrameClipOW,
+#     canSuperSpeed, canMirrorClip, canMirrorWrap, canFakeFlipper, canOWYBA,
+#     canBunnyRevive, canBunnySurf, canSuperBunny, canWaterWalk,
+#     canTransitionWrapped) are pinned false → branches drop.
+#   - `itemPlacement === 'basic'` and `itemPlacement === 'advanced'` branches
+#     are dropped per audit §0.10.2 (Phase A pins itemPlacement=basic
+#     consistently; the `!== 'basic'` test is FALSE in Phase A, collapsing
+#     those disjuncts).
+#   - PHP `PegasusBoots` → our `Boots`.
+#   - PHP `Powder` → our `MagicPowder`.
+#   - PHP `PendantOfCourage/Wisdom/Power` → `OP_HAS_PRIZE(Prize_GreenPendant/
+#     Prize_BluePendant/Prize_RedPendant)` (the engine resolves which dungeon
+#     currently holds each pendant via prize-shuffle).
+#   - The `can_enter` closure (php:141-143) requires RescueZelda → modeled
+#     as the edge from LinksHouse to this region.
+
+format_version: 1
+
+regions:
+  - id: LightWorld_NorthWest
+    name: "Light World - North West"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:14-147"
+
+edges:
+  # NorthWest entry — `can_enter` (php:141-143) only requires RescueZelda.
+  # LinksHouse already provides the world-state gate (Standard requires
+  # RescuedZelda before leaving the sewers), so the edge is TRUE() once
+  # the LinksHouse->LightWorld_NorthEast edge has resolved RescuedZelda
+  # in Standard mode; in Open/Retro the source's can_traverse handles it.
+  - from: LightWorld_NorthEast
+    to: LightWorld_NorthWest
+    predicate: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:141-143 (can_enter = RescueZelda)"
+
+locations:
+  # `Master Sword Pedestal` (php:86-91): pendant trifecta.
+  # The `itemPlacement!=='basic' || has(BookOfMudora)` branch collapses to
+  # TRUE() in Phase A (`itemPlacement=basic` pinned → `!== 'basic'` false →
+  # require BookOfMudora). PHP `PendantOfCourage/Wisdom/Power` map to
+  # OP_HAS_PRIZE on the green/blue/red pendant respectively.
+  - id: "Master Sword Pedestal"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(BookOfMudora) AND OP_HAS_PRIZE(Prize_RedPendant) AND OP_HAS_PRIZE(Prize_BluePendant) AND OP_HAS_PRIZE(Prize_GreenPendant)"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:86-91"
+
+  # `King's Tomb` (php:93-102):
+  #   Boots AND (canBootsClip || canLiftDarkRocks || canOneFrameClipOW
+  #              || (canSuperSpeed && spin) || (MagicMirror && DW NW && ...))
+  # Phase A retained `Boots AND CanLiftDarkRocks`. Phase B Slice 4 §7
+  # surfaces boots-clip (note: CanBootsClip already AND's HAS_ITEM(Boots)
+  # internally, but the outer `HAS_ITEM(Boots)` requirement is preserved
+  # so the predicate's existing structure is unchanged when tricks=0) and
+  # the OWG bypass. canSuperSpeed lacks a macro.
+  - id: "King's Tomb"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(Boots) AND (CanLiftDarkRocks() OR CanBootsClip() OR CanOneFrameClipOW() OR (CanSuperSpeed() AND CanSpinSpeed()))"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:93-102"
+
+  # `Kakariko Tavern` (php:34) — no setRequirements; default TRUE.
+  - id: "Kakariko Tavern"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:34"
+
+  # `Chicken House` (php:35) — no setRequirements; default TRUE.
+  - id: "Chicken House"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:35"
+
+  # `Kakariko Well` chests (php:36-40) — no setRequirements; default TRUE.
+  - id: "Kakariko Well - Top"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:36"
+
+  - id: "Kakariko Well - Left"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:37"
+
+  - id: "Kakariko Well - Middle"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:38"
+
+  - id: "Kakariko Well - Right"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:39"
+
+  - id: "Kakariko Well - Bottom"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:40"
+
+  # `Blind's Hideout` chests (php:41-45) — no setRequirements; default TRUE.
+  - id: "Blind's Hideout - Top"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:41"
+
+  - id: "Blind's Hideout - Left"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:42"
+
+  - id: "Blind's Hideout - Right"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:43"
+
+  - id: "Blind's Hideout - Far Left"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:44"
+
+  - id: "Blind's Hideout - Far Right"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:45"
+
+  # `Pegasus Rocks` (php:104-106): Boots.
+  - id: "Pegasus Rocks"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(Boots)"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:104-106"
+
+  # `Bottle Merchant` (php:47) — no setRequirements; default TRUE.
+  - id: "Bottle Merchant"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:47"
+
+  # `Magic Bat` (php:108-122): Powder AND the same Hammer-or-mirror route as
+  # the Smithy peg pocket. The older Phase-A simplification that treated the
+  # mirror route as Hammer-subsumed became stale once DarkWorld_NorthWest
+  # gained its complete Mitt entry edge.
+  - id: "Magic Bat"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(MagicPowder) AND CanReachSmithPegPocket()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:108-122"
+
+  # `Sick Kid` (php:124-126): hasABottle().
+  - id: "Sick Kid"
+    region: LightWorld_NorthWest
+    can_reach: "HasABottle()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:124-126"
+
+  # `Lost Woods Hideout` (php:50) — no setRequirements; default TRUE.
+  - id: "Lost Woods Hideout"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:50"
+
+  # `Lumberjack Tree` (php:128-130): DefeatAgahnim AND Boots.
+  - id: "Lumberjack Tree"
+    region: LightWorld_NorthWest
+    can_reach: "HAS_ITEM(DefeatAgahnim) AND HAS_ITEM(Boots)"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:128-130"
+
+  # `Graveyard Ledge` (php:132-139):
+  #   (canBootsClip && Boots) || (canSuperSpeed && spin) ||
+  #   (canOneFrameClipOW || (MagicMirror && DW NW && (MoonPearl || OWYBA+bottle
+  #                                                   || canBunnyRevive)))
+  #   AND canBombThings for the back-room bomb wall.
+  # Phase A retained the MagicMirror cross-region path. Phase B Slice 4 §7
+  # surfaces boots-clip + OWG + the pearl-bypass disjunct on the
+  # MagicMirror inner conjunction. canSuperSpeed + canBunnyRevive lack
+  # macros so those disjuncts drop.
+  - id: "Graveyard Ledge"
+    region: LightWorld_NorthWest
+    can_reach: "((HAS_ITEM(MagicMirror) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass()) AND OP_REGION_REACHABLE(DarkWorld_NorthWest)) OR CanBootsClip() OR CanOneFrameClipOW() OR (CanSuperSpeed() AND CanSpinSpeed())) AND CanBombThings()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:132-139"
+
+  # `Mushroom` (php:53) — no setRequirements; default TRUE.
+  - id: "Mushroom"
+    region: LightWorld_NorthWest
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthWest.php:53"
+
+macros: []

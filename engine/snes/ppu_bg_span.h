@@ -4,6 +4,14 @@
 #include <stdbool.h>
 #include <string.h>
 
+// The opaque row path pays off with the ARM SIMD pair select below; the
+// portable version is slower than the per-pixel loop it would replace.
+#if defined(__3DS__) && defined(__arm__) && !defined(__thumb__)
+#define PPU_OPAQUE_ROWS 1
+#else
+#define PPU_OPAQUE_ROWS 0
+#endif
+
 static inline bool PpuRowIsOpaque(uint32_t pixels) {
   // There is a zero nibble iff subtracting one borrows through a nibble's
   // high bit while that bit was clear. Only the all-nonzero result is used.

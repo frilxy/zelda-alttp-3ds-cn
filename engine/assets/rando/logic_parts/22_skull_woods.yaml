@@ -1,0 +1,140 @@
+# 22_skull_woods.yaml — Skull Woods translation
+#
+# Mechanically translated from
+# `../alttp_vt_randomizer/app/Region/Standard/SkullWoods.php` (MIT, verified
+# per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# Phase A axis pins (per audit.md §0.10.2) collapse the PHP closures:
+#   - region.wildKeys / wildBigKeys / wildMaps / wildCompasses → false
+#   - region.bossNormalLocation → true
+#   - region.forceSkullWoodsKey → false (Phase B forced-key shuffle option)
+#   - itemPlacement === 'advanced' / 'basic' → both false (standard mode)
+#   - mode.weapons === 'swordless' → false
+#   - accessibility === 'locations' → false (default accessibility=items)
+#   - canOWYBA / canBunnyRevive / canDungeonRevive → all false (NoGlitches)
+#
+# PHP item-name remappings:
+#   KeyD3     → SmallKey_SkullWoods
+#   BigKeyD3  → BigKey_SkullWoods
+#   MapD3     → Map_SkullWoods
+#   CompassD3 → Compass_SkullWoods
+#   PegasusBoots → Boots
+#
+# Boss: Mothula — translated from `app/Boss.php:96-102`.
+
+format_version: 1
+
+regions:
+  # External parent — Skull Woods's overworld region. Stubbed.
+  - id: DarkWorld_NorthWest
+    name: "Dark World - North West (stub)"
+    source: "stub for cross-file region reference"
+
+  - id: SkullWoods
+    name: "Skull Woods"
+    dungeon: SkullWoods
+    source: "app/Region/Standard/SkullWoods.php:15-71"
+
+edges:
+  # Skull Woods can_enter (php:153-161). Phase A collapse:
+  #   has(RescueZelda)
+  #   && (itemPlacement!='basic' || <basic-mode gate>)   [TRUE]
+  #   && (canDungeonRevive || MoonPearl || canOWYBA+bottle || canBunnyRevive)
+  #   && <NorthWestDarkWorld.canEnter>
+  # Phase A retained `RescuedZelda AND MoonPearl`. Phase B Slice 4 §7
+  # surfaces the pearl-bypass alternative; canDungeonRevive and
+  # canBunnyRevive lack first-class macros in this fork (Phase B
+  # reservation) so their disjuncts drop. Default `tricks=0` collapses
+  # CanPearlBypass to FALSE → Phase A shape.
+  - from: DarkWorld_NorthWest
+    to: SkullWoods
+    predicate: "HAS_ITEM(RescuedZelda) AND (HAS_ITEM(MoonPearl) OR CanPearlBypass())"
+    source: "app/Region/Standard/SkullWoods.php:153-161 (can_enter closure)"
+
+locations:
+  # ===========================================================================
+  # Skull Woods — predicates from SkullWoods.php:104-167
+  # ===========================================================================
+
+  # Compass Chest (php:59) — no setRequirements; default TRUE.
+  - id: "Skull Woods - Compass Chest"
+    region: SkullWoods
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/SkullWoods.php:59"
+
+  # Map Chest (php:60) — no setRequirements; default TRUE.
+  - id: "Skull Woods - Map Chest"
+    region: SkullWoods
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/SkullWoods.php:60"
+
+  # Pot Prison (php:62) — no setRequirements; default TRUE.
+  - id: "Skull Woods - Pot Prison"
+    region: SkullWoods
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/SkullWoods.php:62"
+
+  # Pinball Room (php:63, 106-108). No setRequirements (default TRUE).
+  # setFillRules: !forceSkullWoodsKey || item == KeyD3. forceSkullWoodsKey=false
+  # → first disjunct TRUE → no restriction.
+  - id: "Skull Woods - Pinball Room"
+    region: SkullWoods
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/SkullWoods.php:63, 106-108"
+
+  # Big Key Chest (php:58) — no setRequirements; default TRUE.
+  - id: "Skull Woods - Big Key Chest"
+    region: SkullWoods
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/SkullWoods.php:58"
+
+  # Big Chest (php:110-116): BigKeyD3. Always-allow / setFillRules
+  # accessibility != 'locations' branches vacuous under default
+  # accessibility=items.
+  - id: "Skull Woods - Big Chest"
+    region: SkullWoods
+    can_reach: "HAS_ITEM(BigKey_SkullWoods)"
+    source: "app/Region/Standard/SkullWoods.php:110-116"
+
+  # Bridge Room (php:118-122). Phase A collapse:
+  #   FireRod && (MoonPearl || (canDungeonRevive && Boots && (MagicMirror || hasABottle)))
+  # canDungeonRevive=false → require FireRod AND MoonPearl.
+  - id: "Skull Woods - Bridge Room"
+    region: SkullWoods
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(MoonPearl)"
+    source: "app/Region/Standard/SkullWoods.php:118-122"
+
+  # Boss (php:128-151). canEnter enforced by the edge (Phase A pattern).
+  # Phase A collapse of the body:
+  #   FireRod && (MoonPearl || <canDungeonRevive trick>)
+  #   && (swordless || hasSword())
+  #   && KeyD3,3
+  #   && Mothula.canBeat
+  # canDungeonRevive=false → MoonPearl; swordless=false → HasSword(1).
+  - id: "Skull Woods - Boss"
+    region: SkullWoods
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(MoonPearl) AND (OP_MODEWEAPONS_EQ(swordless) OR HasSword(1)) AND HAS_AMOUNT(SmallKey_SkullWoods, 3) AND CanKillBoss(SkullWoods)"
+    source: "app/Region/Standard/SkullWoods.php:128-151"
+
+  # Prize (php:66, 124-126, 163) — can_complete = Boss canAccess.
+  - id: "Skull Woods - Prize"
+    region: SkullWoods
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(MoonPearl) AND (OP_MODEWEAPONS_EQ(swordless) OR HasSword(1)) AND HAS_AMOUNT(SmallKey_SkullWoods, 3) AND CanKillBoss(SkullWoods)"
+    source: "app/Region/Standard/SkullWoods.php:66, 124-126, 163 (can_complete = Boss access)"
+
+macros:
+  # CanKillMothula — SW boss. Translated from app/Boss.php:96-102.
+  #   (itemPlacement!='basic' || hasSword(2) || (canExtendMagic(w,2) && FireRod))
+  #   && (hasSword() || Hammer
+  #       || (canExtendMagic(w,2) && (FireRod || CaneOfSomaria || CaneOfByrna))
+  #       || canGetGoodBee())
+  # itemPlacement!='basic' → TRUE → leading clause collapses to TRUE.
+  - name: CanKillMothula
+    parameters: [world]
+    body: "(HasSword(1) OR HAS_ITEM(Hammer) OR (CanExtendMagic(world, 2) AND (HAS_ITEM(FireRod) OR HAS_ITEM(CaneOfSomaria) OR HAS_ITEM(CaneOfByrna))) OR CanGetGoodBee()) AND NeedsBossSoul(Soul_Mothula)"
+    source: "app/Boss.php:96-102 (Boss::canBeat for Mothula)"
+    notes: |
+      Phase A: itemPlacement!='basic' → TRUE drops the leading
+      (basic-mode-requires-strong-weapon) gate. The body is the inner
+      "kill Mothula" disjunction: sword OR hammer OR magic-extended ranged
+      OR golden-bee swarm.

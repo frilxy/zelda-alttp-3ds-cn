@@ -1,0 +1,317 @@
+# hint_metadata.yaml — authoritative Hints v2 classification and naming data
+#
+# This file augments item_registry.yaml and location_registry.yaml by symbolic
+# identity. assets/rando_logic_gen.py validates every selector/reference against
+# those registries and emits src/rando/hint_metadata.h. Runtime hint code does
+# not maintain parallel item/location switch statements.
+#
+# Classification is intentionally expressed as registry categories plus narrow
+# exceptions. Codegen gives every item exactly one eligibility outcome:
+#   junk   — never enters a rich exact-fact candidate pool
+#   useful — eligible for exact useful facts
+#   major  — useful and preferred for major/backfill quotas
+#   priority — major and preferred for the high-priority quota
+#
+# hint_metadata.lock.json binds selection semantics to algorithm_version and
+# rendered naming/alias semantics to text_schema_version. Change an axis only
+# with its matching runtime constant and intentionally refresh the lock.
+
+format_version: 1
+algorithm_version: 4
+text_schema_version: 4
+
+item_classification:
+  junk_registry_categories:
+    - heart
+    - junk
+    - rupee
+    - trap
+
+  major_registry_categories:
+    - absolute
+    - bottle
+    - prize_crystal
+    - prize_pendant
+    - progressive
+    - soul
+    - triforce
+  useful_registry_categories:
+    - dungeon_item
+    - shop_consumable
+    - virtual
+  major_dungeon_kinds:
+    - SmallKey
+    - BigKey
+    - KeyRing
+  item_overrides:
+    # Skeleton Key is intentionally a useful bonus rather than progression.
+    SkeletonKey: useful
+    GenericKey: major
+    Nothing: junk
+
+  priority_items:
+    - ProgressiveGlove
+    - ProgressiveBow
+    - FireRod
+    - IceRod
+    - Hammer
+    - Hookshot
+    - MagicMirror
+    - Boots
+    - Flippers
+    - MoonPearl
+
+# Stable semantic-family ids used only as a diversity preference. Id 0 is
+# reserved to mean "this item is its own family"; never recycle a numeric id.
+diversity_groups:
+  - id: 1
+    name: swords
+    items: [ProgressiveSword, L1Sword, L2Sword, L3Sword, L4Sword]
+  - id: 2
+    name: shields
+    items: [ProgressiveShield, FighterShield, RedShield, MirrorShield]
+  - id: 3
+    name: armor
+    items: [ProgressiveArmor, BlueMail, RedMail]
+  - id: 4
+    name: gloves
+    items: [ProgressiveGlove, PowerGlove, TitanMitt]
+  - id: 5
+    name: bows
+    items: [ProgressiveBow, Bow, SilverArrowUpgrade]
+  - id: 6
+    name: bottles
+    items:
+      - BottleEmpty
+      - BottleWithFairy
+      - BottleWithBee
+      - BottleWithGoodBee
+      - BottleWithRedPotion
+      - BottleWithGreenPotion
+      - BottleWithBluePotion
+  - id: 7
+    name: pendants
+    items: [Prize_GreenPendant, Prize_RedPendant, Prize_BluePendant]
+  - id: 8
+    name: crystals
+    items:
+      - Prize_Crystal1
+      - Prize_Crystal2
+      - Prize_Crystal3
+      - Prize_Crystal4
+      - Prize_Crystal5
+      - Prize_Crystal6
+      - Prize_Crystal7
+
+item_names:
+  # Player-facing exceptions to the deterministic registry-name splitter.
+  # "qualified" is used by exact placement facts and location->item signs;
+  # when omitted it is identical to "short".
+  overrides:
+    BugCatchingNet: { short: "Net" }
+    BeeContents: { short: "Bee" }
+    DefeatAgahnim: { short: "Agahnim" }
+    BookOfMudora: { short: "Book" }
+    OcarinaInactive: { short: "Flute" }
+    PieceOfHeart: { short: "Heart Piece" }
+    BottleEmpty: { short: "Bottle" }
+    GenericKey:
+      { short: "Universal Small Key", compact_qualified: "Universal SK" }
+    SilverArrowUpgrade:
+      { short: "Silver Arrows", compact_qualified: "SilverArrow" }
+    SmallMagic: { short: "Small Magic Refill" }
+    L1Sword:
+      { short: "Fighter Sword", compact_qualified: "Fighter Swd" }
+    L2Sword:
+      { short: "Master Sword", compact_qualified: "Master Swd" }
+    L3Sword:
+      { short: "Tempered Sword", compact_qualified: "Tempered Swd" }
+    L4Sword:
+      { short: "Golden Sword", compact_qualified: "Golden Swd" }
+    BombUpgrade5:
+      { short: "Bomb Capacity 5", compact_qualified: "Bomb Cap5" }
+    ArrowUpgrade5:
+      { short: "Arrow Capacity 5", compact_qualified: "Arrow Cap5" }
+    Soul_Npc_MMCNpc:
+      { short: "Mini Moldorm Cave NPC Soul", compact_qualified: "MM Cave Soul" }
+    Soul_Npc_HypeCaveNpc:
+      { short: "Hype Cave NPC Soul", compact_qualified: "Hype NPC Soul" }
+    # The fixed Sahasrahla redirect already identifies the Green Pendant; exact
+    # placement facts still use the qualified color-bearing identity.
+    Prize_GreenPendant: { short: "Pendant", qualified: "Green Pendant" }
+    # ProgressiveBow and the absolute Bow can coexist in the registry even
+    # though settings keep them out of one normal pool. Keep the generated
+    # exact-text identity injective without depending on that setting rule.
+    ProgressiveBow: { short: "Bow Upgrade" }
+
+    # Lossless compact-qualified labels are used only after the complete exact
+    # prose fails the three-row game envelope. They remain unique registry
+    # identities; full semantic/spoiler text continues to use `qualified`.
+    BlueBoomerang: { compact_qualified: "BlueBoom" }
+    BottleWithBee: { compact_qualified: "Bee Btl" }
+    BottleWithBluePotion: { compact_qualified: "Blue Btl" }
+    BottleWithFairy: { compact_qualified: "Fairy Btl" }
+    BottleWithGoodBee: { compact_qualified: "GoodBeeBtl" }
+    BottleWithGreenPotion: { compact_qualified: "Green Btl" }
+    BottleWithRedPotion: { compact_qualified: "Red Btl" }
+    CaneOfSomaria: { compact_qualified: "SomariaCane" }
+    FighterShield: { compact_qualified: "FighterShld" }
+    HyruleCastleBigKey: { compact_qualified: "HC Big Key" }
+    StartingHeart: { compact_qualified: "StartHeart" }
+    TriforcePiece: { compact_qualified: "TriforcePc" }
+    Soul_ArmosKnights: { compact_qualified: "S-ArmosK" }
+    Soul_BallChainTrooper: { compact_qualified: "S-BallChn" }
+    Soul_BushHoarder: { compact_qualified: "S-BushHrd" }
+    Soul_HardhatBeetle: { compact_qualified: "S-Hardhat" }
+    Soul_HelmasaurKing: { compact_qualified: "S-HelmKing" }
+    Soul_MiniHelmasaur: { compact_qualified: "S-MiniHelm" }
+    Soul_MiniMoldorm: { compact_qualified: "S-MiniMold" }
+    Soul_WalkingZora: { compact_qualified: "S-WalkZora" }
+    Soul_Npc_BombShopDealer: { compact_qualified: "S-BombShop" }
+    Soul_Npc_BottleMerchant: { compact_qualified: "S-BottleM" }
+    Soul_Npc_DiggingGame: { compact_qualified: "S-DigGame" }
+    Soul_Npc_MazeGameGuy: { compact_qualified: "S-MazeGuy" }
+    Soul_Npc_MazeGameLady: { compact_qualified: "S-MazeLady" }
+    Soul_Npc_MiddleAgedMan: { compact_qualified: "S-MidMan" }
+    Soul_Npc_PyramidFairy: { compact_qualified: "S-Pyramid" }
+    Soul_Npc_WaterfallFairy: { compact_qualified: "S-WaterF" }
+
+  strip_prefixes:
+    - Prize_
+    - Progressive
+
+  dungeon_kinds:
+    SmallKey: "Small Key"
+    BigKey: "Big Key"
+    Map: "Map"
+    Compass: "Compass"
+    KeyRing: "Key Ring"
+
+  compact_dungeon_kinds:
+    SmallKey: "SK"
+    BigKey: "BK"
+    Map: "Map"
+    Compass: "Comp"
+    KeyRing: "KR"
+
+dungeon_aliases:
+  HyruleCastleEscape: "Escape"
+  EasternPalace: "Eastern"
+  DesertPalace: "Desert"
+  TowerOfHera: "Hera"
+  HyruleCastleTower: "Castle Tower"
+  PalaceOfDarkness: "PoD"
+  SwampPalace: "Swamp"
+  SkullWoods: "Skull"
+  ThievesTown: "Thieves"
+  IcePalace: "Ice"
+  MiseryMire: "Mire"
+  TurtleRock: "Turtle Rock"
+  GanonsTower: "GT"
+
+compact_dungeon_aliases:
+  HyruleCastleEscape: "Escape"
+  EasternPalace: "Eastern"
+  DesertPalace: "Desert"
+  TowerOfHera: "Hera"
+  HyruleCastleTower: "CT"
+  PalaceOfDarkness: "PoD"
+  SwampPalace: "Swamp"
+  SkullWoods: "Skull"
+  ThievesTown: "Thieves"
+  IcePalace: "Ice"
+  MiseryMire: "Mire"
+  TurtleRock: "TR"
+  GanonsTower: "GT"
+
+# Base aliases preserve the complete " - <suffix>" tail. Thus the three
+# Sahasrahla checks become "Sahasrahla - Left/Middle/Right", and shop/take-any
+# slot numbers remain part of the identity.
+location_base_aliases:
+  "Sahasrahla's Hut": "Sahasrahla"
+  "Master Sword Pedestal": "MS Pedestal"
+  "Checkerboard Cave": "Checker Cave"
+  "Dark World Village of Outcasts": "DW Outcasts"
+  "Dark World Lumberjack Hut": "DW Lumber Hut"
+  "Dark World Lake Hylia Shop": "DW Hylia Shop"
+  "Light World Lake Hylia Shop": "LW Hylia Shop"
+  "Dark World Death Mountain Shop": "DW DM Shop"
+  "Light World Death Mountain Shop": "LW DM Shop"
+  "Dark Lake Hylia Ledge Spike Cave": "DW Spike Cave"
+  "Dark Lake Hylia Ledge Fairy": "DW Ledge Fairy"
+  "Lake Hylia Fortune Teller": "Hylia Fortune"
+  "Fortune Teller (Light)": "LW Fortune"
+  "Archery Game (Take-Any)": "Archery Game"
+  "Good Bee Cave (Take-Any)": "Good Bee Cave"
+  "Hookshot Fairy (Take-Any)": "Hookshot Fairy"
+
+# Explicit overrides resolve the few vanilla names whose acronym plus final
+# semantic tokens would otherwise collide. Unknown future collisions are a
+# hard codegen error until an explicit lossless alias is authored here.
+location_aliases:
+  "Bottle Merchant": "Bottle Merchant"
+  "Bomb Merchant": "Bomb Merchant"
+  "Spiral Cave": "Spiral Cave"
+  "Spike Cave": "Spike Cave"
+  "Light Hype Fairy - 0": "Hype Fairy 0"
+  "Light Hype Fairy - 1": "Hype Fairy 1"
+  "Lake Hylia Fairy - 0": "Hylia Fairy 0"
+  "Lake Hylia Fairy - 1": "Hylia Fairy 1"
+  "Eastern Palace - Cannonball Chest": "EP Cannonball"
+  "Ganon's Tower - Firesnake Room": "GT Firesnake"
+  "Hyrule Castle - Boomerang Chest": "HC Boomerang"
+  "Palace of Darkness - Prize": "PoD Prize"
+  "Palace of Darkness - Harmless Hellway": "PoD Hellway"
+  "Palace of Darkness - Stalfos Basement": "PoD Stalfos"
+  "Palace of Darkness - Dark Basement - Right": "PoD Base Right"
+  "Swamp Palace - Waterfall Room": "Swamp Falls"
+  "Turtle Rock - Crystaroller Room": "TR Crystaroller"
+
+# Compact labels for region-value facts are generated from each registry
+# RegionDef.name. Add only collision/fit exceptions here.
+region_aliases:
+  OWC_Bumper_Cave_Entry: "OW Bumper Entry"
+  OWC_Bumper_Cave_Ledge: "OW Bumper Ledge"
+  OWC_Dark_C_Whirlpool_Area: "OW Dark C Whirl"
+  OWC_Dark_Chapel_Area: "OW Dark Chapel"
+  OWC_Dark_Fortune_Area: "OW Dark Fortune"
+  OWC_Dark_Graveyard_North: "OW Dark Grave N"
+  OWC_Dark_Lumberjack_Area: "OW Dark Lumber"
+  OWC_Desert_Checkerboard_Ledge: "OW Checker Ledge"
+  OWC_Desert_Ledge_Keep: "OW Desert Keep"
+  OWC_Desert_Pass_Ledge: "OW Desert Pass"
+  OWC_Desert_Teleporter_Ledge: "OW Desert Tele"
+  OWC_Hammer_Pegs_Entry: "OW Hammer Entry"
+  OWC_Kings_Grave_Area: "OW Kings Grave"
+  OWC_Links_House_Area: "OW Links House"
+  OWC_Mire_Teleporter_Ledge: "OW Mire Tele"
+  OWC_Octoballoon_Area: "OW Octo Area"
+  OWC_Octoballoon_Water: "OW Octo Water"
+  OWC_Potion_Shop_Water: "OW Potion Water"
+  OWC_Shield_Shop_Fence: "OW Shield Fence"
+  OWC_Spiral_Cave_Ledge: "OW Spiral Ledge"
+
+# Must match the fixed item->location redirect set in rando_hints.c.
+redirect_item_location_items:
+  - Prize_GreenPendant
+  - MoonPearl
+  - OcarinaInactive
+  - BookOfMudora
+
+high_friction_locations:
+  - King Zora
+  - Master Sword Pedestal
+  - Magic Bat
+  - Sick Kid
+  - Graveyard Ledge
+  - Hobo
+  - Cave 45
+  - Checkerboard Cave
+  - Library
+  - Mimic Cave
+  - Floating Island
+  - Catfish
+  - Pyramid Fairy - Left
+  - Pyramid Fairy - Right
+  - Bumper Cave
+  - Spike Cave

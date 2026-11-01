@@ -1,0 +1,172 @@
+# DesertPalace.yaml — Desert Palace Inverted world-state (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/DesertPalace.php`
+# (MIT, verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# The Inverted variant `extends Region\Standard\DesertPalace` and overrides:
+#   1. `Desert Palace - Big Key Chest` setRequirements (php:49-56) —
+#      Standard had just `KeyP2 AND canKillMostThings`; Inverted adds the
+#      bunny-state gate (Inverted-mode in light world → bunny without
+#      MoonPearl).
+#   2. `Desert Palace - Boss` setRequirements (php:59-79) — Inverted adds
+#      a bunny-state gate AND keeps the spatial gate / boss kill chain.
+#   3. `can_enter` (php:82-91) — Standard's BookOfMudora-only entry is
+#      replaced by a 3-way entry chain (`$main`, `$side`, `$thieves`)
+#      wrapped in a bunny-state gate.
+#
+# Inherited (unchanged) from Standard parent (`10_desert_palace.yaml`):
+#   - Big Chest (BigKeyP2), Map Chest (TRUE), Torch (Boots), Compass Chest
+#     (KeyP2). These are NOT overridden in the Inverted PHP file.
+#   - Prize predicate = Boss predicate (Standard php:130, inherited).
+#   - setFillRules / setAlwaysAllow on Boss (Standard php:108-120).
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP item-name remappings (identical to 10_desert_palace.yaml):
+#       * KeyP2 → SmallKey_DesertPalace
+#       * BigKeyP2 → BigKey_DesertPalace
+#       * CompassP2 → Compass_DesertPalace
+#       * MapP2 → Map_DesertPalace
+#       * KeyD4 → SmallKey_ThievesTown (D4 = Thieves' Town's dungeon number)
+#       * BigKeyD4 → BigKey_ThievesTown
+#       * PegasusBoots → Boots
+#   - Dropped branches:
+#       * canOneFrameClipOW (php:29, 65-68, 82-91 multiple call sites)
+#         — Phase B trick, FALSE.
+#       * canBootsClip (php:35-36, 67-68) — Phase B trick, FALSE.
+#       * canBunnyRevive+canBunnyRevive (php:33-34, 53-54, 63-64, 85-86)
+#         — Phase B trick, FALSE.
+#       * canOWYBA+hasABottle (php:32-33, 54-55, 64-65, 86-87) — Phase B
+#         trick, FALSE.
+#       * canDungeonRevive (php:52, 66, 83) — Phase B trick, FALSE.
+#       * canSuperBunny+MagicMirror (php:84-85) — Phase B trick, FALSE.
+#       * canOneFrameClipUW gate on $thieves chain (php:44) — Phase B
+#         clip trick, FALSE → $thieves disjunct drops entirely (it's
+#         gated on canOneFrameClipUW in ITS body).
+#       * region.wildCompasses / region.wildMaps in Boss (php:73-78) —
+#         default false → guards collapse to TRUE.
+#   - hasSword() bunny-revive shorthand: where Standard's "MoonPearl OR
+#     <bunny-state tricks>" appears in Inverted, Phase A collapse keeps
+#     `HAS_ITEM(MoonPearl) OR HasSword(1)` because php:55 in Big Key Chest
+#     ends with `|| $items->hasSword()`, the only non-trick disjunct beyond
+#     MoonPearl. NOTE: Boss predicate (php:62-65) does NOT include hasSword
+#     as a fallback — only canBunnyRevive and canOWYBA — so its surviving
+#     gate is bare HAS_ITEM(MoonPearl).
+#   - The `$main` / `$side` / `$thieves` closures (php:23-45) form the
+#     entry-route disjunction:
+#       * $main:    has(BookOfMudora) AND South_Light_World.canEnter
+#       * $side:    <trick branches only> AND South_Light_World.canEnter
+#                   → collapses entirely; $side's only non-trick disjunct
+#                   is the MoonPearl/OWYBA/bunny-revive gate AND the
+#                   canBootsClip+Boots gate (php:35-36); the AND chain
+#                   needs both, and canBootsClip=FALSE makes the outer AND
+#                   FALSE → $side drops in Phase A.
+#       * $thieves: Thieves_Town.canEnter AND has(KeyD4) AND has(BigKeyD4)
+#                   AND canOneFrameClipUW → drops entirely (canOneFrameClipUW=FALSE).
+#
+# Status: translated 2026-05-27. Awaiting review + codegen integration.
+
+format_version: 1
+
+regions:
+  # External parent stubs.
+  - id: LightWorld_South
+    name: "Light World - South (stub)"
+    source: "stub for cross-file region reference ($main entry route)"
+
+  # Re-declared from `10_desert_palace.yaml` — codegen merges (last-wins).
+  - id: DesertPalace_Lobby
+    name: "Desert Palace - Lobby"
+    dungeon: DesertPalace
+    source: "app/Region/Inverted/DesertPalace.php:11 (extends Standard\\DesertPalace); base in app/Region/Standard/DesertPalace.php:15-66"
+
+  - id: DesertPalace_PastLanmolas
+    name: "Desert Palace - Past Lanmolas"
+    dungeon: DesertPalace
+    parent: DesertPalace_Lobby
+    source: "app/Region/Standard/DesertPalace.php:60-62 (Boss + Prize past Lanmolas room)"
+
+edges:
+  # Inverted `can_enter` (Inverted/DesertPalace.php:82-91). Phase A collapse:
+  #   bunny-state-OR (canDungeonRevive || canSuperBunny+Mirror ||
+  #                   canBunnyRevive+revive || canOWYBA+bottle ||
+  #                   has(MoonPearl))                          [→ MoonPearl]
+  #   AND ($main || $side || $thieves)                         [→ $main only]
+  # $main = BookOfMudora AND SouthLightWorld.canEnter. The South-LW
+  # reachability is handled by the edge `from: LightWorld_South`.
+  - from: LightWorld_South
+    to: DesertPalace_Lobby
+    predicate: "HAS_ITEM(MoonPearl) AND HAS_ITEM(BookOfMudora)"
+    source: "app/Region/Inverted/DesertPalace.php:82-91 (can_enter closure); $main route from php:23-26"
+
+  # Boss-room spatial gate. The Inverted Boss predicate (php:59-79) carries
+  # an inline `canLiftRocks OR canBootsClip-Boots OR canOneFrameClipOW`
+  # gate identical to Standard (php:96-102) minus the Mire-mirror reroute
+  # which the Inverted file does not re-emit. Phase A drops all trick
+  # disjuncts → CanLiftRocks().
+  - from: DesertPalace_Lobby
+    to: DesertPalace_PastLanmolas
+    predicate: "CanLiftRocks()"
+    source: "app/Region/Inverted/DesertPalace.php:59-79 (Boss spatial gate); inherited shape from Standard php:96-102"
+
+locations:
+  # Big Key Chest (Inverted/DesertPalace.php:49-56). Phase A collapse:
+  #   has(KeyP2)
+  #   AND canKillMostThings(world)
+  #   AND (has(MoonPearl)
+  #        || canDungeonRevive
+  #        || canBunnyRevive+revive
+  #        || canOWYBA+bottle
+  #        || hasSword())                                   [→ MoonPearl OR HasSword(1)]
+  - id: "Desert Palace - Big Key Chest"
+    region: DesertPalace_Lobby
+    can_reach: "HAS_ITEM(SmallKey_DesertPalace) AND CanKillMostThings(world, 5) AND (HAS_ITEM(MoonPearl) OR HasSword(1))"
+    source: "app/Region/Inverted/DesertPalace.php:49-56"
+
+  # Boss (Inverted/DesertPalace.php:59-79). Phase A collapse:
+  #   canEnter                                              [enforced by edge]
+  #   AND (MoonPearl || canBunnyRevive || canOWYBA          [→ MoonPearl]
+  #        || (canOneFrameClipOW AND canDungeonRevive))     [FALSE]
+  #   AND (canLiftRocks || canBootsClip+Boots               [enforced by edge → CanLiftRocks()]
+  #        || canOneFrameClipOW)                            [FALSE]
+  #   AND canLightTorches()
+  #   AND has(BigKeyP2) AND has(KeyP2)
+  #   AND boss.canBeat (Lanmolas)
+  #   AND wildCompasses/wildMaps guards                     [TRUE]
+  - id: "Desert Palace - Boss"
+    region: DesertPalace_PastLanmolas
+    can_reach: "HAS_ITEM(MoonPearl) AND CanLightTorches() AND HAS_ITEM(BigKey_DesertPalace) AND HAS_ITEM(SmallKey_DesertPalace) AND CanKillBoss(DesertPalace)"
+    # setFillRules / setAlwaysAllow inherited from Standard php:108-120;
+    # mirrored in 10_desert_palace.yaml. Phase B integration: confirm
+    # codegen carries these through the inherited-by-default path.
+    can_place: "NOT OP_ITEM_IS(SmallKey_DesertPalace) AND NOT OP_ITEM_IS(BigKey_DesertPalace)"
+    always_allow: "OP_ITEM_IS(Compass_DesertPalace) OR OP_ITEM_IS(Map_DesertPalace)"
+    source: "app/Region/Inverted/DesertPalace.php:59-79 (Boss override); setFillRules/setAlwaysAllow inherited from Standard php:108-120"
+
+  # Prize: inherited via Standard parent's
+  # `prize_location->setRequirements($this->can_complete)` (Standard
+  # php:130); can_complete = Boss canAccess (Standard php:92-94).
+  # The Boss predicate is the Inverted override above; Prize mirrors it.
+  - id: "Desert Palace - Prize"
+    region: DesertPalace_PastLanmolas
+    can_reach: "HAS_ITEM(MoonPearl) AND CanLightTorches() AND HAS_ITEM(BigKey_DesertPalace) AND HAS_ITEM(SmallKey_DesertPalace) AND CanKillBoss(DesertPalace)"
+    source: "app/Region/Inverted/DesertPalace.php:59-79 (Prize = can_complete = Boss access)"
+
+locations_notes: |
+  Inherited from Standard parent (NOT overridden in Inverted), already
+  authored in `assets/rando/logic_parts/10_desert_palace.yaml`:
+    - Desert Palace - Big Chest (Standard php:76-78; HAS_ITEM(BigKey_DesertPalace))
+    - Desert Palace - Map Chest (Standard php:56; default TRUE)
+    - Desert Palace - Torch (Standard php:88-90; HAS_ITEM(Boots))
+    - Desert Palace - Compass Chest (Standard php:84-86; HAS_ITEM(SmallKey_DesertPalace))
+  The CanKillLanmolas macro is defined in 10_desert_palace.yaml (its sole
+  definition); no redefinition here.
+
+  Inverted-only DROPPED entry routes:
+    - $side (php:28-38): Inverted's Mire-side mirror-warp entry — gated on
+      canBootsClip in its OWN body, so the AND chain collapses to FALSE.
+      When Phase B trick-logic lands, re-introduce as a separate edge
+      with predicate gated on OP_TRICK(boots-clip).
+    - $thieves (php:40-45): Inverted's Thieves' Town basement-clip entry —
+      gated on canOneFrameClipUW. Re-introduce in Phase B with
+      OP_TRICK(one-frame-clip-uw) (clip trick id TBD in trick registry).

@@ -40,27 +40,19 @@ int WideCamera_FindDungeonTransitionEnd(int start_x, int direction,
   return start_x + direction * 256;
 }
 
-static int RoundedDivide(int numerator, int denominator) {
-  if (numerator < 0)
-    return -((-numerator + denominator / 2) / denominator);
-  return (numerator + denominator / 2) / denominator;
+int WideCamera_Lerp(int from, int to, int progress) {
+  int d = (to - from) * progress;
+  return from + (d >= 0 ? (d + 128) >> 8 : -((-d + 128) >> 8));
 }
 
-int WideCamera_InterpolateTransition(int logical_x, int start_logical_x,
-                                     int start_visual_x, int end_offset,
-                                     int direction, int distance) {
-  if ((direction != -1 && direction != 1) || distance <= 0)
-    return logical_x;
+int WideCamera_Approach(int from, int to, int step) {
+  return to > from + step ? from + step : to < from - step ? from - step : to;
+}
 
-  int progress = direction > 0 ?
-    (int)(uint16_t)(logical_x - start_logical_x) :
-    (int)(uint16_t)(start_logical_x - logical_x);
-  if (progress > distance)
-    progress = distance;
-
-  int start_offset = start_logical_x - start_visual_x;
-  int offset_delta = end_offset - start_offset;
-  int offset = start_offset +
-    RoundedDivide(offset_delta * progress, distance);
-  return logical_x - offset;
+int WideCamera_Follow(int last, int last_target, int target, int moved,
+                      int rate) {
+  int change = target - last_target;
+  int low = moved < 0 ? moved : 0, high = moved > 0 ? moved : 0;
+  int follow = last + (change < low ? low : change > high ? high : change);
+  return WideCamera_Approach(follow, target, rate);
 }

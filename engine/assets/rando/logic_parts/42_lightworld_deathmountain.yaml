@@ -1,0 +1,162 @@
+# 42_lightworld_deathmountain.yaml — Light World Death Mountain (West + East)
+#
+# Mechanically translated from ALTTPR PHP closures at:
+#   - `../alttp_vt_randomizer/app/Region/Standard/LightWorld/DeathMountain/West.php`
+#   - `../alttp_vt_randomizer/app/Region/Standard/LightWorld/DeathMountain/East.php`
+# (MIT, verified per CLAUDE.md "Claim-grounding discipline").
+#
+# Phase A translation discipline (audit.md §0.10.2):
+#   - All glitch/trick branches (canBootsClip, canOneFrameClipOW,
+#     canSuperSpeed, canMirrorClip, canMirrorWrap, canOWYBA) drop.
+#   - swordless-mode branch drops.
+#   - `itemPlacement` branches drop.
+#   - PHP `PegasusBoots` → our `Boots`.
+#   - PHP `item.require.Lamp` defaults to 1 → `HAS_ITEM(Lamp)` (vanilla).
+#   - PHP `Bottle` (the base/empty bottle name) → modeled via HasABottle().
+#   - PHP `KeyD7` (Turtle Rock small key) → `SmallKey_TurtleRock`.
+
+format_version: 1
+
+regions:
+  - id: LightWorld_DeathMountain_West
+    name: "Light World - Death Mountain West"
+    source: "app/Region/Standard/LightWorld/DeathMountain/West.php:14-74"
+
+  - id: LightWorld_DeathMountain_East
+    name: "Light World - Death Mountain East"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:16-102"
+
+edges:
+  # DM West entry — `can_enter` (West.php:62-70):
+  #   RescueZelda AND (canFly OR (canLiftRocks AND Lamp)
+  #                    OR canOneFrameClipOW          [OWG branch]
+  #                    OR (canBootsClip && PegasusBoots))
+  # Phase B Slice 4 §56: the canOneFrameClipOW disjunct un-pins under
+  # logic=overworld_glitches (or higher). The boots-clip disjunct
+  # un-pins under tricks=boots-clip. Defaults (no_glitches, tricks=0)
+  # collapse both new branches to FALSE.
+  - from: LightWorld_NorthEast
+    to: LightWorld_DeathMountain_West
+    predicate: "CanFly(world) OR (CanLiftRocks() AND HAS_ITEM(Lamp)) OR CanOneFrameClipOW() OR CanBootsClip() OR (CanSuperSpeed() AND CanSpinSpeed())"
+    source: "app/Region/Standard/LightWorld/DeathMountain/West.php:62-70"
+
+  # DM East entry — `can_enter` (East.php:89-98):
+  #   RescueZelda AND (canOneFrameClipOW OR (canBootsClip+Boots) OR
+  #                    (canSuperSpeed+spin) OR
+  #                    ((MagicMirror+Hookshot)+West-DM mirror routes) OR
+  #                    (Hammer + Tower of Hera))
+  # Phase A retained the Hookshot+West-DM and Hammer+ToH paths.
+  # Phase B Slice 4 §7 surfaces CanBootsClip + OWG bypass.
+  # canSuperSpeed lacks a macro (Phase B reservation).
+  - from: LightWorld_DeathMountain_West
+    to: LightWorld_DeathMountain_East
+    predicate: "HAS_ITEM(Hookshot) OR (HAS_ITEM(Hammer) AND OP_REGION_REACHABLE(TowerOfHera_Lobby)) OR CanBootsClip() OR CanOneFrameClipOW()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:89-98"
+
+locations:
+  # ===========================================================================
+  # Light World — Death Mountain West (php:14-74)
+  # ===========================================================================
+
+  # `Old Man` (West.php:46-48): has Lamp.
+  - id: "Old Man"
+    region: LightWorld_DeathMountain_West
+    can_reach: "HAS_ITEM(Lamp)"
+    source: "app/Region/Standard/LightWorld/DeathMountain/West.php:46-48"
+
+  # `Spectacle Rock Cave` (West.php:31) — no setRequirements; default TRUE.
+  - id: "Spectacle Rock Cave"
+    region: LightWorld_DeathMountain_West
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/West.php:31"
+
+  # `Ether Tablet` (West.php:50-54): BookOfMudora AND hasSword(2)
+  # AND Tower of Hera reachable. §4 swordless: reads with Book+Hammer
+  # (West.php:51-52 `hasSword(2) || (swordless && Hammer)`). Inert under
+  # randomized. Runtime: EtherTablet cutscene accepts hammer.
+  - id: "Ether Tablet"
+    region: LightWorld_DeathMountain_West
+    can_reach: "HAS_ITEM(BookOfMudora) AND (HasSword2() OR (OP_MODEWEAPONS_EQ(swordless) AND HAS_ITEM(Hammer))) AND OP_REGION_REACHABLE(TowerOfHera_Lobby)"
+    source: "app/Region/Standard/LightWorld/DeathMountain/West.php:50-54"
+
+  # `Spectacle Rock` (West.php:56-60): MagicMirror OR boots-clip.
+  # Phase B Slice 4 §56 — boots-clip trick branch un-pinned; under
+  # default settings (tricks=0) it evaluates FALSE and the predicate
+  # collapses to the Phase A `HAS_ITEM(MagicMirror)` form.
+  - id: "Spectacle Rock"
+    region: LightWorld_DeathMountain_West
+    can_reach: "HAS_ITEM(MagicMirror) OR CanBootsClip()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/West.php:56-60"
+
+  # ===========================================================================
+  # Light World — Death Mountain East (php:16-102)
+  # ===========================================================================
+
+  # `Spiral Cave` (East.php:32) — no setRequirements; default TRUE.
+  - id: "Spiral Cave"
+    region: LightWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:32"
+
+  # `Mimic Cave` (East.php:68-77): Hammer AND MagicMirror AND
+  #   (canMirrorClip OR (canBootsClip+Boots+(MoonPearl OR canOWYBA+bottle))
+  #    OR (canSuperSpeed+spin+MoonPearl+EastDarkDM-reachable)
+  #    OR canOneFrameClipOW OR (KeyD7>=2 AND TurtleRock reachable))
+  # Phase A retained the TR-keys+region branch. Phase B Slice 4 §7
+  # surfaces OWG bypass. canBootsClip needs MoonPearl OR pearl-bypass
+  # at this site, which makes the disjunct conditional — defer that
+  # variant; just add the simple OWG path here.
+  - id: "Mimic Cave"
+    region: LightWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(MagicMirror) AND ((HAS_AMOUNT(SmallKey_TurtleRock, 2) AND OP_REGION_REACHABLE(TurtleRock_Lobby)) OR CanOneFrameClipOW())"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:68-77"
+
+  # `Paradox Cave` chests (East.php:34-40) — no setRequirements; default TRUE.
+  - id: "Paradox Cave Lower - Far Left"
+    region: LightWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:34"
+
+  - id: "Paradox Cave Lower - Left"
+    region: LightWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:35"
+
+  - id: "Paradox Cave Lower - Right"
+    region: LightWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:36"
+
+  - id: "Paradox Cave Lower - Far Right"
+    region: LightWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:37"
+
+  - id: "Paradox Cave Lower - Middle"
+    region: LightWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:38"
+
+  - id: "Paradox Cave Upper - Left"
+    region: LightWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:39"
+
+  - id: "Paradox Cave Upper - Right"
+    region: LightWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:40"
+
+  # `Floating Island` (East.php:79-87):
+  #   (canBootsClip && PegasusBoots) || (canOWYBA && bottle) ||
+  #   canOneFrameClipOW || (MagicMirror && MoonPearl && canBombThings
+  #     && canLiftRocks && East-Dark-DM-reachable)
+  # Phase A retained only the MagicMirror cross-region path. Phase B
+  # Slice 4 §7 surfaces the three trick / OWG alternatives — all
+  # collapse to FALSE under default (tricks=0, logic=NoGlitches).
+  - id: "Floating Island"
+    region: LightWorld_DeathMountain_East
+    can_reach: "(HAS_ITEM(MagicMirror) AND HAS_ITEM(MoonPearl) AND CanBombThings() AND CanLiftRocks() AND OP_REGION_REACHABLE(DarkWorld_DeathMountain_East)) OR CanBootsClip() OR CanPearlBypass() OR CanOneFrameClipOW()"
+    source: "app/Region/Standard/LightWorld/DeathMountain/East.php:79-87"
+
+macros: []

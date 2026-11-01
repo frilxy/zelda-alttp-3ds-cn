@@ -12,7 +12,10 @@ bool ZeldaIsMusicPlaying();
 void ZeldaEnableMsu(uint8 enable);
 
 void ZeldaRenderAudio(int16 *audio_buffer, int samples, int channels);
+void ZeldaRenderStartupSfx(int16 *audio_buffer, int samples);
 void ZeldaDiscardUnusedAudioFrames();
+// Caller owns the APU lock (or the audio device is closed).
+void ZeldaResetAudio_Locked(void);
 void ZeldaRestoreMusicAfterLoad_Locked(bool is_reset);
 void ZeldaSaveMusicStateToRam_Locked();
 void ZeldaPushApuState();

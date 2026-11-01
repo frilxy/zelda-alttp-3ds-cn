@@ -1,0 +1,157 @@
+# MiseryMire.yaml — Misery Mire Inverted world-state (Phase B Slice 2)
+#
+# Mechanically translated from
+# `../alttp_vt_randomizer/app/Region/Inverted/MiseryMire.php` (MIT, verified
+# per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+# Inverted/MiseryMire.php:11 extends Standard/MiseryMire; the parent's
+# locations, location predicates, can_complete, and boss closure are
+# inherited unchanged (parent::initalize() at php:21). The override at
+# php:23-39 REPLACES the parent's can_enter closure.
+#
+# Translation discipline (audit.md §0.10.2):
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP item-name remappings (per parent file):
+#       KeyD6     → SmallKey_MiseryMire
+#       BigKeyD6  → BigKey_MiseryMire
+#       CompassD6 → Compass_MiseryMire
+#       MapD6     → Map_MiseryMire
+#       PegasusBoots → Boots
+#       RescueZelda → RescuedZelda (parent only; Inverted override drops it)
+#   - Phase A axis pins (collapses for inherited location predicates):
+#       * region.cantTakeDamage → false → byrna/cape spike-chest disjuncts
+#         collapse to TRUE.
+#       * region.wildCompasses / wildMaps / bossNormalLocation → false /
+#         false / true → wild-* clauses collapse to TRUE; setFillRules
+#         unreachable.
+#       * itemPlacement !== 'basic' branch TRUE in Phase A → the
+#         basic-mode strict health/bottle/sword gate is vacuous.
+#       * mode.weapons === 'swordless' → false.
+#   - Phase B branches dropped from Inverted can_enter (php:23-39):
+#       * canBootsClip / canSuperSpeed / canOneFrameClipOW — all trick-
+#         based; Phase A pinned false.
+#       * canBunnyRevive (parent-only; Inverted override drops it).
+#       * canOWYBA (parent-only; Inverted override drops it).
+#   - Inverted MM can_enter REPLACES the parent closure: the parent's
+#     `RescueZelda`, `MoonPearl`, and bottle-bunny-revival branches are NOT
+#     inherited (the override drops them — Inverted-mode Link starts in
+#     the dark world and reaches Mire via the natural Inverted overworld).
+#   - Inverted parent region: DarkWorld_Mire (PHP `Mire`). Canonical id is
+#     defined by the eventual `inverted/DarkWorld/Mire.yaml` translation.
+#
+# Boss: Vitreous — `CanKillVitreous` macro is already defined in
+# `31_misery_mire.yaml` (Standard MM), so this file does NOT re-emit it
+# (codegen "last wins" merge — single canonical macro).
+
+format_version: 1
+
+regions:
+  # External parent stub — Inverted Mire dark-world square (the natural
+  # Inverted overworld region for MM's approach tile). Canonical
+  # definition lives in `inverted/DarkWorld/Mire.yaml`.
+  - id: DarkWorld_Mire
+    name: "Dark World - Mire (stub, Inverted)"
+    world_state_filter: [Inverted]
+    source: "stub for cross-file region reference (Inverted/MiseryMire.php:38)"
+
+  - id: MiseryMire_Entrance
+    name: "Misery Mire Entrance"
+    world_state_filter: [Inverted]
+    source: "app/Region/Inverted/MiseryMire.php:23-39 (can_enter approach tile)"
+
+  - id: MiseryMire_Lobby
+    name: "Misery Mire - Lobby"
+    dungeon: MiseryMire
+    parent: MiseryMire_Entrance
+    world_state_filter: [Inverted]
+    source: "app/Region/Inverted/MiseryMire.php:11-42 (extends Standard/MiseryMire.php:15-63)"
+
+edges:
+  # First leg of Inverted can_enter (php:23-39) — reach the MM approach
+  # tile. After Phase A axis collapse:
+  #   itemPlacement !== 'basic' TRUE → first conjunct vacuous.
+  #   AND (Boots OR Hookshot)
+  #   AND canKillMostThings(world, 8)
+  #   AND DarkWorld_Mire reachable (via this edge's `from:` linkage)
+  # The medallion-match clause is split onto the second edge below.
+  # Phase B reroutes (clip/SpinSpeed/OWYBA) are DROPPED. The parent's
+  # MoonPearl/RescueZelda gates are NOT inherited (override replaces
+  # entire closure).
+  - from: DarkWorld_Mire
+    to: MiseryMire_Entrance
+    predicate: "(HAS_ITEM(Boots) OR HAS_ITEM(Hookshot)) AND CanKillMostThings(world, 8)"
+    source: "app/Region/Inverted/MiseryMire.php:23-39 (can_enter — approach)"
+
+  # Second leg — read the medallion tablet to open MM (php:31-35):
+  #   ((Bombos in MM-medallion-slot AND has Bombos)
+  #    OR (Ether in slot AND has Ether)
+  #    OR (Quake in slot AND has Quake))
+  #   AND (swordless OR hasSword())
+  # The medallion-shuffle table is encoded by OP_MEDALLION_OPENS.
+  # §4 swordless: the cast needs no sword under swordless (inert under randomized).
+  - from: MiseryMire_Entrance
+    to: MiseryMire_Lobby
+    predicate: "OP_MEDALLION_OPENS(MiseryMire_Entrance) AND (OP_MODEWEAPONS_EQ(swordless) OR HasSword(1))"
+    source: "app/Region/Inverted/MiseryMire.php:31-35"
+
+locations:
+  # ===========================================================================
+  # All location predicates inherited from Standard parent via
+  # parent::initalize() at Inverted php:21. See `31_misery_mire.yaml` for
+  # the canonical author-time comments; we duplicate the predicate bodies
+  # here so the codegen merger has Inverted-tagged location records.
+  # ===========================================================================
+
+  # MM - Big Chest (Standard php:73-75): has(BigKeyD6).
+  - id: "Misery Mire - Big Chest"
+    region: MiseryMire_Lobby
+    can_reach: "HAS_ITEM(BigKey_MiseryMire)"
+    source: "app/Region/Standard/MiseryMire.php:73-75 (inherited)"
+
+  # MM - Spike Chest (Standard php:77-80): cantTakeDamage=false → TRUE.
+  - id: "Misery Mire - Spike Chest"
+    region: MiseryMire_Lobby
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/MiseryMire.php:77-80 (inherited)"
+
+  # MM - Main Lobby (Standard php:82-84): has(KeyD6) OR has(BigKeyD6).
+  - id: "Misery Mire - Main Lobby"
+    region: MiseryMire_Lobby
+    can_reach: "HAS_ITEM(SmallKey_MiseryMire) OR HAS_ITEM(BigKey_MiseryMire)"
+    source: "app/Region/Standard/MiseryMire.php:82-84 (inherited)"
+
+  # MM - Map Chest (Standard php:86-88): identical to Main Lobby.
+  - id: "Misery Mire - Map Chest"
+    region: MiseryMire_Lobby
+    can_reach: "HAS_ITEM(SmallKey_MiseryMire) OR HAS_ITEM(BigKey_MiseryMire)"
+    source: "app/Region/Standard/MiseryMire.php:86-88 (inherited)"
+
+  # MM - Big Key Chest (Standard php:90-96): location-pinned 2-key path
+  # dropped per audit; keep 3-key path.
+  - id: "Misery Mire - Big Key Chest"
+    region: MiseryMire_Lobby
+    can_reach: "CanLightTorches() AND HAS_AMOUNT(SmallKey_MiseryMire, 3)"
+    source: "app/Region/Standard/MiseryMire.php:90-96 (inherited)"
+
+  # MM - Compass Chest (Standard php:98-104): identical structure.
+  - id: "Misery Mire - Compass Chest"
+    region: MiseryMire_Lobby
+    can_reach: "CanLightTorches() AND HAS_AMOUNT(SmallKey_MiseryMire, 3)"
+    source: "app/Region/Standard/MiseryMire.php:98-104 (inherited)"
+
+  # MM - Bridge Chest (Standard php:54 — no setRequirements): default TRUE.
+  - id: "Misery Mire - Bridge Chest"
+    region: MiseryMire_Lobby
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/MiseryMire.php:54 (inherited; no setRequirements)"
+
+  # MM - Boss (Standard php:110-117).
+  - id: "Misery Mire - Boss"
+    region: MiseryMire_Lobby
+    can_reach: "HAS_ITEM(CaneOfSomaria) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_MiseryMire) AND CanKillBoss(MiseryMire)"
+    source: "app/Region/Standard/MiseryMire.php:110-117 (inherited)"
+
+  # MM - Prize (Standard php:106-108, 156) — can_complete = Boss canAccess.
+  - id: "Misery Mire - Prize"
+    region: MiseryMire_Lobby
+    can_reach: "HAS_ITEM(CaneOfSomaria) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_MiseryMire) AND CanKillBoss(MiseryMire)"
+    source: "app/Region/Standard/MiseryMire.php:106-108, 156 (inherited; can_complete = Boss access)"

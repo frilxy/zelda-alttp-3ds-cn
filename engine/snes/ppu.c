@@ -8,6 +8,7 @@
 #include "ppu.h"
 #include "ppu_bg_span.h"
 #include "ppu_retained.h"
+#include "ppu_ui.h"
 #include "src/types.h"
 
 #ifdef __3DS__
@@ -33,6 +34,7 @@ static int ppu_getPixelForMode7(Ppu* ppu, int x, int layer, bool priority);
 static bool ppu_getWindowState(Ppu* ppu, int layer, int x);
 static bool ppu_evaluateSprites(Ppu* ppu, int line);
 static bool PpuEvaluateVisibleSprites(Ppu *ppu, int line);
+static bool PpuLineHasSpriteCandidates(Ppu *ppu, int line);
 static void PpuDrawWholeLine(Ppu *ppu, uint y);
 
 #define IS_SCREEN_ENABLED(ppu, sub, layer) (ppu->screenEnabled[sub] & (1 << layer))
@@ -83,6 +85,7 @@ void ppu_reset(Ppu* ppu) {
   ppu->extraLeftCur = 0;
   ppu->extraRightCur = 0;
   ppu->extraBottomCur = 0;
+  ppu->wideUi = kPpuUiNone;
   ppu->renderObjXOffset = 0;
   ppu->renderObjYOffset = 0;
   ppu->spriteLinesValid = false;
@@ -200,6 +203,8 @@ void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_fl
     ppu->phase.frame = frame;
     ppu->phase.active = (frame & 63) == 1;
     if (ppu->phase.active) prepare_start = PpuProfileTick();
+  }
+  if (render_flags & kPpuRenderFlags_FastPaths) {
     if (!ppu->retainedAttempted) {
       ppu->retainedAttempted = true;
       ppu->retained = calloc(1, sizeof(PpuRetainedMaps));
@@ -228,9 +233,8 @@ void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_fl
     ppu->colorMapDirty = false;
     for (int i = 0; i < 256; i++) {
       uint32 color = ppu->cgram[i];
-      if (render_flags & kPpuRenderFlags_Old3DS)
-        ppu->colorMapRgb5Spaced[i] = (color & 31) << 16 |
-          ((color >> 5) & 31) << 8 | ((color >> 10) & 31);
+      ppu->colorMapRgb5Spaced[i] = (color & 31) << 16 |
+        ((color >> 5) & 31) << 8 | ((color >> 10) & 31);
       ppu->colorMapRgb[i] =
         ppu->brightnessMult[color & 0x1f] << 16 |
         ppu->brightnessMult[(color >> 5) & 0x1f] << 8 |
@@ -247,9 +251,17 @@ static inline void ClearBackdrop(Ppu *ppu, PpuPixelPrioBufs *buf) {
   size_t i = 0;
   if (((uintptr_t)data & 2) && i < count)
     data[i++] = 0x0500;
-  for (; i + 2 <= count; i += 2)
-    *(uint32 *)&data[i] = 0x05000500;
-  for (; i < count; i++)
+  // Four aligned words per step: up to three buffers are cleared every line.
+  uint32 *words = (uint32 *)&data[i];
+  size_t pairs = (count - i) / 2, k = 0;
+  for (; k + 4 <= pairs; k += 4) {
+    words[k] = 0x05000500; words[k + 1] = 0x05000500;
+    words[k + 2] = 0x05000500; words[k + 3] = 0x05000500;
+  }
+  for (; k < pairs; k++)
+    words[k] = 0x05000500;
+  i += pairs * 2;
+  if (i < count)
     data[i] = 0x0500;
 }
 
@@ -299,10 +311,17 @@ void ppu_runLine(Ppu *ppu, int line) {
     // neither when OBJ is disabled on both main and subscreen.
     bool sprites_enabled =
       (ppu->screenEnabled[0] | ppu->screenEnabled[1]) & (1 << 4);
-    if (!ppu->forcedBlank && sprites_enabled) {
+    bool fast_sprites = (ppu->renderFlags & kPpuRenderFlags_FastPaths) &&
+                        ppu->spriteLinesValid;
+    if (!ppu->forcedBlank && sprites_enabled && fast_sprites &&
+        (ppu->renderFlags & kPpuRenderFlags_NewRenderer) &&
+        !PpuLineHasSpriteCandidates(ppu, line - 1)) {
+      // Nothing to draw: the new renderer reads the buffer only when
+      // lineHasSprites is set, so it is not cleared either.
+      ppu->lineHasSprites = false;
+    } else if (!ppu->forcedBlank && sprites_enabled) {
       ClearBackdrop(ppu, &ppu->objBuffer);
-      ppu->lineHasSprites = (ppu->renderFlags & kPpuRenderFlags_Old3DS) &&
-                            ppu->spriteLinesValid ?
+      ppu->lineHasSprites = fast_sprites ?
         PpuEvaluateVisibleSprites(ppu, line - 1) : ppu_evaluateSprites(ppu, line - 1);
     } else {
       ppu->lineHasSprites = false;
@@ -408,7 +427,7 @@ void PpuGetWindowSpans(Ppu *p, unsigned layer, bool enabled, PpuWindowSpans *out
 }
 
 static bool PpuDrawRetainedBackground(Ppu *ppu, unsigned y, bool sub, unsigned layer) {
-  if (!(ppu->renderFlags & kPpuRenderFlags_Old3DS) || !ppu->retainedUsable || !ppu->retained) return false;
+  if (!(ppu->renderFlags & kPpuRenderFlags_FastPaths) || !ppu->retainedUsable || !ppu->retained) return false;
   const PpuRetainedLayer *plane=&ppu->retained->layers[layer];
   const BgLayer *bg=&ppu->bgLayer[layer];
   if (!plane->valid || plane->mapAddress!=bg->tilemapAdr || plane->tileAddress!=bg->tileAdr ||
@@ -498,7 +517,7 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
       uint32 pixels = READ_PIXELS(ta, tile & 0x3ff);
       if (pixels) {
         z += ((tile & 0x1c00) >> kPaletteShift);
-        if ((ppu->renderFlags & kPpuRenderFlags_Old3DS) && PpuRowIsOpaque(pixels)) {
+        if (PPU_OPAQUE_ROWS && (ppu->renderFlags & kPpuRenderFlags_FastPaths) && PpuRowIsOpaque(pixels)) {
           PpuDrawOpaqueBgRow(dstz, pixels, z, (tile & 0x4000) != 0);
         } else if (tile & 0x4000) {
           DO_PIXEL(0); DO_PIXEL(1); DO_PIXEL(2); DO_PIXEL(3);
@@ -533,6 +552,7 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
 
 // Draw a whole line of a 2bpp background layer into bgBuffers
 static void PpuDrawBackground_2bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZbufType zhi, PpuZbufType zlo) {
+  if (layer == 2 && PpuUiActiveLine(ppu, y)) return;
 #define DO_PIXEL(i) do { \
   pixel = (pixels >> ((i) * 4)) & 3; \
   if (pixel && z > dstz[i]) dstz[i] = z + pixel; } while (0)
@@ -600,7 +620,7 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
       uint32 pixels = READ_PIXELS(ta, tile & 0x3ff);
       if (pixels & 0x33333333) {
         z += ((tile & 0x1c00) >> kPaletteShift);
-        if ((ppu->renderFlags & kPpuRenderFlags_Old3DS) && PpuRowIsOpaque((pixels & 0x33333333u))) {
+        if (PPU_OPAQUE_ROWS && (ppu->renderFlags & kPpuRenderFlags_FastPaths) && PpuRowIsOpaque((pixels & 0x33333333u))) {
           PpuDrawOpaqueBgRow(dstz, (pixels & 0x33333333u), z, (tile & 0x4000) != 0);
         } else if (tile & 0x4000) {
           DO_PIXEL(0); DO_PIXEL(1); DO_PIXEL(2); DO_PIXEL(3);
@@ -632,6 +652,14 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
 #undef READ_PIXELS
 #undef DO_PIXEL
 #undef DO_PIXEL_HFLIP
+}
+
+// How far x is into its mosaic block. mosaicModulo starts at the SNES
+// picture's left edge; left of it, in the WIDE band (x < 0), the blocks go on
+// with the same period.
+static inline int PpuMosaicPhase(const Ppu *ppu, int x) {
+  int m = ppu->mosaicSize;
+  return x >= 0 ? x - ppu->mosaicModulo[x] : (m - 1) - (-x - 1) % m;
 }
 
 // Draw a whole line of a 4bpp background layer into bgBuffers, with mosaic applied
@@ -666,7 +694,7 @@ static void PpuDrawBackground_4bpp_mosaic(Ppu *ppu, uint y, bool sub, uint layer
     const uint16 *tp = tps[x >> 8 & 1] + ((x >> 3) & 0x1f);
     const uint16 *tp_last = tps[x >> 8 & 1] + 31, *tp_next = tps[(x >> 8 & 1) ^ 1];
     x &= 7;
-    int w = ppu->mosaicSize - (sx - ppu->mosaicModulo[sx]);
+    int w = ppu->mosaicSize - PpuMosaicPhase(ppu, sx);
     do {
       w = IntMin(w, dstz_end - dstz);
       uint32 tile = *tp;
@@ -725,7 +753,7 @@ static void PpuDrawBackground_2bpp_mosaic(Ppu *ppu, int y, bool sub, uint layer,
     const uint16 *tp = tps[x >> 8 & 1] + ((x >> 3) & 0x1f);
     const uint16 *tp_last = tps[x >> 8 & 1] + 31, *tp_next = tps[(x >> 8 & 1) ^ 1];
     x &= 7;
-    int w = ppu->mosaicSize - (sx - ppu->mosaicModulo[sx]);
+    int w = ppu->mosaicSize - PpuMosaicPhase(ppu, sx);
     do {
       w = IntMin(w, dstz_end - dstz);
       uint32 tile = *tp;
@@ -820,7 +848,7 @@ static void PpuDrawBackground_mode7(Ppu *ppu, uint y, bool sub, PpuZbufType z) {
     uint32 outside_value = ppu->m7largeField ? 0x3ffff : 0xffffffff;
     bool char_fill = ppu->m7charFill;
     if (mosaic_enabled) {
-      int w = ppu->mosaicSize - (x - ppu->mosaicModulo[x]);
+      int w = ppu->mosaicSize - PpuMosaicPhase(ppu, x);
       do {
         w = IntMin(w, dstz_end - dstz);
         if ((uint32)(xpos | ypos) > outside_value) {
@@ -1070,22 +1098,34 @@ static void PpuPrepareFixedMath(Ppu *ppu) {
 static bool PpuLineUsesMath(Ppu *ppu, uint32 mask) {
   const PpuZbufType *p = ppu->bgBuffers[0].data +
     kPpuExtraLeftRight - ppu->extraLeftCur;
-  const PpuZbufType *end = p + 256 + ppu->extraLeftCur + ppu->extraRightCur;
-  while (p != end) {
-    if (mask & (1u << ((*p++ >> 8) & 15)))
+  size_t n = 256 + ppu->extraLeftCur + ppu->extraRightCur;
+  // Usually no pixel does and the whole line is read: eight pixels per test
+  // (bit 0 of the ORed shifts), without a branch for each.
+  for (; n >= 8; n -= 8, p += 8) {
+    uint32 hit = mask >> ((p[0] >> 8) & 15) | mask >> ((p[1] >> 8) & 15) |
+                 mask >> ((p[2] >> 8) & 15) | mask >> ((p[3] >> 8) & 15) |
+                 mask >> ((p[4] >> 8) & 15) | mask >> ((p[5] >> 8) & 15) |
+                 mask >> ((p[6] >> 8) & 15) | mask >> ((p[7] >> 8) & 15);
+    if (hit & 1)
+      return true;
+  }
+  for (; n; n--, p++) {
+    if ((mask >> ((*p >> 8) & 15)) & 1)
       return true;
   }
   return false;
 }
 
-static void PpuWriteFixedMathSpan(Ppu *ppu, uint32 *dst,
-                                 const PpuZbufType *src, uint32 count,
+static void PpuWriteFixedMathSpan(Ppu *ppu, uint32 *__restrict dst,
+                                 const PpuZbufType *__restrict src, uint32 count,
                                  uint32 mask, bool unclipped) {
   if (unclipped) {
+    const uint32 *__restrict fixed = ppu->fixedMathRgb;
+    const uint32 *__restrict plain = ppu->colorMapRgb;
     while (count--) {
       uint32 pixel = *src++;
       *dst++ = (mask & (1u << ((pixel >> 8) & 15))) ?
-        ppu->fixedMathRgb[pixel & 255] : ppu->colorMapRgb[pixel & 255];
+        fixed[pixel & 255] : plain[pixel & 255];
     }
   } else {
     uint32 black = ppu->fixedMathBlack;
@@ -1135,11 +1175,16 @@ static void PpuWriteBackdropSubMath(Ppu *ppu, uint32 *dst, uint32 left,
     ppu->backdropMathKey = key;
     ppu->backdropMathValid = true;
   }
+  const PpuZbufType *__restrict main_px = ppu->bgBuffers[0].data;
+  const PpuZbufType *__restrict sub_px = ppu->bgBuffers[1].data;
+  const uint32 *__restrict backdrop = ppu->backdropMathRgb;
+  const uint32 *__restrict plain = ppu->colorMapRgb;
+  uint32 *__restrict out = dst;
   for (unsigned i = left; i < right; i++) {
-    uint32 pixel = ppu->bgBuffers[0].data[i];
-    *dst++ = (pixel & 0xf00) == 0x500 ?
-      ppu->backdropMathRgb[ppu->bgBuffers[1].data[i] & 255] :
-      (unclipped ? ppu->colorMapRgb[pixel & 255] : 0);
+    uint32 pixel = main_px[i];
+    *out++ = (pixel & 0xf00) == 0x500 ?
+      backdrop[sub_px[i] & 255] :
+      (unclipped ? plain[pixel & 255] : 0);
   }
 }
 
@@ -1148,22 +1193,28 @@ static void PpuWriteBackdropSubMath(Ppu *ppu, uint32 *dst, uint32 left,
 // Shift/mask performs SNES floor((a+b)/2), then expand 5 bits to 8 exactly.
 static void PpuWriteFullBrightnessHalfAdd(Ppu *ppu, uint32 *dst, uint32 left,
                                          uint32 right, uint32 mask, bool unclipped) {
-  const uint32 *spaced = ppu->colorMapRgb5Spaced;
+  const uint32 *__restrict spaced = ppu->colorMapRgb5Spaced;
+  const uint32 *__restrict plain = ppu->colorMapRgb;
+  const uint32 *__restrict fixed = ppu->fixedMathRgb;
+  const PpuZbufType *__restrict main_px = ppu->bgBuffers[0].data;
+  const PpuZbufType *__restrict sub_px = ppu->bgBuffers[1].data;
+  const uint32 black = ppu->fixedMathBlack;
+  uint32 *__restrict out = dst;
   for (uint i = left; i < right; i++) {
-    uint32 pixel = ppu->bgBuffers[0].data[i];
+    uint32 pixel = main_px[i];
     uint32 index = pixel & 255;
     if (!(mask & (1u << ((pixel >> 8) & 15)))) {
-      *dst++ = unclipped ? ppu->colorMapRgb[index] : 0;
+      *out++ = unclipped ? plain[index] : 0;
       continue;
     }
-    uint32 sub_index = ppu->bgBuffers[1].data[i] & 255;
+    uint32 sub_index = sub_px[i] & 255;
     if (sub_index == 0) {
-      *dst++ = unclipped ? ppu->fixedMathRgb[index] : ppu->fixedMathBlack;
+      *out++ = unclipped ? fixed[index] : black;
       continue;
     }
     uint32 sum = (unclipped ? spaced[index] : 0) + spaced[sub_index];
     uint32 rgb5 = (sum >> 1) & 0x1f1f1f;
-    *dst++ = (rgb5 << 3) | ((rgb5 >> 2) & 0x070707);
+    *out++ = (rgb5 << 3) | ((rgb5 >> 2) & 0x070707);
   }
 }
 
@@ -1179,25 +1230,48 @@ static void PpuWriteSubscreenMathSpan(Ppu *ppu, uint32 *dst, uint32 left,
     return;
   }
   PpuPrepareSubscreenMath(ppu);
-  const uint8 *map = ppu->subscreenMath;
+  const uint8 *__restrict map = ppu->subscreenMath;
+  const uint16 *__restrict cgram = ppu->cgram;
+  const uint32 *__restrict plain = ppu->colorMapRgb;
+  const uint32 *__restrict fixed = ppu->fixedMathRgb;
+  const PpuZbufType *__restrict main_px = ppu->bgBuffers[0].data;
+  const PpuZbufType *__restrict sub_px = ppu->bgBuffers[1].data;
+  const uint32 black = ppu->fixedMathBlack;
+  uint32 *__restrict out = dst;
   for (uint i = left; i < right; i++) {
-    uint32 pixel = ppu->bgBuffers[0].data[i];
+    uint32 pixel = main_px[i];
     uint32 index = pixel & 255;
     if (!(mask & (1u << ((pixel >> 8) & 15)))) {
-      *dst++ = unclipped ? ppu->colorMapRgb[index] : 0;
+      *out++ = unclipped ? plain[index] : 0;
       continue;
     }
-    uint32 sub_index = ppu->bgBuffers[1].data[i] & 255;
+    uint32 sub_index = sub_px[i] & 255;
     if (sub_index == 0) {
-      *dst++ = unclipped ? ppu->fixedMathRgb[index] : ppu->fixedMathBlack;
+      *out++ = unclipped ? fixed[index] : black;
       continue;
     }
-    uint32 color = unclipped ? ppu->cgram[index] : 0;
-    uint32 color2 = ppu->cgram[sub_index];
+    uint32 color = unclipped ? cgram[index] : 0;
+    uint32 color2 = cgram[sub_index];
     uint32 r = map[(color & 31) | ((color2 & 31) << 5)];
     uint32 g = map[((color >> 5) & 31) | (color2 & 0x3e0)];
     uint32 b = map[((color >> 10) & 31) | ((color2 >> 5) & 0x3e0)];
-    *dst++ = b | g << 8 | r << 16;
+    *out++ = b | g << 8 | r << 16;
+  }
+}
+
+static void PpuDrawWideUi(Ppu *ppu, unsigned line, uint32 *dst) {
+  if (!PpuUiActiveLine(ppu, line)) return;
+  for (unsigned x = 0; x < 400; x += 8) {
+    uint16 tile;
+    unsigned sx, sy;
+    if (!PpuUiSample(ppu, ppu->vram, line, x, &tile, &sx, &sy)) continue;
+    unsigned row = tile & 0x8000 ? 7 - sy : sy;
+    uint32 bits = PpuGetCached4bppRow(ppu, ppu->bgLayer[2].tileAdr + (tile & 1023) * 8 + row);
+    for (unsigned i = 0; i < 8; i++) {
+      unsigned bit = tile & 0x4000 ? sx + i : 7 - sx - i;
+      unsigned pixel = (bits >> (bit * 4)) & 3;
+      if (pixel) dst[x + i] = ppu->colorMapRgb[((tile & 0x1c00) >> 8) + pixel];
+    }
   }
 }
 
@@ -1213,8 +1287,8 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
 
   if (ppu->windowExtLeft) {
     int wy = y - 1 - ppu->renderObjYOffset;
-    ppu->windowExtLeftCur = wy >= 0 ? ppu->windowExtLeft[wy] : 0;
-    ppu->windowExtRightCur = wy >= 0 ? ppu->windowExtRight[wy] : -1;
+    ppu->windowExtLeftCur = wy >= 0 && wy < 240 ? ppu->windowExtLeft[wy] : 0;
+    ppu->windowExtRightCur = wy >= 0 && wy < 240 ? ppu->windowExtRight[wy] : -1;
   }
 
   if (ppu->mode == 7 && (ppu->renderFlags & kPpuRenderFlags_4x4Mode7)) {
@@ -1237,9 +1311,9 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
   uint32 math_enabled = ppu->mathEnabled;
   // E6 refreshes its normal palette at BeginDrawing. Mid-frame CGRAM writes
   // therefore require the original path until the next palette refresh.
-  bool old3ds = (ppu->renderFlags & kPpuRenderFlags_Old3DS) != 0 &&
+  bool fast = (ppu->renderFlags & kPpuRenderFlags_FastPaths) != 0 &&
     !ppu->colorMapDirty;
-  if (old3ds && math_enabled && ppu->preventMathMode != 3 &&
+  if (fast && math_enabled && ppu->preventMathMode != 3 &&
       !PpuLineUsesMath(ppu, math_enabled))
     math_enabled = 0;
 
@@ -1294,12 +1368,12 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
                            ppu->colorMapRgb);
         dst += count;
       }
-    } else if (old3ds && !rendered_subscreen) {
+    } else if (fast && !rendered_subscreen) {
       PpuPrepareFixedMath(ppu);
       PpuWriteFixedMathSpan(ppu, dst, &ppu->bgBuffers[0].data[left],
                             right - left, math_enabled_cur, clip_color_mask != 0);
       dst += right - left;
-    } else if (old3ds) {
+    } else if (fast) {
       PpuWriteSubscreenMathSpan(ppu, dst, left, right, math_enabled_cur,
                                 clip_color_mask != 0);
       dst += right - left;
@@ -1345,16 +1419,25 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
     }
   } while (cw_clip_math >>= 1, ++windex < cwin.nr);
 
-  // Clear out stuff on the sides.
-  if (ppu->extraLeftRight - ppu->extraLeftCur != 0)
-    memset(dst_org, 0, sizeof(*dst_org) *
-           (ppu->extraLeftRight - ppu->extraLeftCur));
-  if (ppu->extraLeftRight - ppu->extraRightCur != 0) {
-    size_t first = 256 + ppu->extraLeftRight * 2 -
-                   (ppu->extraLeftRight - ppu->extraRightCur);
-    memset(dst_org + first, 0, sizeof(*dst_org) *
-           (ppu->extraLeftRight - ppu->extraRightCur));
+  // Clear out stuff on the sides, or continue the room's outer 16 pixels
+  // across them. A 16-pixel shift keeps every layer on its tile grid, so the
+  // floor and void patterns repeat without a seam. Must match Compose() in
+  // the 3DS GPU renderer.
+  unsigned left_margin = ppu->extraLeftRight - ppu->extraLeftCur;
+  unsigned right_margin = ppu->extraLeftRight - ppu->extraRightCur;
+  size_t first = 256 + ppu->extraLeftRight * 2 - right_margin;
+  if (ppu->wideMarginRepeat) {
+    for (unsigned x = left_margin; x-- > 0;)
+      dst_org[x] = dst_org[x + 16];
+    for (size_t x = first; x < first + right_margin; x++)
+      dst_org[x] = dst_org[x - 16];
+  } else {
+    if (left_margin != 0)
+      memset(dst_org, 0, sizeof(*dst_org) * left_margin);
+    if (right_margin != 0)
+      memset(dst_org + first, 0, sizeof(*dst_org) * right_margin);
   }
+  PpuDrawWideUi(ppu, y, dst_org);
   if (profile) ppu->phase.compose += PpuProfileTick() - phase_start;
 }
 
@@ -1672,9 +1755,10 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
     if (row >= spriteSize)
       continue;
     // in y-range, get the x location, using the high bit as well
-    int x = (ppu->oam[index] & 0xff) + (highOam & 1) * 256;
-    x -= (x >= 256 + extra_left_right) * 512;
-    x += ppu->renderObjXOffset;
+    // The 9 bits wrap around the drawn picture: the fixed camera can place it
+    // up to extra_left_right pixels beside the game's camera.
+    int x = (ppu->oam[index] & 0xff) + (highOam & 1) * 256 + ppu->renderObjXOffset;
+    x = ((x + 256 - extra_left_right) & 511) - 256 + extra_left_right;
     // if in x-range
     if (x <= -(spriteSize + extra_left_right))
       continue;
@@ -1721,6 +1805,13 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
   return (tilesLeft != tilesLeftOrg);
 }
 
+// The sprite lines hold every OAM entry that covers a line: none means the
+// evaluation below would draw nothing.
+static bool PpuLineHasSpriteCandidates(Ppu *ppu, int line) {
+  const uint32 *words = ppu->spriteLines[(line - ppu->renderObjYOffset) & 255];
+  return (words[0] | words[1] | words[2] | words[3]) != 0;
+}
+
 static bool PpuEvaluateVisibleSprites(Ppu *ppu, int line) {
   line -= ppu->renderObjYOffset;
   // Old-only candidate iteration; all fetch/priority rules match the base path.
@@ -1742,9 +1833,10 @@ static bool PpuEvaluateVisibleSprites(Ppu *ppu, int line) {
     int highOam = ppu->oam[0x100 + (index >> 4)] >> (index & 15);
     int spriteSize = spriteSizes[(highOam >> 1) & 1];
     // in y-range, get the x location, using the high bit as well
-    int x = (ppu->oam[index] & 0xff) + (highOam & 1) * 256;
-    x -= (x >= 256 + extra_left_right) * 512;
-    x += ppu->renderObjXOffset;
+    // The 9 bits wrap around the drawn picture: the fixed camera can place it
+    // up to extra_left_right pixels beside the game's camera.
+    int x = (ppu->oam[index] & 0xff) + (highOam & 1) * 256 + ppu->renderObjXOffset;
+    x = ((x + 256 - extra_left_right) & 511) - 256 + extra_left_right;
     // if in x-range
     if (x <= -(spriteSize + extra_left_right))
       continue;

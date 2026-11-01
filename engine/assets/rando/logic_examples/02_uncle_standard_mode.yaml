@@ -1,0 +1,86 @@
+# 02_uncle_standard_mode.yaml — standard-mode starting-area worked example
+#
+# Exercises: world_state_filter, can_place restriction (Standard mode
+# restricts the uncle's slot to plausible starting items), OP_WORLDSTATE_EQ
+# in a predicate, NPC location type.
+#
+# Translated from `app/Region/Standard/HyruleCastleEscape.php` and
+# `app/Region/Open/HyruleCastleEscape.php` (line numbers per audit §0.3.5).
+
+format_version: 1
+
+regions:
+  - id: LinksHouse
+    name: "Link's House"
+    # World-state-specific: in Inverted, Link's House moves to Dark World.
+    world_state_filter: [open, standard, retro]
+    source: "app/Region/Standard/HyruleCastleEscape.php:40"
+
+  - id: LinksHouse_Inverted
+    name: "Link's House (Inverted)"
+    world_state_filter: [inverted]
+    source: "app/Region/Inverted/DarkWorld/South.php:31"
+
+  - id: HyruleCastleEscape
+    name: "Hyrule Castle Escape"
+    dungeon: HyruleCastleEscape
+    source: "app/Region/Standard/HyruleCastleEscape.php:21-50"
+
+edges:
+  - from: LinksHouse
+    to: HyruleCastleEscape
+    # Standard-mode requires Link to have left the house with sword+shield
+    # (the uncle pickup) before he can reach the castle approach. Open mode
+    # has the uncle as a normal placement and the castle is reachable from
+    # the start.
+    predicate: "WORLDSTATE_EQ(open) OR WORLDSTATE_EQ(retro) OR HAS_ITEM(RescuedZelda)"
+    source: "app/Region/Standard/HyruleCastleEscape.php (mode-state guard)"
+    notes: |
+      The RescuedZelda virtual item is granted by clearing the uncle/sewers
+      path. In Standard mode the predicate becomes HAS_ITEM(RescuedZelda).
+      In Open mode either WORLDSTATE_EQ branch passes immediately.
+
+locations:
+  - id: "Link's Uncle"
+    name: "Link's Uncle"
+    region: LinksHouse
+    type: Npc
+    vanilla_item: L1Sword
+    # Standard-mode `setFillRules` restricts the uncle slot to plausible
+    # starting items: nothing that requires sword/glove/etc. to have come
+    # before it. ALTTPR factors this as a list of bad items rather than
+    # a list of good items.
+    can_reach: "TRUE()"
+    can_place: |
+      WORLDSTATE_EQ(open) OR WORLDSTATE_EQ(retro) OR (
+        NOT OP_ITEM_IS(SilverArrowUpgrade)
+        AND NOT OP_ITEM_IS(MirrorShield)
+        AND NOT OP_ITEM_IS(TitanMitt)
+        AND NOT OP_ITEM_IS(L4Sword)
+        AND NOT OP_ITEM_IS(MagicMirror)
+        AND NOT OP_ITEM_IS(MoonPearl)
+        AND NOT OP_ITEM_IS(BookOfMudora)
+      )
+    source: "app/Region/Standard/HyruleCastleEscape.php:49 (setRequirements + setFillRules)"
+    notes: |
+      The Standard-mode uncle is part of the placement pool (not hardcoded
+      to sword). Link starts swordless and the chosen item is collected
+      from the uncle. Open mode does not restrict the slot.
+
+  - id: Sanctuary
+    name: "Sanctuary"
+    region: HyruleCastleEscape
+    type: Chest
+    vanilla_item: HeartContainer
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/HyruleCastleEscape.php:41"
+
+  - id: "Hyrule Castle - Boomerang Chest"
+    name: "Hyrule Castle - Boomerang Chest"
+    region: HyruleCastleEscape
+    type: Chest
+    vanilla_item: BlueBoomerang
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/HyruleCastleEscape.php:46"
+
+macros: []

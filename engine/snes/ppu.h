@@ -47,8 +47,11 @@ enum {
   kPpuRenderFlags_Height240 = 4,
   // Disable sprite render limits
   kPpuRenderFlags_NoSpriteLimits = 8,
-  // Full-resolution, E6-equivalent Old 3DS composition fast paths.
+  // Old 3DS hardware: phase profiling and the GPU composition path.
   kPpuRenderFlags_Old3DS = 16,
+  // Retained background planes, per-frame sprite lines, opaque rows and span
+  // color math. Output is identical to the per-pixel paths.
+  kPpuRenderFlags_FastPaths = 32,
 };
 
 
@@ -73,6 +76,8 @@ struct Ppu {
   uint8_t *renderBuffer;
   PpuTileCache *tileCache;
   uint8_t extraLeftCur, extraRightCur, extraLeftRight, extraBottomCur;
+  uint8_t wideUi, wideUiSaveX, wideUiSaveY; // derived native interface layout
+  uint8_t wideMarginRepeat; // continue room edges across black WIDE margins
   int16_t renderObjXOffset;
   int16_t renderObjYOffset;
   float mode7PerspectiveLow, mode7PerspectiveHigh;

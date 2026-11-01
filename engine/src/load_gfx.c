@@ -1,14 +1,29 @@
 #include "zelda_rtl.h"
 #include "variables.h"
+#include "mods.h"
 #include "snes/snes_regs.h"
 #include "overworld.h"
 #include "load_gfx.h"
 #include "player.h"
 #include "sprite.h"
 #include "assets.h"
+#include "localized.h"
+#include "language_cart.h"
+#include "rando/medallion_icons.h"  // Rando_PatchMedallionEntranceBgGfx
+#include "rando/shuffle_enemies.h"  // EnemyShuffle_ReshuffleCurrentRoomSheets (sheet reshuffle)
 
 // Allow this to be overwritten
 uint16 kGlovesColor[2] = {0x52f6, 0x376};
+
+const uint16 *Palette_GetLinkArmorColors(unsigned armor) {
+  const uint16 *skin = (const uint16 *)Mods_Table(kModTable_LinkPalette);
+  return skin && armor < 4 ? skin + armor * 15 : kPalette_ArmorAndGloves + armor * 15;
+}
+
+static uint16 LinkGloveColor(unsigned glove) {
+  const uint16 *skin = (const uint16 *)Mods_Table(kModTable_LinkPalette);
+  return skin ? skin[60 + glove] : kGlovesColor[glove];
+}
 
 static const uint16 kPaletteFilteringBits[64] = {
   0xffff, 0xffff, 0xfffe, 0xffff, 0x7fff, 0x7fff, 0x7fdf, 0xfbff, 0x7f7f, 0x7f7f, 0x7df7, 0xefbf, 0x7bdf, 0x7bdf, 0x77bb, 0xddef,
@@ -202,6 +217,12 @@ static const uint8 kSpriteTilesets[144][4] = {
   {97, 98,  99, 80},
   {97, 98,  99, 80},
 };
+
+// As the quest's cartridge has the table ($80:DB57).
+static const uint8 *SpriteTileset(int i) {
+  return MODS_U8(kSpriteTilesets, 0x80db57) + i * 4;
+}
+
 static const uint8 kAuxTilesets[82][4] = {
   {  6,   0,  31,  24},
   {  8,   0,  34,  27},
@@ -329,7 +350,8 @@ static const int8 kGraphicsLoadSp6[20] = {
 static const uint8 kMirrorWarp_LoadNext_NmiLoad[15] = {0, 14, 15, 16, 17, 0, 0, 0, 0, 0, 0, 18, 19, 20, 0};
 
 static const uint8 *GetCompSpritePtr(int i) {
-  return kSprGfx(i).ptr;
+  const uint8 *loc = Loc_SprSheet(i);
+  return loc ? loc : kSprGfx(i).ptr;
 }
 
 void ApplyPaletteFilter_bounce() {
@@ -413,7 +435,7 @@ void EraseTileMaps_normal() {
   EraseTileMaps(0x7f, 0x1ec);
 }
 
-static void DecompAndUpload2bpp(uint16 *vram_ptr, uint8 pack) {
+void DecompAndUpload2bpp(uint16 *vram_ptr, uint8 pack) {
   Decomp_spr(&g_ram[0x14000], pack);
   const uint8 *src = &g_ram[0x14000];
   memcpy(vram_ptr, src, 1024 * sizeof(uint16));
@@ -443,7 +465,8 @@ void EraseTileMaps(uint16 r2, uint16 r0) {  // 808355
   for (int i = 0; i < 0x2000; i++)
     dst[i] = r0;
 
-  dst = g_zenv.vram + 0x6000;
+  // The BG3 tilemap: $7800 in the French Canadian cartridge ($80:839D).
+  dst = g_zenv.vram + (g_loc_rom ? 0x7800 : 0x6000);
   for (int i = 0; i < 0x800; i++)
     dst[i] = r2;
 }
@@ -554,12 +577,48 @@ void LoadFollowerGraphics() {  // 80d423
 }
 
 void WriteTo4BPPBuffer_at_7F4000(uint8 a) {  // 80d4db
+  // Invalidate here, not (only) in DecodeAnimatedSpriteTile_variable: the
+  // rupee-receipt animation (Ancilla22_ItemReceipt) repaints the slot by
+  // calling this directly each animation tick, and a stale owner would make
+  // Rando_EnsureRecvItemSlotGfx skip reloading a field item's tiles forever
+  // after the slot contents change.
+  g_recv_item_slot_owner = 0xFFFFu;  // slot content is about to change
   uint8 *src = &g_ram[0x14000] + kDecodeAnimatedSpriteTile_Tab[a];
   Expand3To4High(&g_ram[0x9000] + 0x2d40, src, g_ram, 2);
   Expand3To4High(&g_ram[0x9000] + 0x2d40 + 0x40, src + 0x180, g_ram, 2);
 }
 
+bool DecodeAnimatedSpriteTile_ToBuffer(uint8 a, uint8 *dst) {
+  if (dst == NULL || (a & 0x80) ||
+      a >= sizeof(kDecodeAnimatedSpriteTile_Tab) / sizeof(kDecodeAnimatedSpriteTile_Tab[0]))
+    return false;
+  uint8 y = (a == 0x23 || a >= 0x37) ? 0x5d :
+            (a == 0xc || a >= 0x24) ? 0x5c : 0x5b;
+  Decomp_spr(&g_ram[0x14600], y);
+  Decomp_spr(&g_ram[0x14000], 0x5a);
+  uint8 *src = &g_ram[0x14000] + kDecodeAnimatedSpriteTile_Tab[a];
+  Expand3To4High(dst, src, g_ram, 2);
+  Expand3To4High(dst + 0x40, src + 0x180, g_ram, 2);
+  return true;
+}
+
+// Which gfx index currently occupies the shared receive-item VRAM slot
+// (chars 0x24/0x34), so the field-item drawer can skip a
+// redundant re-decompress when it already owns the slot. 0xFFFF = unknown/dirty.
+// Every slot repaint invalidates it — WriteTo4BPPBuffer_at_7F4000 (which all
+// repaints funnel through: item receipt incl. the rupee animation ticks,
+// direct-grant icon, another field item) and DecodeAnimatedSpriteTile_variable
+// — so the next field-item draw repaints. Snapshot restore invalidates it too
+// (StateRecorder_Load): the buffer lives in g_ram but this cache does not.
+uint16 g_recv_item_slot_owner = 0xFFFFu;
+
 void DecodeAnimatedSpriteTile_variable(uint8 a) {  // 80d4ed
+  // Custom item gfx ids (kRandoCustomGfx_*, 0x80 bit) are not bundle indices;
+  // they must route through Rando_EnsureRecvItemSlotGfx, which handles them
+  // before ever calling here. A leak would index kDecodeAnimatedSpriteTile_Tab
+  // out of bounds.
+  assert(!(a & 0x80));
+  g_recv_item_slot_owner = 0xFFFFu;  // slot content is about to change
   uint8 y = (a == 0x23 || a >= 0x37) ? 0x5d :
             (a == 0xc || a >= 0x24) ? 0x5c : 0x5b;
   Decomp_spr(&g_ram[0x14600], y);
@@ -617,23 +676,31 @@ void LoadTransAuxGFX_sprite() {  // 80d6f9
 }
 
 void Gfx_LoadSpritesInner(uint8 *dst) {  // 80d706
-  const uint8 *p = kSpriteTilesets[sprite_graphics_index];
+  const uint8 *p = SpriteTileset(sprite_graphics_index);
   int len;
 
+  // Resolve all four subgroup ids first (a 0 entry inherits the prior sheet),
+  // then let the enemy-shuffle SHEET reshuffle rewrite any safe subgroup slot BEFORE any
+  // decompress — so the sheet actually loaded into VRAM matches what the picker
+  // sees (EnemyShuffle_Pick* reads sprite_gfx_subset_*). Reordering all-resolve-
+  // then-all-decompress is behavior-identical to the original interleaving
+  // (Decomp_spr has no effect on the subset ids); a no-op when the shuffle is off.
   if (p[0])
     sprite_gfx_subset_0 = p[0];
-  len = Decomp_spr(dst, sprite_gfx_subset_0);
-  assert(len == 0x600);
   if (p[1])
     sprite_gfx_subset_1 = p[1];
-  len = Decomp_spr(dst + 0x600, sprite_gfx_subset_1);
-  assert(len == 0x600);
   if (p[2])
     sprite_gfx_subset_2 = p[2];
-  len = Decomp_spr(dst + 0x600*2, sprite_gfx_subset_2);
-  assert(len == 0x600);
   if (p[3])
     sprite_gfx_subset_3 = p[3];
+  EnemyShuffle_ReshuffleCurrentRoomSheets(p);
+
+  len = Decomp_spr(dst, sprite_gfx_subset_0);
+  assert(len == 0x600);
+  len = Decomp_spr(dst + 0x600, sprite_gfx_subset_1);
+  assert(len == 0x600);
+  len = Decomp_spr(dst + 0x600*2, sprite_gfx_subset_2);
+  assert(len == 0x600);
   len = Decomp_spr(dst + 0x600*3, sprite_gfx_subset_3);
   assert(len == 0x600);
   incremental_counter_for_vram = 0;
@@ -749,7 +816,7 @@ void AnimateMirrorWarp_DecompressNewTileSets() {  // 80d8fe
   aux_bg_subset_2 = at[2] ? at[2] : mt[5];
   aux_bg_subset_3 = at[3] ? at[3] : mt[6];
 
-  const uint8 *p = kSpriteTilesets[sprite_graphics_index];
+  const uint8 *p = SpriteTileset(sprite_graphics_index);
   if (p[0]) sprite_gfx_subset_0 = p[0];
   if (p[1]) sprite_gfx_subset_1 = p[1];
   if (p[2]) sprite_gfx_subset_2 = p[2];
@@ -818,11 +885,12 @@ void LoadNewSpriteGFXSet() {  // 80e031
 void InitializeTilesets() {  // 80e19b
   LoadCommonSprites();
 
-  const uint8 *p = kSpriteTilesets[sprite_graphics_index];
+  const uint8 *p = SpriteTileset(sprite_graphics_index);
   if (p[0]) sprite_gfx_subset_0 = p[0];
   if (p[1]) sprite_gfx_subset_1 = p[1];
   if (p[2]) sprite_gfx_subset_2 = p[2];
   if (p[3]) sprite_gfx_subset_3 = p[3];
+  EnemyShuffle_ReshuffleCurrentRoomSheets(p);  // rando: may rewrite subgroup slots 0..3
 
   LoadSpriteGraphics(&g_zenv.vram[0x5000], sprite_gfx_subset_0, &g_ram[0x7800]);
   LoadSpriteGraphics(&g_zenv.vram[0x5400], sprite_gfx_subset_1, &g_ram[0x7e00]);
@@ -848,7 +916,7 @@ void InitializeTilesets() {  // 80e19b
 }
 
 const uint8 *GetSpriteTilesetPacks(int idx) {
-  return kSpriteTilesets[idx];
+  return SpriteTileset(idx);
 }
 
 void LoadDefaultGraphics() {  // 80e2d0
@@ -867,15 +935,24 @@ void LoadDefaultGraphics() {  // 80e2d0
     }
   } while (--num);
 
-  // Load 2bpp graphics used for hud
-  DecompAndUpload2bpp(&g_zenv.vram[0x7000], 0x6a);
-  DecompAndUpload2bpp(&g_zenv.vram[0x7400], 0x6b);
-  DecompAndUpload2bpp(&g_zenv.vram[0x7800], 0x69);
+  LoadHudGraphics();
+}
+
+void LoadHudGraphics() {
+  // Load 2bpp graphics used for hud. BG3 characters start at $6000 in the
+  // French Canadian cartridge ($80:E2C8).
+  uint16 *bg3 = &g_zenv.vram[g_loc_rom ? 0x6000 : 0x7000];
+  DecompAndUpload2bpp(bg3, 0x6a);
+  DecompAndUpload2bpp(bg3 + 0x400, 0x6b);
+  DecompAndUpload2bpp(bg3 + 0x800, 0x69);
+  if (g_loc_rom)
+    Loc_UploadMenuChars(bg3);  // the German release's extra characters
 }
 
 void Attract_LoadBG3GFX() {  // 80e36d
-  // load 2bpp gfx for attract images
-  DecompAndUpload2bpp(&g_zenv.vram[0x7800], 0x67);
+  // load 2bpp gfx for attract images ($6800 in the French Canadian
+  // cartridge, $80:E31E)
+  DecompAndUpload2bpp(&g_zenv.vram[g_loc_rom ? 0x6800 : 0x7800], 0x67);
 }
 
 void Graphics_LoadChrHalfSlot() {  // 80e3fa
@@ -940,7 +1017,19 @@ void Graphics_LoadChrHalfSlot() {  // 80e3fa
 }
 
 void TransferFontToVRAM() {  // 80e556
-  memcpy(&g_zenv.vram[0x7000], FindIndexInMemblk(kDialogueFont(0), 0).ptr, 0x800 * sizeof(uint16));
+  if (g_loc_rom) {
+    // Twice the characters, from $0C:D078 to $6000 ($80:E4FC).
+    Loc_Words(&g_zenv.vram[0x6000], Loc_FontAddr(), 0x1000);
+    return;
+  }
+  // A translation in the USA layout draws the file screens with its own
+  // letters (language_cart.h): the dialogue font of the language in use.
+  MemBlk font = LanguageCart_UsaLayout() && g_zenv.dialogue_font_blk.ptr ?
+      g_zenv.dialogue_font_blk : kDialogueFont(0);
+  MemBlk chars = FindIndexInMemblk(font, 0);
+  if (chars.size < 0x800 * sizeof(uint16))
+    chars = FindIndexInMemblk(kDialogueFont(0), 0);
+  memcpy(&g_zenv.vram[0x7000], chars.ptr, 0x800 * sizeof(uint16));
 }
 
 void Do3To4High(uint16 *vram_ptr, const uint8 *decomp_addr) {  // 80e5af
@@ -1003,16 +1092,29 @@ int Decomp_spr(uint8 *dst, int gfx) {  // 80e772
   const uint8 *sprite_data = GetCompSpritePtr(gfx);
   // If the size is not 0x600 then it's compressed
   if (gfx >= 103 || blk.size != 0x600)
-    return Decompress(dst, blk.ptr);
-  memcpy(dst, blk.ptr, 0x600);
+    return Decompress(dst, sprite_data);
+  memcpy(dst, sprite_data, 0x600);
   return 0x600;
 }
 
 int Decomp_bg(uint8 *dst, int gfx) {  // 80e78f
-  return Decompress(dst, kBgGfx(gfx).ptr);
+  const uint8 *loc = Loc_BgSheet(gfx);
+  int len = Decompress(dst, loc ? loc : kBgGfx(gfx).ptr);
+  Rando_PatchMedallionEntranceBgGfx(dst, gfx, len);
+  return len;
 }
 
 int Decompress(uint8 *dst, const uint8 *src) {  // 80e79e
+  // With no zelda3_assets.dat every g_asset_ptrs[] entry is NULL, so each
+  // kSprGfx/kBgGfx lookup hands us a null source and the first `*src++` below
+  // faults. That is reachable headlessly and it is not hypothetical: the
+  // grant self-checks commit real receipts, and a vanilla receipt
+  // (AncillaAdd_ItemReceipt) decodes the item's tile bundle -- which segfaulted
+  // --rando-selftest and --rando-grant-check on every ROM-less CI checkout.
+  // Decompress is the single funnel every graphics read passes through, so
+  // fail soft here: with assets present src is never NULL and this is inert.
+  if (src == NULL)
+    return 0;
   uint8 *dst_org = dst;
   int len;
   for (;;) {
@@ -1455,6 +1557,10 @@ void SpotlightInternal(uint8 x, uint8 y) {  // 80f29d
 }
 
 void IrisSpotlight_ConfigureTable() {  // 80f312
+  for(int i=0;i<240;i++) {
+    hdma_table_dynamic[i]=0x00ff;
+    g_spotlight_ext_left[i]=255;g_spotlight_ext_right[i]=0;
+  }
   uint16 r14 = link_y_coord - BG2VOFS_copy2 + 12;
   spotlight_y_lower = r14 - spotlight_var1;
   spotlight_y_upper = r14 + spotlight_var1;
@@ -1486,11 +1592,17 @@ void IrisSpotlight_ConfigureTable() {  // 80f312
     r4++, r6--;
   }
 
-  for (int i = 224; i < 240; i++) {
-    hdma_table_dynamic[i] = 0;
-    g_spotlight_ext_left[i] = 0, g_spotlight_ext_right[i] = 0;
+  if(enhanced_features0 & kFeatures0_WidescreenVisualFixes) {
+    // The native HDMA picture is 224 lines, but the presentation mask covers
+    // all 240. Sample the actual distance rather than truncating the ellipse.
+    for(int row=0;row<240;row++) {
+      spotlight_ext_x0=255;spotlight_ext_x1=0;
+      int distance=abs(row-(int16)r14);uint16 raw=0x00ff;
+      if(distance<spotlight_var1)raw=IrisSpotlight_CalculateCircleValue(distance);
+      g_spotlight_ext_left[row]=spotlight_ext_x0;g_spotlight_ext_right[row]=spotlight_ext_x1;
+      if(row>=224)hdma_table_dynamic[row]=raw;
+    }
   }
-
   memcpy(hdma_table_unused, hdma_table_dynamic, 224  * sizeof(uint16));
 
   int delta = kSpotlight_delta_size[spotlight_var2 >> 1];
@@ -1937,7 +2049,7 @@ void LoadGearPalettes(uint8 sword, uint8 shield, uint8 armor) {  // 8ed6e8
   src = kPalette_Shield + (shield ? shield - 1 : 0) * 4;
   Palette_LoadMultiple_Arbitrary(src, 0x1b8, 3);
 
-  src = kPalette_ArmorAndGloves + armor * 15;
+  src = Palette_GetLinkArmorColors(armor);
   Palette_LoadMultiple_Arbitrary(src, 0x1e2, 14);
   flag_update_cgram_in_nmi++;
 }
@@ -2049,12 +2161,19 @@ void Palette_Load_Sp6L() {  // 9bece4
 }
 
 void Palette_Load_Sword() {  // 9bed03
+  // Assetless (headless CI): kPalette_Sword is NULL, so the read below faults.
+  // Reached from AncillaAdd_ItemReceipt for the sword receive codes, which the
+  // grant self-checks exercise. See the Decompress() null guard.
+  if (kPalette_Sword == NULL)
+    return;
   const uint16 *src = kPalette_Sword + ((int8)link_sword_type > 0 ? link_sword_type - 1 : 0) * 3;  // wtf: zelda reads offset 0xff
   Palette_LoadMultiple_Arbitrary(src, kPal_Sword, 2);
   flag_update_cgram_in_nmi += 1;
 }
 
 void Palette_Load_Shield() {  // 9bed29
+  if (kPalette_Shield == NULL)   // assetless — see Palette_Load_Sword
+    return;
   const uint16 *src = kPalette_Shield + (link_shield_type ? link_shield_type - 1 : 0) * 4;
   Palette_LoadMultiple_Arbitrary(src, kPal_Shield, 3);
   flag_update_cgram_in_nmi += 1;
@@ -2087,14 +2206,14 @@ void Palette_Load_DungeonMapSprite() {  // 9beddd
 }
 
 void Palette_Load_LinkArmorAndGloves() {  // 9bedf9
-  const uint16 *src = kPalette_ArmorAndGloves + link_armor * 15;
+  const uint16 *src = Palette_GetLinkArmorColors(link_armor);
   Palette_LoadMultiple_Arbitrary(src, kPal_ArmorGloves, 14);
   Palette_UpdateGlovesColor();
 }
 
 void Palette_UpdateGlovesColor() {  // 9bee1b
   if (link_item_gloves)
-    main_palette_buffer[0xfd] = aux_palette_buffer[0xfd] = kGlovesColor[link_item_gloves - 1];
+    main_palette_buffer[0xfd] = aux_palette_buffer[0xfd] = LinkGloveColor(link_item_gloves - 1);
   flag_update_cgram_in_nmi += 1;
 }
 
@@ -2166,11 +2285,11 @@ void Palette_LoadForFileSelect() {  // 9bef96
 }
 
 void Palette_LoadForFileSelect_Armor(int k, uint8 armor, uint8 gloves) {  // 9bf032
-  const uint16 *pal = kPalette_ArmorAndGloves + armor * 15;
+  const uint16 *pal = Palette_GetLinkArmorColors(armor);
   for (int i = 0; i != 15; i++)
     aux_palette_buffer[k + 0x81 + i] = main_palette_buffer[k + 0x81 + i] = pal[i];
   if (gloves)
-    aux_palette_buffer[k + 0x8d] = main_palette_buffer[k + 0x8d] = kGlovesColor[gloves - 1];
+    aux_palette_buffer[k + 0x8d] = main_palette_buffer[k + 0x8d] = LinkGloveColor(gloves - 1);
 }
 
 void Palette_LoadForFileSelect_Sword(int k, uint8 sword) {  // 9bf072
@@ -2211,4 +2330,3 @@ void HandleScreenFlash() {  // 9de9b6
 
   flag_update_cgram_in_nmi++;
 }
-

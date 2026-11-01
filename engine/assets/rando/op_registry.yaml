@@ -1,0 +1,676 @@
+# op_registry.yaml — predicate VM op-code assignments
+#
+# Per `randomizer-logic / Predicate VM op set` and tasks.md §3.4.
+#
+# - Append-only: new ops receive new IDs at the end; removed ops keep their
+#   slot reserved with `deprecated: true`.
+# - Op-code bytecode is compiled into `src/rando/logic_data.c` at build time
+#   and is NOT stored in any save; cross-version save compatibility does not
+#   depend on op-code stability.
+# - Changing any assignment is a `kGeneratorVersion` bump trigger (tasks.md §13.6).
+
+format_version: 1
+phase: A
+
+# ---------------------------------------------------------------------------
+# Phase A ops (15 active)
+# ---------------------------------------------------------------------------
+ops:
+  # --- Inventory ops ----------------------------------------------------------
+  - id: 0
+    name: OP_HAS_ITEM
+    phase: A
+    operands: [item_id]
+    semantics: "counts[item_id] >= 1"
+    contexts: [can_reach, can_place]
+
+  - id: 1
+    name: OP_HAS_AMOUNT
+    phase: A
+    operands: [item_id, n_uint8]
+    semantics: "counts[item_id] >= n"
+    contexts: [can_reach, can_place]
+
+  - id: 2
+    name: OP_HAS_ANY_OF
+    phase: A
+    operands: [item_id_list]
+    semantics: "any(counts[id] >= 1 for id in list)"
+    contexts: [can_reach, can_place]
+
+  - id: 3
+    name: OP_HAS_ANY_COUNT
+    phase: A
+    operands: [item_id_list, n_uint8]
+    semantics: "sum(counts[id] for id in list) >= n"
+    contexts: [can_reach, can_place]
+    notes: |
+      Canonical "hearts total" predicate uses this op over
+      [PieceOfHeart, BossHeartContainer, StartingHeart]. Sums counters
+      across the union — a 4-quarter PieceOfHeart counts as one container
+      because the heart-piece roll-over to a container is handled by the
+      grant path, not by this op (this op sums the *registry counters*).
+
+  # --- World / settings / goal ops --------------------------------------------
+  - id: 4
+    name: OP_WORLDSTATE_EQ
+    phase: A
+    operands: [world_state_id]
+    semantics: "settings.world_state == world_state_id"
+    contexts: [can_reach, can_place]
+
+  - id: 5
+    name: OP_GOAL_EQ
+    phase: A
+    operands: [goal_id]
+    semantics: "settings.goal == goal_id"
+    contexts: [can_reach, can_place]
+
+  - id: 6
+    name: OP_GOAL_REQUIRES_DUNGEON
+    phase: A
+    operands: [dungeon_id]
+    semantics: |
+      true iff the active goal predicate references dungeon_id as a
+      required-clear (Defeat Ganon and Fast Ganon do not require any
+      dungeon; All Dungeons requires every dungeon; Completionist requires
+      every dungeon whose locations are non-empty in the active world-state).
+    contexts: [can_reach, can_place]
+
+  - id: 7
+    name: OP_DUNGEON_CLEARED
+    phase: A
+    operands: [dungeon_id]
+    semantics: "dungeon_id ∈ cleared_dungeons (set maintained by reachability fixed-point)"
+    contexts: [can_reach, can_place]
+
+  # --- Region / entrance ops --------------------------------------------------
+  - id: 8
+    name: OP_REGION_REACHABLE
+    phase: A
+    operands: [region_id]
+    semantics: |
+      true iff region_id is reachable from the start region under the current
+      inventory snapshot, by traversing the static EdgeDef[] graph (plus any
+      per-world-state / per-seed edge overlay). The operand is a region id
+      directly — the Phase A `RegionRemap` indirection was retired in Phase C
+      entrance shuffle (dead identity code; see add-rando-entrance-shuffle
+      design.md §1).
+    contexts: [can_reach, can_place]
+    notes: |
+      Memoized PER fixed-point iteration of the reachability outer loop
+      (cache invalidated at every iteration boundary because adding an
+      item between iterations can make a previously unreachable region
+      reachable).
+
+  # --- Shuffle-aware ops ------------------------------------------------------
+  - id: 9
+    name: OP_HAS_PRIZE
+    phase: A
+    operands: [prize_id]
+    semantics: |
+      true iff the dungeon whose prize-shuffle assignment is prize_id is
+      currently in cleared_dungeons. Bridges the prize-shuffle table to
+      logic gates like "Sahasrahla wants the Green Pendant" (the predicate
+      asks for the prize, the engine resolves the prize to the dungeon
+      that currently holds it).
+    contexts: [can_reach, can_place]
+
+  - id: 10
+    name: OP_MEDALLION_OPENS
+    phase: A
+    operands: [entrance_id]
+    semantics: |
+      true iff the inventory contains the medallion that medallion-shuffle
+      assigned to entrance_id. Used by Misery Mire and Turtle Rock entrance
+      predicates.
+    contexts: [can_reach, can_place]
+
+  # --- Placement-only op ------------------------------------------------------
+  - id: 11
+    name: OP_ITEM_IS
+    phase: A
+    operands: [item_id]
+    semantics: "candidate_item == item_id (evaluates the placer's candidate_item register)"
+    contexts: [can_place, always_allow]
+    notes: |
+      Per `randomizer-logic / Per-location can_place + always_allow predicates`:
+      OP_ITEM_IS evaluates against the candidate_item register. It SHALL
+      appear ONLY inside placement-context predicates (can_place AND
+      always_allow). The placer consults `can_place(item) OR always_allow(item)`
+      as the placement gate — both expressions have the candidate_item
+      register populated, so OP_ITEM_IS is well-defined in either. The
+      well-formedness pass (task 3.10) rejects OP_ITEM_IS in can_reach (the
+      reachability context, where candidate_item is undefined).
+
+  # --- Composition ------------------------------------------------------------
+  - id: 12
+    name: OP_AND
+    phase: A
+    operands: [predicate_list]
+    semantics: "all(eval(p) for p in list)"
+    contexts: [can_reach, can_place]
+
+  - id: 13
+    name: OP_OR
+    phase: A
+    operands: [predicate_list]
+    semantics: "any(eval(p) for p in list)"
+    contexts: [can_reach, can_place]
+
+  - id: 14
+    name: OP_NOT
+    phase: A
+    operands: [predicate]
+    semantics: "not eval(predicate)"
+    contexts: [can_reach, can_place]
+
+  # ---------------------------------------------------------------------------
+  # Phase B placeholders — id slots reserved, handlers ship in Phase B.
+  # Predicates that reference these ops MUST NOT appear in Phase A logic.yaml;
+  # the codegen well-formedness pass rejects them.
+  # ---------------------------------------------------------------------------
+  - id: 15
+    name: OP_TRICK
+    phase: B
+    operands: [trick_id]
+    semantics: "settings.tricks bitfield has trick_id enabled (Phase A pins tricks=none → always false)"
+    contexts: [can_reach, can_place]
+
+  - id: 16
+    name: OP_DIFFICULTY_AT_LEAST
+    phase: B
+    operands: [difficulty_level]
+    semantics: "settings.item_pool_difficulty >= level"
+    contexts: [can_reach, can_place]
+    notes: |
+      Phase A's item_pool_difficulty does NOT affect the logic graph;
+      this op exists only for Phase B+ predicates that gate behavior on
+      pool difficulty (e.g., hard-only macros).
+
+  - id: 17
+    name: OP_GLITCH_LEVEL_AT_LEAST
+    phase: B
+    operands: [glitch_level]
+    semantics: |
+      settings.logic >= level (NoGlitches=0 < OverworldGlitches=1 <
+      MajorGlitches=2 < HybridMG=3 < NoLogic=4). Phase A pins logic=NoGlitches,
+      so any predicate referencing this op evaluates to its zero-glitch branch.
+    contexts: [can_reach, can_place]
+
+  - id: 18
+    name: OP_MODEWEAPONS_EQ
+    phase: B
+    operands: [mode_weapons]
+    semantics: |
+      settings.mode_weapons == operand (randomized=0, assured=1, vanilla=2,
+      swordless=3). Added for swordless mode (add-rando-trick-logic-and-axes §4):
+      the Ganon / Agahnim / CanMeltThings predicates gate their swordless branch
+      on OP_MODEWEAPONS_EQ(swordless). Under the default (randomized) it is false,
+      so the swordless disjuncts are inert and default placement is unchanged.
+    contexts: [can_reach, can_place]
+
+  - id: 19
+    name: OP_CAN_KILL_BOSS
+    phase: B
+    operands: [dungeon_id]
+    semantics: |
+      true iff Link can defeat the boss CURRENTLY ASSIGNED to dungeon_id under
+      boss-shuffle. The op resolves dungeon_id -> assigned boss-pool index via the
+      per-seed boss assignment (PredicateContext.boss_assignment, installed by the
+      placer the same way prize/medallion are; NULL falls back to the vanilla boss
+      via kRandoDungeonVanillaBoss), then evaluates that boss's kill predicate from
+      kRandoBossKillPred[]. Added for runtime boss shuffle
+      (add-rando-shuffles-and-minigames boss-runtime): each dungeon's `- Boss`
+      / `- Prize` location gates on CanKillBoss(<Dungeon>) instead of the vanilla
+      CanKill<Boss> macro, so a shuffled item-gated boss can't strand the prize.
+      With boss_shuffle off the assignment is the vanilla identity, so the op
+      resolves to the dungeon's vanilla boss-kill predicate — byte-identical to the
+      inline macro it replaces (default-settings placement unchanged).
+    contexts: [can_reach, can_place]
+    notes: |
+      The boss-pool index order (kBoss_* in src/rando/shuffle_boss.c) is the
+      contract shared by kRandoBossKillPred[] (codegen) and the runtime boss
+      assignment (BossShuffle_ComputeAssignment). Logic_SelfCheck cross-checks
+      kRandoDungeonVanillaBoss against shuffle_boss.c's vanilla map.
+
+
+  - id: 20
+    name: OP_DOORS_ACTIVE
+    phase: C
+    operands: [door_dungeon_idx]
+    semantics: |
+      true iff a door-shuffle layout is installed AND its shuffled_mask has the
+      bit for door_dungeon_idx (the kDoorTblDungeons index, NOT the game's
+      palace index). Pinned dungeons (Hyrule Castle, Swamp Palace at MVP) keep
+      the bit clear, so their locations evaluate the vanilla branch of the
+      codegen wrap. Added for add-rando-door-shuffle: every door-controlled
+      location's can_reach is wrapped as
+      (NOT DOORS_ACTIVE(d) AND vanilla) OR (DOORS_ACTIVE(d) AND DOORS_LOC_REACHABLE(loc)),
+      which evaluates to exactly the vanilla predicate while inactive.
+
+  - id: 21
+    name: OP_DOORS_LOC_REACHABLE
+    phase: C
+    operands: [location_id_u16]
+    semantics: |
+      Door-shuffle oracle query: true iff the location is reachable inside its
+      (shuffled) dungeon under the installed layout, given current inventory
+      counts, the worst-case per-key-door thresholds from the key prover, and
+      the portal lobbies whose kDoorPortalGates row evaluates true against the
+      current region bitset. False when no layout is installed (tracker before
+      activation, vanilla seeds). Evaluated by DoorExplore_Run — the same
+      crystal-aware explorer the stitcher and prover use, so generator and
+      logic cannot drift.
+
+  - id: 22
+    name: OP_INSTANT_FLUTE
+    phase: C
+    operands: []
+    semantics: |
+      true iff settings.instant_flute is enabled. Used by CanFly so the
+      seed-burned instant-flute QoL can make owning OcarinaInactive sufficient
+      for duck travel, while instant_flute=false restores ALTTPR's separate
+      canActivateOcarina route.
+    contexts: [can_reach, can_place]
+
+  - id: 23
+    name: OP_POT_KEYS_ON
+    phase: C
+    operands: []
+    semantics: |
+      true iff dungeon POT keys are first-class shuffled checks this seed —
+      pot_shuffle >= Keys AND pots are not forced off by cave-entrance shuffle,
+      exactly like pot_active() in rando_placement.c. Added for
+      add-rando-pot-sanity (task #25): a pot-bearing dungeon's deep locations are
+      wrapped with POT_KEYS_WILD / POT_KEYS_DUNGEON terms. With pots off this is
+      false, so the wrap collapses to the vanilla term — default + every pots-off
+      placement stays byte-identical. Door shuffle composes through the generated
+      door x pot bridge.
+    contexts: [can_reach, can_place]
+
+  - id: 24
+    name: OP_POT_KEYS_WILD
+    phase: C
+    operands: []
+    semantics: |
+      OP_POT_KEYS_ON AND Settings_EffectiveSmallKeysMode == Wild (keysanity,
+      incl. Retro which forces wild). Added for add-rando-pot-sanity (task #25):
+      a pot-bearing dungeon's deep locations wrap their small-key term as
+      `<vanilla predicate> AND (NOT POT_KEYS_WILD OR HAS_AMOUNT(SmallKey_X,
+      full))`, where `full` is the prover WORST-CASE key-door depth once the pot
+      keys are first-class items. Under wild keys the keys live anywhere in the
+      world, so you must HOLD `full` of them before reaching — the static
+      worst-case is both correct (no strand) and achievable (collect externally,
+      enter loaded; capped at the dungeon's real key count). Dungeon-keys
+      (in-context collection) and pots-off both leave this false, so the wrap
+      collapses to the vanilla term and their placement is byte-identical.
+    contexts: [can_reach, can_place]
+
+  - id: 25
+    name: OP_POT_KEYS_DUNGEON
+    phase: C
+    operands: []
+    semantics: |
+      OP_POT_KEYS_ON AND Settings_EffectiveSmallKeysMode == Dungeon (per-dungeon
+      small keys, the in-context case). Added for add-rando-pot-sanity (task #25):
+      a pot-bearing dungeon's deep locations / pots wrap their small-key term as
+      `<vanilla predicate> AND (NOT POT_KEYS_DUNGEON OR HAS_AMOUNT(SmallKey_X,
+      mindepth))`, where `mindepth` is the prover SHORTEST-PATH key-door count —
+      the keys are collected EN ROUTE so the graduated min-depth is necessary +
+      sufficient for a known layout (a flat worst-case would be circular: the keys
+      sit behind the doors they open). Key pots use their EXACT region min-depth;
+      loot/empty pots and chest/boss/prize use the location/room min-depth. The
+      nonpot enemy/guard drops are free-granted into the assumed inventory
+      (rando_placement.c) so HAS_AMOUNT stays satisfiable, exactly mirroring
+      pots-off "drops free". Wild keys (worst-case held externally) and pots-off
+      both leave this false, so the term collapses out and their placement is
+      byte-identical.
+    contexts: [can_reach, can_place]
+
+  - id: 26
+    name: OP_ENEMY_DROP_KEYS_DUNGEON
+    phase: C
+    operands: []
+    semantics: |
+      enemy_drop_checks=Keys AND Settings_EffectiveSmallKeysMode == Dungeon.
+      Added for add-rando-enemy-drop-sanity Phase 5: generated forced enemy
+      small-key drop rows suppress inherited same-key predicates and replace them
+      with the prover DROP-region min-depth. Door shuffle uses the generated
+      door x enemy-drop bridge instead of the vanilla-door min-depth numbers.
+    contexts: [can_reach, can_place]
+
+  - id: 27
+    name: OP_ENEMY_DROP_KEYS_WILD
+    phase: C
+    operands: []
+    semantics: |
+      enemy_drop_checks=Keys AND Settings_EffectiveSmallKeysMode == Wild
+      (keysanity, incl. Retro which forces wild). Added for
+      add-rando-enemy-drop-sanity Phase 6: once forced enemy small-key drops are
+      first-class checks, generated enemy-drop rows and ordinary dungeon
+      locations gate their prover worst-case key-depth on this op. Under Wild
+      keys those keys must already be held externally before entering the gated
+      branch, unlike Dungeon keys where keys can be collected en route.
+    contexts: [can_reach, can_place]
+
+
+  - id: 28
+    name: OP_SOULS_TIER_AT_LEAST
+    phase: C
+    operands: [souls_tier]
+    semantics: |
+      settings.souls_shuffle >= tier (Off=0 < Bosses=1 < BossesEnemies=2).
+      add-enemy-souls: wraps soul-item requirements so one logic blob serves
+      all tiers - NeedsBossSoul/NeedsEnemySoul macros compile to
+      (NOT SOULS_TIER_AT_LEAST(t)) OR HAS_ITEM(Soul_X), which collapses to
+      true (requirement inert) below the tier. Default Off leaves every
+      souls-conditional predicate at its pre-souls value (placement
+      byte-identical).
+    contexts: [can_reach, can_place]
+
+  - id: 29
+    name: OP_NPC_SOULS_ACTIVE
+    phase: C
+    operands: []
+    semantics: |
+      settings.npc_souls != 0 (add-npc-souls). Wraps NPC-check soul
+      requirements so they collapse to true (inert) when the toggle is off -
+      NeedsNpcSoul macros compile to
+      (NOT NPC_SOULS_ACTIVE) OR HAS_ITEM(Soul_Npc_X). Default off leaves
+      every gated predicate at its pre-npc-souls value (placement
+      byte-identical).
+    contexts: [can_reach, can_place]
+
+  - id: 30
+    name: OP_TOWER_CRYSTALS_MET
+    phase: C
+    operands: []
+    semantics: |
+      Crystal count (Prize_Crystal1..7 held) >= the seed's RESOLVED
+      crystals.tower requirement (add-rando-random-crystals, external-review
+      round-2 fix: the GT entry edges previously hardcoded 7, so random /
+      non-7 tower counts never affected generator reachability). Context
+      builders resolve the requirement (Crystals_Resolve for the random
+      sentinel when the seed is available; the cached effective count on the
+      tracker path); an unresolved context falls back to
+      min(settings.crystals_tower, 7) - conservative 7 for the sentinel.
+      Default settings (tower=7) evaluate byte-identically to the old
+      hardcoded HAS_ANY_COUNT(...,7) term.
+    contexts: [can_reach, can_place]
+
+  - id: 31
+    name: OP_OW_FLUTE_VANILLA
+    phase: E
+    operands: []
+    semantics: |
+      True iff settings.flute_shuffle == off (add-rando-ow-warp-shuffle).
+      The CanFly macro's neutralization conjunct: CanFly's baked disjuncts
+      encode the eight VANILLA flute destinations, which stop existing under
+      an active flute shuffle — this op compiles the whole macro false then,
+      making the OW_FluteNet hub the sole source of flute reachability.
+      Reads the NORMALIZED flute_shuffle (apply_derived_rules zeroes it
+      under Inverted), so Inverted's intact CanFly uses are unaffected. A
+      NULL-settings evaluation context returns TRUE (vanilla behavior).
+      Settings-constant per evaluation, so reachability-monotone.
+    contexts: [can_reach, can_place]
+
+
+
+# ---------------------------------------------------------------------------
+# Phase B trick bit-position scaffolding (priming for `add-rando-trick-logic-and-axes`)
+# ---------------------------------------------------------------------------
+#
+# OP_TRICK (id 15) takes a trick_id operand. The trick_id maps to a bit
+# position in `settings.tricks` (uint8 LE per Phase A canonical
+# serialization position #5). Width is 8 bits — Phase B supports 8 tricks;
+# extending to uint16/uint64 is a separate generator_version bump.
+#
+# Bit positions SHALL be stable across kGeneratorVersion bumps within
+# Phase B (only added entries shift the bit space, and new entries get
+# appended to the next free bit).
+#
+# Status: scaffold only. Phase B `add-rando-trick-logic-and-axes` will
+# populate the per-trick predicate authoring discipline + per-location
+# applicability via ALTTPR PHP grep.
+#
+# Initial 8 tricks (the "canonical 5" + 3 fill, per Phase B risk register R11):
+
+# `status:` values
+#   scaffold    — bit reserved, no predicates wired (the priming state).
+#   authored    — predicates wired across logic_parts/** + PHP-cited; maps to a
+#                 real ALTTPR config flag (verified by an ALTTPR config-flag grep).
+#   placeholder — fork-invented trick id with NO upstream ALTTPR flag to ground.
+#                 Cannot be PHP-authored; the bit exists but no predicate reads it.
+#
+# `rom_version_status:` (§12.6 — ALTTPR targets JP 1.0; this fork is US 1.0)
+#   untested-on-us10 | verified-us10 | cross-version | jp10-only | us10-different
+#   Default new entries to `untested-on-us10`, except pure player-skill tricks
+#   (no ROM dependency) which are `cross-version`. Per-trick US-1.0 verification
+#   is OUT OF SCOPE here (playtest work) — see tasks §12.6.7.
+tricks:
+  - bit: 0
+    id: boots-clip
+    name: "Pegasus Boots clip"
+    description: |
+      Using boots to clip into a tile slightly inside an obstacle, enabling
+      out-of-bounds traversal or shortcuts.
+    sources:
+      # ALTTPR config flag `canBootsClip` — an OWG-group flag (config/logic.php:9,
+      # 18,28 → OWG/HMG/MG). Phase D (§5) macro: CanBootsClip = (OP_TRICK(boots_clip)
+      # OR OP_GLITCH_LEVEL_AT_LEAST(overworld_glitches)) AND HAS_ITEM(Boots), so the
+      # trick BIT is now ONE of two enablers (the other is logic>=OWG). Composed at
+      # logic_parts/10_desert_palace.yaml, 11_tower_of_hera.yaml, 31_misery_mire.yaml,
+      # logic.yaml:286 (Lake Hylia island).
+      - "app/Region/**: config('canBootsClip', false) — 134 uses; config/logic.php:9,18,28"
+    status: authored
+    # untested grounded (romdiff 2026-06-09): NOT jp10-only — LinkState_Dashing +
+    # the collision routines are byte-identical JP↔US and tile_detect.c reproduces
+    # the sub-tile corner math bit-for-bit. Cross-version ROM; the corner-clip
+    # frame/sub-pixel feasibility on this build is playtest-pending. (See
+    # openspec/changes/add-rando-major-glitch/TEN_TECHNIQUES.md / the
+    # glitch_levels grounding note.)
+    rom_version_status: untested-on-us10
+
+  - bit: 1
+    id: fake-flippers
+    name: "Fake Flippers"
+    description: |
+      Traversing water without flippers using sprite-based water bounce.
+    sources:
+      # ALTTPR config flag `canFakeFlipper` — OWG-group (config/logic.php:7,16,26).
+      # Phase D (§5) macro: CanFakeFlippers = OP_TRICK(fake_flippers) OR
+      # OP_GLITCH_LEVEL_AT_LEAST(overworld_glitches); composed `HAS_ITEM(Flippers)
+      # OR CanFakeFlippers()` at swim sites (logic.yaml:286, 30_ice_palace.yaml:68).
+      - "app/Region/**: config('canFakeFlipper', false) — 33 uses; config/logic.php:7,16,26"
+    status: authored
+    # add-rando-major-glitch F4 — VERIFIED on US 1.0. Fake Flippers is one of the
+    # six JP-1.0 glitches restored + owner-playtest-confirmed by
+    # add-jp-glitch-restoration (archive 2026-06-09; gate at src/player.c:1778).
+    # add-rando-major-glitch D6 now FORCES kFeatures0_RestoreJpGlitches on for any
+    # seed enabling this trick, so the runtime can always perform the assumed swim.
+    # `canFakeFlipper` is the ONLY ALTTPR OWG flag that maps 1:1 to a restored
+    # glitch and is independently addressable as a trick bit, so it is the only
+    # entry flipped; the glitch LEVELS stay untested (they bundle un-restored
+    # techniques — see the glitch_levels notes below).
+    rom_version_status: verified-us10
+
+  - bit: 2
+    id: bunny-revival
+    name: "Bunny revival"
+    description: |
+      Recovering from bunny-state mid-movement to chain into walls/screens.
+    sources:
+      # ALTTPR config flag `canBunnyRevive` (145 uses) + ItemCollection.php:457-466
+      # canBunnyRevive(). Fork macro CanBunnyRevival = OP_TRICK(bunny_revival) AND
+      # CanBunnyRevive(world); 50 predicate uses across logic_parts/**.
+      - "app/Region/**: config('canBunnyRevive', false) — 145 uses"
+      - "app/Support/ItemCollection.php:457-466 (canBunnyRevive)"
+    status: authored
+    rom_version_status: untested-on-us10
+
+  - bit: 3
+    id: dark-room-nav
+    name: "Dark room navigation"
+    description: |
+      Navigating dark rooms without the lamp by memorizing layouts. Pure player
+      skill (memorize the layout) — no ROM-version dependency, hence cross-version.
+    sources:
+      # ALTTPR `item.require.Lamp` config (default 1); setting it to 0 drops the
+      # Lamp requirement on dark-room gates. Fork macro CanDarkRoomNav =
+      # OP_TRICK(dark_room_nav); composed `HAS_ITEM(Lamp) OR CanDarkRoomNav()`
+      # at 42 dark-room predicate sites (EP/HCT/PoD/...).
+      - "config/alttp.php + app/Region/**: item.require.Lamp — 42 dark-room gates"
+    status: authored
+    rom_version_status: cross-version
+
+  - bit: 4
+    id: bomb-jump
+    name: "Bomb jump"
+    description: |
+      Using a bomb's knockback to vault over an obstacle.
+    sources:
+      # NO corresponding ALTTPR config flag exists (config-flag grep finds no
+      # canBombJump). Fork-invented placeholder; cannot be PHP-grounded. The
+      # CanBombJump macro exists but is referenced by ZERO predicates.
+    status: placeholder
+    rom_version_status: untested-on-us10
+
+  - bit: 5
+    id: pearl-bypass
+    name: "Moon Pearl bypass"
+    description: |
+      Limited dark-world traversal without Moon Pearl via bunny-state tech.
+      (Distinct from Inverted-world bunny-state at start; this trick applies
+      when in dark world without pearl in Open/Standard.)
+    sources:
+      # ALTTPR config flag `canOWYBA` (Over-World Y-Button-Aim) — the bottle-assisted
+      # dark-world bunny traversal. A MajorGlitches-EXCLUSIVE flag (config/logic.php:33
+      # — MG only, NOT OWG/HMG). Phase D (§5) macro: CanPearlBypass =
+      # (OP_TRICK(pearl_bypass) OR (>=major_glitches AND NOT >=hybrid_major_glitches))
+      # AND HasABottle() — opens at MG but not HMG; trick bit is the independent
+      # opt-in. 72 predicate uses (composed `HAS_ITEM(MoonPearl) OR CanPearlBypass()`).
+      - "app/Region/**: config('canOWYBA', false) — 203 uses; config/logic.php:33 (MG-only)"
+    status: authored
+    # untested grounded (romdiff 2026-06-09): NOT jp10-only — the bunny + bottle
+    # path is byte-identical JP↔US and the fork ports the bunny state machine
+    # faithfully. Cross-version ROM; the OWYBA setup's frame-feasibility on this
+    # build is playtest-pending. (See
+    # openspec/changes/add-rando-major-glitch/TEN_TECHNIQUES.md /
+    # glitch_levels grounding.)
+    rom_version_status: untested-on-us10
+
+  - bit: 6
+    id: hookshot-clip
+    name: "Hookshot clip"
+    description: |
+      Hookshot through a wall onto a target normally unreachable.
+    sources:
+      # NO corresponding ALTTPR config flag exists. Fork-invented placeholder;
+      # cannot be PHP-grounded. CanHookshotClip macro exists, ZERO predicate uses.
+    status: placeholder
+    rom_version_status: untested-on-us10
+
+  - bit: 7
+    id: lobotomy
+    name: "Aginah Lobotomy"
+    description: |
+      Specific Aginah's Cave skip technique. Reserved as a placeholder for
+      the 8th trick if community prioritizes; replace if a higher-priority
+      Phase B trick emerges.
+    sources:
+      # NO corresponding ALTTPR config flag exists (community meme name).
+      # Fork-invented placeholder; cannot be PHP-grounded. ZERO predicate uses.
+    status: placeholder
+    rom_version_status: untested-on-us10
+
+# ---------------------------------------------------------------------------
+# Glitch levels (§12.6.2). Surfaced as registry entries so the same
+# `rom_version_status` field + the spoiler `unverified_tricks_enabled` warning
+# apply to OP_GLITCH_LEVEL_AT_LEAST tiers the same way they apply to tricks.
+# `level` is the settings.logic value (matches rando_settings.h `logic` enum +
+# the codegen GLITCH_LEVELS map). NoGlitches (0) is the default tier and is
+# NEVER unverified, so it is intentionally absent.
+#
+# WHY the levels stay `untested-on-us10` (grounded, JP-vs-US ROM sweep
+# 2026-06-09, _jpglitch_spike/romdiff.py — see
+# openspec/changes/add-rando-major-glitch/TEN_TECHNIQUES.md): of the 10
+# glitch techniques the JP-glitch restoration did NOT make performable
+# (everything except canFakeFlipper + canSuperSpeed), a per-technique
+# careful_diff confirmed NONE is JP-1.0-exclusive — every enabling collision/
+# movement/bunny/swim/dungeon routine is byte-identical JP↔US (relocation only),
+# and the fork faithfully reproduces the substrate (sub-tile corner-collision
+# tables, subpixel velocity-before-collision ordering, the bunny state machine).
+# So they are CROSS-VERSION ROM, but their fork-reimpl frame-feasibility (esp.
+# the 1-frame clips canOneFrameClipOW/UW) is unconfirmed → honest
+# `untested-on-us10`, NOT `cross-version` (that bar needs a positive playtest)
+# and NOT `jp10-only`. (canMirrorWrap + canTransitionWrapped are NOT
+# us10-different — the mirror-warp / screen-entry DESTINATION + position +
+# camera math is BYTE-IDENTICAL JP↔US; the only delta is the destination
+# screen's overworld MUSIC selection [$7F5B00 = overworld_music[] WRAM, not a
+# dest table; writes differ at $12C/$12D], which has no reachability effect.
+# So those two are cross-version ROM like the rest → untested-on-us10. See
+# their macros.yaml notes.)
+# ---------------------------------------------------------------------------
+glitch_levels:
+  - level: 1
+    id: overworld_glitches
+    name: "Overworld Glitches"
+    description: |
+      OWG tier. ALTTPR OverworldGlitches flag set (config/logic.php:5-13):
+      canSuperBunny, canFakeFlipper, canSuperSpeed, canBootsClip, canMirrorClip,
+      canWaterWalk, canDungeonRevive. Phase D (add-rando-major-glitch §5) folded
+      the OWG-group level into the CanBootsClip + CanFakeFlippers macros, so
+      `logic=OverworldGlitches` is NO LONGER a placement no-op — boots-clip and
+      fake-flipper sites now route at tier 1. PARTIAL: the remaining OWG-group
+      techniques (canSuperSpeed/canSuperBunny/canMirrorClip/canWaterWalk/
+      canDungeonRevive) still ride the raw OP_GLITCH_LEVEL_AT_LEAST(major_glitches)
+      threshold sites, so they stay closed at OWG (the SAFE direction — never opens
+      too early). Reclassifying those raw sites to tier 1 is frontier F1 (per-site
+      technique ID). US-1.0 unverified regardless — see design.md + tasks F1/F4.
+      # F4 honesty: of the 7 OWG techniques, exactly TWO are restored+performable
+      # on US 1.0 — canFakeFlipper (flipped verified-us10 as the fake-flippers
+      # trick) and canSuperSpeed (Superspeed glitch, owner-confirmed). The level
+      # STAYS untested because the other 5 (canSuperBunny/canBootsClip/
+      # canMirrorClip/canWaterWalk/canDungeonRevive) are NOT restored by
+      # add-jp-glitch-restoration and are US-1.0-unperformed-on-this-fork; flipping
+      # the level would falsely suppress the unverified warning for seeds routing
+      # through them. canSuperSpeed has no independent trick bit, so it cannot be
+      # flipped in isolation — it rides this level's status. See the
+      # OVERNIGHT_REPORT performability ledger.
+    rom_version_status: untested-on-us10
+  - level: 2
+    id: major_glitches
+    name: "Major Glitches"
+    description: |
+      MG tier — the MOST permissive (config/logic.php:24-37: OWG-group +
+      canMirrorWrap + canOWYBA + canOneFrameClipOW + canOneFrameClipUW +
+      canTransitionWrapped). Phase D §5: canOWYBA (MG-exclusive) folded into
+      CanPearlBypass via `>=major_glitches AND NOT >=hybrid_major_glitches`, so it
+      opens at MG but NOT HMG. ~40 raw OP_GLITCH_LEVEL_AT_LEAST(major_glitches)
+      threshold sites (canOneFrameClipOW/UW etc.) remain — frontier F1.
+    rom_version_status: untested-on-us10
+  - level: 3
+    id: hybrid_major_glitches
+    name: "Hybrid Major Glitches"
+    description: |
+      HMG tier (config/logic.php:14-23): OWG-group + canOneFrameClipUW. A
+      technique SUBSET of MajorGlitches (HMG ⊂ MG), so there are ZERO
+      HMG-exclusive locations. Opened for user input in Phase D
+      (add-rando-major-glitch §2). canOneFrameClipUW rides
+      OP_GLITCH_LEVEL_AT_LEAST(major_glitches) (>=2, true at MG+HMG); the
+      MG-exclusive techniques (canOWYBA folded into CanPearlBypass, plus the raw
+      canOneFrameClipOW/canMirrorWrap/canTransitionWrapped threshold sites) are
+      correctly closed at HMG only where they use the MG-exclusive form — the raw
+      threshold sites still over-reach at HMG (frontier F1).
+    rom_version_status: untested-on-us10
+  - level: 4
+    id: no_logic
+    name: "No Logic"
+    description: |
+      NoLogic tier — NOT in config/logic.php (no technique flags). Opened for
+      user input in Phase D (§2). The predicate VM short-circuits the reachability
+      eval (rando_logic.c Predicate_EvalCtx, placement_context==0) so every
+      location is reachable and goal-completability passes vacuously; can_place
+      confinement stays live. Carries the dedicated no_logic_seed spoiler warning.
+    rom_version_status: untested-on-us10

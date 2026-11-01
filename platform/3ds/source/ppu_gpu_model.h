@@ -6,7 +6,7 @@
 
 enum { PICA_ATLAS_W=1024, PICA_ATLAS_H=512, PICA_SLOTS=8192,
        PICA_HASH=16384, PICA_MAX_LINES=240, PICA_MAX_VERTICES=262140,
-       PICA_GROUPS=20, PICA_LINE_BYTES=offsetof(Ppu, oam) };
+       PICA_UI_GROUP=20, PICA_GROUPS=21, PICA_LINE_BYTES=offsetof(Ppu, oam) };
 // A register snapshot, never a pointer-owning PPU. All game memory is retained
 // once separately. This also preserves the exact core's extended-window rules.
 typedef struct { uint8_t bytes[PICA_LINE_BYTES]; } PicaLine;

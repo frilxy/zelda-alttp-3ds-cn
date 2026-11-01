@@ -1,4 +1,7 @@
 #include "overworld.h"
+#include "qol_shortcut.h"
+#include "localized.h"
+#include "mods.h"
 #include "hud.h"
 #include "load_gfx.h"
 #include "dungeon.h"
@@ -11,6 +14,22 @@
 #include "player_oam.h"
 #include "snes/snes_regs.h"
 #include "assets.h"
+#include "features.h"   // enhanced_features1 / kFeatures1_RandomizerActive
+#include "zelda_rtl.h"
+#include "rando/rando.h"  // Phase B Slice 1 §38 — Rando_BumpReachabilityCounter
+#include "rando/location_ids.h"
+#include "rando/shuffle_ow_warp.h"  // add-rando-ow-warp-shuffle runtime hooks
+#include "rando/chains_runtime.h"
+#include "rando/location_ids.h"  // LOC_Hammer_Pegs (Phase B Slice 8 §67/#79)
+#include "rando/item_ids.h"      // ITEM_PieceOfHeart
+#include "rando/inverted_maps.h" // Overworld_ApplyInvertedTiles (#82 Inverted topology)
+#include "rando/medallion_icons.h"  // Rando_PatchMedallionEntranceMap8
+#include <stdio.h>  // Overworld_DumpTerrainTable (--dump-terrain-table)
+
+static bool CutsceneFastForwardEnabled(void) {
+  return (enhanced_features0 & kFeatures0_CutsceneFastForward) &&
+         !ZeldaIsEmulatorAttached();
+}
 
 const uint16 kOverworld_OffsetBaseX[64] = {
   0,     0, 0x400, 0x600, 0x600, 0xa00, 0xa00, 0xe00,
@@ -31,6 +50,32 @@ const uint16 kOverworld_OffsetBaseY[64] = {
   0xa00, 0xa00, 0xa00, 0xa00, 0xa00, 0xa00, 0xa00, 0xa00,
   0xc00, 0xc00, 0xc00, 0xc00, 0xc00, 0xc00, 0xc00, 0xc00,
   0xc00, 0xc00, 0xe00, 0xe00, 0xe00, 0xc00, 0xc00, 0xe00,
+};
+// The special areas (screens 0x80 and up) index the two tables above with
+// 0x80 to 0xbf. On the SNES that reads past both, into the code that follows
+// kOverworld_OffsetBaseX ($02:A9C4 and $02:AA44). These are those words, so
+// that the result is the SNES one instead of whatever follows the arrays;
+// entering a special area then sets both bases from kSpExit_Top and
+// kSpExit_LeftEdgeOfMap.
+static const uint16 kOverworld_OffsetBaseY_Special[64] = {
+  0x16ad, 0xf004, 0x2003, 0xf273, 0x20c2, 0x30a5, 0xff29, 0xf000,
+  0xa523, 0x2967, 0x000c, 0x0085, 0x00ae, 0xa507, 0x3820, 0xc4ff,
+  0x02a8, 0x06a0, 0x08a2, 0x04c9, 0x9000, 0xa03b, 0xa204, 0xcd04,
+  0x0716, 0x32b0, 0x31a5, 0xff29, 0xf000, 0xad2f, 0x0716, 0x6918,
+  0x0004, 0x0285, 0x67a5, 0x0329, 0x8500, 0xae00, 0x0700, 0x22a5,
+  0xff38, 0xa944, 0xa002, 0xa202, 0xc902, 0x0006, 0x0890, 0x00a0,
+  0x01a2, 0x02c5, 0x0490, 0x00e4, 0x05f0, 0x4922, 0x0ede, 0xe260,
+  0x2220, 0xf439, 0xb007, 0x84f3, 0x6402, 0x2003, 0x8b0c, 0x31c2,
+};
+static const uint16 kOverworld_OffsetBaseX_Special[64] = {
+  0x02a6, 0x84a5, 0x2c3f, 0x02a6, 0x8485, 0x00ad, 0x1807, 0x347f,
+  0x02a8, 0x8548, 0x8a04, 0x0a0a, 0x0a0a, 0x0a0a, 0x0405, 0xa5aa,
+  0x1884, 0x347f, 0x02a6, 0x8485, 0x4a68, 0xe2aa, 0xa530, 0x488a,
+  0x2ac9, 0x05d0, 0x80a9, 0x2d8d, 0xbf01, 0xa5ec, 0x0f02, 0xf3ca,
+  0x857e, 0x8d8a, 0x040a, 0xafaa, 0xf3ca, 0xf07e, 0xaf06, 0xf357,
+  0xf07e, 0xbf1f, 0x5b00, 0x4a7f, 0x4a4a, 0xd04a, 0xa905, 0x8d05,
+  0x012d, 0x00bf, 0x7f5b, 0x0f29, 0x30cd, 0xf001, 0xa905, 0x8df1,
+  0x012c, 0x0820, 0xa9ab, 0x8501, 0xa511, 0x8d00, 0x0410, 0x168d,
 };
 static const uint16 kOverworld_UpDownScrollTarget[64] = {
   0xff20, 0xff20, 0xff20, 0xff20, 0xff20, 0xff20, 0xff20, 0xff20,
@@ -248,7 +293,24 @@ const uint8 *GetMap8toTileAttr() {
 }
 
 const uint16 *GetMap16toMap8Table() {
-  return kMap16ToMap8;
+  const uint16 *loc = Loc_Map16ToMap8(kMap16ToMap8, kMap16ToMap8_SIZE);
+  return loc ? loc : kMap16ToMap8;
+}
+
+// The 4 map8 tiles of a map16, the way the game reads them: LDA $0F8000,X
+// with X the map16 times 8 in 16 bits. A map16 past the table, as the
+// overlays of Secrets of the Past write, wraps on 8192 and lands in the
+// table or past it: in the code that follows it in the cartridge
+// ($8F:F540), then in the work RAM's first 8 KB that bank $10 mirrors, then
+// in its registers. The code and the registers read as 0 here.
+const uint16 *Map16ToMap8Entry(uint16 map16) {
+  static const uint16 kNone[4];
+  uint32 i = map16 & 0x1fff;
+  if (i < kMap16ToMap8_SIZE / 8)
+    return GetMap16toMap8Table() + i * 4;
+  if (i >= 0x1000 && i < 0x1400)
+    return (const uint16 *)(g_ram + (i - 0x1000) * 8);
+  return kNone;
 }
 
 bool LookupInOwEntranceTab(uint16 r0, uint16 r2) {
@@ -345,10 +407,25 @@ void InitializeMirrorHDMA() {  // 80fdee
   HDMAEN_copy = 0xc0;
 }
 
+// Fast-forward may advance CPU-only mirror animation work more than once per
+// rendered frame, but AnimateMirrorWarp also uses a single NMI command slot and
+// shared staging buffers for its graphics stages. Once a step queues NMI work,
+// another step in the same frame would replace that command/buffer before the
+// upload runs, leaving the destination world rendered with stale graphics.
+static void MirrorWarp_RunFastForwardSteps() {
+  int steps = CutsceneFastForwardEnabled() ? 3 : 1;
+  do {
+    MirrorWarp_RunAnimationSubmodules();
+    if (nmi_subroutine_index != 0 || nmi_disable_core_updates != 0)
+      break;
+  } while (--steps);
+}
+
 void MirrorWarp_BuildWavingHDMATable() {  // 80fe64
-  MirrorWarp_RunAnimationSubmodules();
-  if (frame_counter & 1)
+  MirrorWarp_RunFastForwardSteps();
+  if (!CutsceneFastForwardEnabled() && (frame_counter & 1)) {
     return;
+  }
 
   int y = 240 - 8;
   do {
@@ -383,9 +460,10 @@ void MirrorWarp_BuildWavingHDMATable() {  // 80fe64
 }
 
 void MirrorWarp_BuildDewavingHDMATable() {  // 80ff2f
-  MirrorWarp_RunAnimationSubmodules();
-  if (frame_counter & 1)
+  MirrorWarp_RunFastForwardSteps();
+  if (!CutsceneFastForwardEnabled() && (frame_counter & 1)) {
     return;
+  }
   int y = 240 - 8;
   do {
     hdma_table_dynamic[y] = hdma_table_dynamic[y + 2] = hdma_table_dynamic[y + 4] = hdma_table_dynamic[y + 6] = hdma_table_dynamic[y - 8];
@@ -425,6 +503,8 @@ void PreOverworld_LoadProperties() {  // 8283c7
   else
     LoadOverworldFromSpecialOverworld();
   Overworld_SetSongList();
+  // rando-exempt: state-shuffle — 0xff sentinel marks "outside dungeon" key
+  // count when transitioning to the overworld. (audit.md §0.2.2)
   link_num_keys = 0xff;
   Hud_RefillLogic();
 
@@ -475,7 +555,15 @@ setsong:
     DecodeAnimatedSpriteTile_variable(0x1e);
   saved_module_for_menu = 9;
   Sprite_ReloadAll_Overworld();
-  if (!(overworld_screen_index & 0x40))
+  // #82 Inverted: residual portal spawn-side (z3randomizer $82B34D). Vanilla
+  // spawns the leftover mirror portal only in the LIGHT world (!(ow&0x40));
+  // Inverted flips the home world, so spawn it in the DARK world instead.
+  bool portal_away_world =
+      ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+       Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */)
+        ? (overworld_screen_index & 0x40) != 0
+        : !(overworld_screen_index & 0x40);
+  if (portal_away_world)
     Sprite_InitializeMirrorPortal();
   sound_effect_ambient = sram_progress_indicator < 2 ? 1 : 5;
   if (follower_indicator == 6)
@@ -488,7 +576,15 @@ setsong:
   link_speed_setting = 0;
   draw_water_ripples_or_grass = 0;
   Dungeon_ResetTorchBackgroundAndPlayerInner();
-  if (!link_item_moon_pearl && savegame_is_darkworld) {
+  // #82 Inverted: DecideIfBunnyByScreenIndex (z3randomizer bugfixes.asm). On
+  // overworld load, bunny when in the away-world without the Moon Pearl. Vanilla
+  // away-world = DW (savegame_is_darkworld set); Inverted away-world = LW (clear).
+  bool ow_load_away_world =
+      ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+       Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */)
+        ? !savegame_is_darkworld
+        :  (savegame_is_darkworld != 0);
+  if (!link_item_moon_pearl && ow_load_away_world) {
     link_is_bunny = link_is_bunny_mirror = 1;
     link_player_handler_state = kPlayerState_PermaBunny;
     LoadGearPalettes_bunny();
@@ -703,6 +799,7 @@ void ResetAncillaAndCutscene() {  // 829e6e
 
 void Module09_Overworld() {  // 82a475
   kOverworldSubmodules[submodule_index]();
+  ZeldaWideBeforeSprites();
 
   int bg2x = BG2HOFS_copy2;
   int bg2y = BG2VOFS_copy2;
@@ -715,6 +812,8 @@ void Module09_Overworld() {  // 82a475
   BG1VOFS_copy2 = BG1VOFS_copy = bg1y + bg1_y_offset;
 
   Sprite_Main();
+  Rando_DrawOverworldEnemyMarkerGlints();
+  Rando_DrawTerrainGlints();  // add-rando-grass-rock-shuffle — capped "check" glints
 
   BG2HOFS_copy2 = bg2x;
   BG2VOFS_copy2 = bg2y;
@@ -747,7 +846,86 @@ void OverworldOverlay_HandleRain() {  // 82a4cd
   BG1VOFS_copy2 += kOverworld_DrawBadWeather_Y[i] << 8;
 }
 
+// #82 Inverted: the DW->LW "under-rock" world-warps sit beneath rocks that the
+// inverted overlay (inverted_maps.c / Overworld_ApplyInvertedTiles) only draws
+// on a FULL screen rebuild — mirror / flute / cave-exit / save-and-quit. A
+// walking-scroll entry skips that overlay, so the rock (and thus the warp record
+// under it) is missing when you simply walk onto the screen. Re-assert just the
+// single liftable rock tile for the current warp screen here; this runs every
+// frame in the walking state, so the tile is restored the frame the screen
+// settles and on any partial redraw. The {pos,tile} pairs mirror the overlay
+// rows in inverted_maps.c exactly (pos is the dung_bg2 byte offset; overlay's
+// field is 0x2000 + pos). We skip when the tile already shows the rock OR the
+// revealed warp swirl (0x0212), so lifting the rock is never re-covered before
+// the player can step onto the warp. Reusable by design (the warp flips worlds
+// and may be used repeatedly), so it is NOT gated on a location-checked flag.
+static const struct {
+  uint8  screen;  // overworld_screen_index (Dark World)
+  uint16 pos;     // dung_bg2 byte offset of the warp rock
+  uint16 tile;    // liftable-rock map16 value
+} kInvertedWarpRocks[] = {
+  { 0x73, 0x02A8, 0x020F },
+  { 0x50, 0x0B2E, 0x020F },
+  { 0x6F, 0x0BB2, 0x020F },
+  { 0x4E, 0x1D4A, 0x0239 },
+  { 0x70, 0x1D94, 0x0239 },
+  { 0x78, 0x1D94, 0x0239 },
+  { 0x75, 0x0F50, 0x0239 },
+  { 0x47, 0x069E, 0x0239 },
+  { 0x47, 0x06A4, 0x0239 },
+};
+
+// Never replace event-modified tiles (lifted rocks, open doors, etc.).
+static void Overworld_QolShortcutTiles(uint16 *dst,int screen,int stride) {
+  if (!(enhanced_features1 & kFeatures1_QolKakariko)) return;
+  for (unsigned i=0;i<countof(kQolShortcutCells);i++) {
+    const struct QolShortcutCell *c=&kQolShortcutCells[i];
+    if(c->screen==screen && dst[c->y*stride+c->x]==c->original)
+      dst[c->y*stride+c->x]=c->tile;
+  }
+}
+
+// Live changes use bounded VRAM stripes on ordinary overworld control frames.
+// Defer a tile under Link until he has stepped away when closing the passage.
+static void Overworld_QolShortcutLive(void) {
+  if (!(enhanced_features1 & kFeatures1_QolManaged)) return;
+  bool enabled=(enhanced_features1 & kFeatures1_QolKakariko)!=0;
+  int base=overworld_screen_index, writes=0;
+  for (unsigned i=0;i<countof(kQolShortcutCells);i++) {
+    const struct QolShortcutCell *c=&kQolShortcutCells[i];
+    int delta=c->screen-base, ox=delta&1, oy=delta>>3;
+    if(delta!=0 && delta!=1 && delta!=8 && delta!=9)continue;
+    int x=c->x+ox*32,y=c->y+oy*32, pos=(y*64+x)*2;
+    uint16 from=enabled?c->original:c->tile,to=enabled?c->tile:c->original;
+    if(dung_bg2[pos>>1]!=from)continue;
+    int wx=((base&7)*512)+x*16,wy=(((base&63)>>3)*512)+y*16;
+    if(!enabled && abs((int)link_x_coord-wx)<24 && abs((int)link_y_coord-wy)<24)continue;
+    if(vram_upload_offset>0x300 || writes==8)break;
+    Overworld_DrawMap16_Persist(pos,to);writes++;
+  }
+  if(writes)nmi_load_bg_from_vram=1;
+}
+
+static void Overworld_EnsureInvertedWarpRock(void) {
+  if (!((enhanced_features1 & kFeatures1_RandomizerActive) &&
+        Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */))
+    return;
+  uint8 scr = (uint8)overworld_screen_index;
+  for (uint32 i = 0; i < sizeof(kInvertedWarpRocks) / sizeof(kInvertedWarpRocks[0]); i++) {
+    if (kInvertedWarpRocks[i].screen != scr)
+      continue;
+    uint16 pos = kInvertedWarpRocks[i].pos;
+    uint16 cur = dung_bg2[pos >> 1];
+    if (cur == kInvertedWarpRocks[i].tile || cur == 0x0212)
+      continue;  // rock already placed, or warp already revealed — leave it
+    Overworld_DrawMap16_Persist(pos, kInvertedWarpRocks[i].tile);
+    nmi_load_bg_from_vram = 1;
+  }
+}
+
 void Module09_00_PlayerControl() {  // 82a53c
+  Overworld_EnsureInvertedWarpRock();
+  Overworld_QolShortcutLive();
   if (!(flag_custom_spell_anim_active | flag_is_link_immobilized | flag_block_link_menu | trigger_special_entrance)) {
     if (filtered_joypad_H & 0x10) {
       overworld_map_state = 0;
@@ -787,6 +965,43 @@ void Module09_00_PlayerControl() {  // 82a53c
   }
 }
 
+// The ROM's words from $82:A8C4: kOverworld_OffsetBaseY, kOverworld_OffsetBaseX,
+// then the code that follows, which the game reads as more of the table when
+// Link walks off the map's edge (a quest that lets him gives those bytes).
+static uint16 OwOffsetBaseWord(int i) {
+  if (i >= 0 && i < 64)
+    return kOverworld_OffsetBaseY[i];
+  if (i >= 64 && i < 128)
+    return kOverworld_OffsetBaseX[i - 64];
+  return Mods_RomWord(0x82a8c4 + i * 2, 0);
+}
+
+// The same from $82:BEE2: the scroll targets, then the sizes.
+static uint16 OwScrollTargetWord(int i) {
+  if (i >= 0 && i < 64)
+    return kOverworld_UpDownScrollTarget[i];
+  if (i >= 64 && i < 128)
+    return kOverworld_LeftRightScrollTarget[i - 64];
+  if (i >= 128 && i < 136) {
+    static const uint16 *const kSizes[4] = { kOverworld_Size1, kOverworld_Size2, kOverworld_UpDownScrollSize, kOverworld_LeftRightScrollSize };
+    return kSizes[(i - 128) >> 1][i & 1];
+  }
+  return Mods_RomWord(0x82bee2 + i * 2, 0);
+}
+
+// The ROM's bytes from $82:A5EC: kOverworldAreaHeads, then kSwitchAreaTab0
+// ($82:A62C) and kSwitchAreaTab1 ($82:A634). Off the map's edge the game
+// reads past the heads and past a row of kSwitchAreaTab1, into these.
+static uint8 SwitchAreaRomByte(int i) {
+  if (i < 64)
+    return MODS_U8(kOverworldAreaHeads, 0x82a5ec)[i];
+  if (i < 72)
+    return ((const uint8 *)kSwitchAreaTab0)[i - 64];
+  if (i < 72 + 512)
+    return ((const uint8 *)kSwitchAreaTab1)[i - 72];
+  return 0;
+}
+
 void OverworldHandleTransitions() {  // 82a9c4
   if (BYTE(overworld_screen_trans_dir_bits2))
     OverworldHandleMapScroll();
@@ -794,13 +1009,13 @@ void OverworldHandleTransitions() {  // 82a9c4
   uint16 x, y, t;
   if (link_y_vel != 0) {
     dir = link_direction & 12;
-    t = link_y_coord - kOverworld_OffsetBaseY[BYTE(current_area_of_player) >> 1];
+    t = link_y_coord - OwOffsetBaseWord(BYTE(current_area_of_player) >> 1);
     if ((y = 6, x = 8, t < 4) || (y = 4, x = 4, t >= overworld_right_bottom_bound_for_scroll))
       goto compare;
   }
   if (link_x_vel != 0) {
     dir = link_direction & 3;
-    t = link_x_coord - kOverworld_OffsetBaseX[BYTE(current_area_of_player) >> 1];
+    t = link_x_coord - OwOffsetBaseWord((BYTE(current_area_of_player) >> 1) + 64);
     if ((y = 2, x = 2, t < 6) || (y = 0, x = 1, t >= (uint16)(overworld_right_bottom_bound_for_scroll + 4))) {
 compare:
       if (x == dir && !Link_CheckForEdgeScreenTransition())
@@ -813,14 +1028,19 @@ after:
   y >>= 1;
   Dungeon_ResetTorchBackgroundAndPlayerInner();
   map16_load_src_off &= kSwitchAreaTab0[y];
-  int pushed = ((current_area_of_player + kSwitchAreaTab3[y]) >> 1) & 0x3f;
-  map16_load_src_off += kSwitchAreaTab1[y * 64 + pushed];
+  // As the game: the area in 16 bits, then 8 ($82:AA6D), and the row of
+  // kSwitchAreaTab1 ORed in, not added ($82:AA60). Inside the map they are
+  // the same; a quest can let Link walk off it.
+  uint16 v = current_area_of_player + kSwitchAreaTab3[y];
+  int pushed = (v >> 1) & 0xff;
+  uint16 off = (y * 2) << 6 | v;
+  map16_load_src_off += SwitchAreaRomByte(72 + off) | SwitchAreaRomByte(73 + off) << 8;
 
   uint8 old_screen = overworld_screen_index;
   if (old_screen == 0x2a)
     sound_effect_ambient = 0x80;
 
-  uint8 new_area = kOverworldAreaHeads[pushed] | savegame_is_darkworld;
+  uint8 new_area = SwitchAreaRomByte(pushed) | savegame_is_darkworld;
   BYTE(overworld_screen_index) = new_area;
   BYTE(overworld_area_index) = new_area;
   if (!savegame_is_darkworld || link_item_moon_pearl) {
@@ -855,7 +1075,9 @@ void Overworld_LoadGFXAndScreenSize() {  // 82ab08
   int i = BYTE(overworld_screen_index);
   incremental_counter_for_vram = 0;
   sprite_graphics_index = overworld_sprite_gfx[i];
-  aux_tile_theme_index = kOverworldAuxTileThemeIndexes[i];
+  // Past its 128 areas the game reads the next table ($80:FD1C), as when a
+  // quest lets Link walk off the map's edge into a special area.
+  aux_tile_theme_index = i < 128 ? kOverworldAuxTileThemeIndexes[i] : kOverworldBgPalettes[i - 128];
 
   overworld_area_is_big_backup = overworld_area_is_big;
   BYTE(overworld_area_is_big) = kOverworldMapIsSmall[i & 0x3f] ? 0 : 0x20;
@@ -864,8 +1086,8 @@ void Overworld_LoadGFXAndScreenSize() {  // 82ab08
   misc_sprites_graphics_index = kVariousPacks[6 + (overworld_screen_index & 0x40 ? 8 : 0)];
 
   int j = overworld_screen_index & 0xbf;
-  overworld_offset_base_y = kOverworld_OffsetBaseY[j];
-  overworld_offset_base_x = kOverworld_OffsetBaseX[j] >> 3;
+  overworld_offset_base_y = j < 64 ? kOverworld_OffsetBaseY[j] : kOverworld_OffsetBaseY_Special[j & 63];
+  overworld_offset_base_x = (j < 64 ? kOverworld_OffsetBaseX[j] : kOverworld_OffsetBaseX_Special[j & 63]) >> 3;
 
   int m = overworld_area_is_big ? 0x3f0 : 0x1f0;
   overworld_offset_mask_y = m;
@@ -891,6 +1113,7 @@ void ScrollAndCheckForSOWExit() {  // 82ab7b
 }
 
 void Module09_LoadAuxGFX() {  // 82ab88
+  ZeldaWideBeforeAuxGfx();
   save_ow_event_info[0x3b] &= ~0x20;
   save_ow_event_info[0x7b] &= ~0x20;
   save_dung_info[267] &= ~0x80;
@@ -1306,6 +1529,15 @@ void Module09_MirrorWarp() {  // 82b1fa
   }
 }
 
+// JP-1.0 overworld music/ambient selection (kFeatures0_JpOverworldMusic).
+// Default-off and suppressed under side-by-side so the JP music — which
+// diverges from the US-1.0 reference RAM every frame — never trips the
+// comparator. Mirrors JpGlitchEnabled() in player.c.
+static bool JpOwMusicEnabled(void) {
+  return (enhanced_features0 & kFeatures0_JpOverworldMusic) &&
+         !ZeldaIsEmulatorAttached();
+}
+
 void MirrorWarp_FinalizeAndLoadDestination() {  // 82b260
   HdmaSetup(0, 0xf2fb, 0x41, 0, (uint8)WH0, 0);
   IrisSpotlight_ResetTable();
@@ -1314,11 +1546,34 @@ void MirrorWarp_FinalizeAndLoadDestination() {  // 82b260
   ReloadPreviouslyLoadedSheets();
   Overworld_SetSongList();
   HDMAEN_copy = 0x80;
-  uint8 m = overworld_music[BYTE(overworld_screen_index)];
-  music_control = m & 0xf;
-  sound_effect_ambient = m >> 4;
-  if (BYTE(overworld_screen_index) >= 0x40 && !link_item_moon_pearl)
-    music_control = 4;
+  if (JpOwMusicEnabled()) {
+    // JP 1.0 ($82B260, off 131BD-1320D): pick the post-mirror-warp track from
+    // world state + screen index + progress instead of re-reading the just-built
+    // overworld_music[] scratch table. Ambient ($12D) is left untouched except
+    // on the three special pyramid/HC screens 0x43/0x45/0x47.
+    uint8 s = BYTE(overworld_screen_index);
+    uint8 x = 4;
+    if (!(savegame_is_darkworld && !link_item_moon_pearl)) {
+      x = 9;
+      if (s < 0x40) {
+        x = 2;
+        if (s == 0x18 && sram_progress_indicator < 3)
+          x = 7;
+      }
+    }
+    music_control = x;
+    if (s == 0x40 || s == 0x43 || s == 0x45 || s == 0x47) {
+      if (s != 0x40)
+        sound_effect_ambient = 9;
+      music_control = link_item_moon_pearl ? 0xd : 4;
+    }
+  } else {
+    uint8 m = overworld_music[BYTE(overworld_screen_index)];
+    music_control = m & 0xf;
+    sound_effect_ambient = m >> 4;
+    if (BYTE(overworld_screen_index) >= 0x40 && !link_item_moon_pearl)
+      music_control = 4;
+  }
 
   saved_module_for_menu = submodule_index;
   submodule_index = 0;
@@ -1377,7 +1632,15 @@ void MirrorWarp_LoadSpritesAndColors() {  // 82b334
   Link_ItemReset_FromOverworldThings();
   Dungeon_ResetTorchBackgroundAndPlayerInner();
   link_player_handler_state = kPlayerState_Mirror;
-  if (!(overworld_screen_index & 0x40))
+  // #82 Inverted: residual portal spawn-side (z3randomizer $82B34D). Vanilla
+  // spawns the leftover mirror portal only in the LIGHT world (!(ow&0x40));
+  // Inverted flips the home world, so spawn it in the DARK world instead.
+  bool portal_away_world =
+      ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+       Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */)
+        ? (overworld_screen_index & 0x40) != 0
+        : !(overworld_screen_index & 0x40);
+  if (portal_away_world)
     Sprite_InitializeMirrorPortal();
 }
 
@@ -1698,13 +1961,13 @@ int OverworldScrollTransition() {  // 82c001
 }
 
 void Overworld_SetCameraBoundaries(int big, int area) {  // 82c0c3
-  ow_scroll_vars0.ystart = kOverworld_OffsetBaseY[area];
+  ow_scroll_vars0.ystart = OwOffsetBaseWord(area);
   ow_scroll_vars0.yend = ow_scroll_vars0.ystart + kOverworld_Size1[big];
-  ow_scroll_vars0.xstart = kOverworld_OffsetBaseX[area];
+  ow_scroll_vars0.xstart = OwOffsetBaseWord(area + 64);
   ow_scroll_vars0.xend = ow_scroll_vars0.xstart + kOverworld_Size2[big];
-  up_down_scroll_target = kOverworld_UpDownScrollTarget[area];
+  up_down_scroll_target = OwScrollTargetWord(area);
   up_down_scroll_target_end = up_down_scroll_target + kOverworld_UpDownScrollSize[big];
-  left_right_scroll_target = kOverworld_LeftRightScrollTarget[area];
+  left_right_scroll_target = OwScrollTargetWord(area + 64);
   left_right_scroll_target_end = left_right_scroll_target + kOverworld_LeftRightScrollSize[big];
 }
 
@@ -1718,10 +1981,22 @@ void Overworld_FinalizeEntryOntoScreen() {  // 82c242
   if ((d & 0xfe) == kOverworld_Func8_tab[byte_7E069C]) {
     submodule_index = 0;
     subsubmodule_index = 0;
-    uint8 m = overworld_music[BYTE(overworld_screen_index)];
-    sound_effect_ambient = m >> 4;
-    if (music_unk1 == 0xf1)
-      music_control = m & 0xf;
+    if (JpOwMusicEnabled()) {
+      // JP 1.0 ($82C242, off 141B3-141CE): when the transition track is armed
+      // (music_unk1 == 0xf1) set music_control from screen+progress rather than
+      // from overworld_music[]. JP does NOT write sound_effect_ambient here.
+      if (music_unk1 == 0xf1) {
+        uint8 x = 2;
+        if (BYTE(overworld_screen_index) == 0x18 && sram_progress_indicator < 3)
+          x = 7;
+        music_control = x;
+      }
+    } else {
+      uint8 m = overworld_music[BYTE(overworld_screen_index)];
+      sound_effect_ambient = m >> 4;
+      if (music_unk1 == 0xf1)
+        music_control = m & 0xf;
+    }
   }
   Overworld_OperateCameraScroll();
   if (BYTE(overworld_screen_trans_dir_bits2))
@@ -1781,12 +2056,170 @@ void LoadOverworldFromDungeon() {  // 82e4a3
   cur_palace_index_x2 = 0xff;
   num_memorized_tiles = 0;
 
-  if (dungeon_room_index != 0x104 && dungeon_room_index < 0x180 && dungeon_room_index >= 0x100) {
+  // Phase C Stage 2 — dungeon entrance-shuffle coupling. CONSUME the source-room
+  // override UNCONDITIONALLY here (audit HIGH-1): this function is reached not just
+  // by the room-keyed exit search below but also by Magic-Mirror / special-area /
+  // ending warps (overworld.c:697,1914, ending.c) and the cached-exit `if` branch;
+  // clearing only in the search branch let a mirror-out of a shuffled dungeon leak
+  // a stale source room into a LATER unrelated exit → wrong-door warp. Capture once
+  // into a local, zero the global, then use the local only in the search branch.
+  uint16 coupled_exit_room = g_rando_entrance_exit_room;
+  g_rando_entrance_exit_room = 0;
+  // Phase C Stage 3 — a cave→dungeon cross redirect loads a dungeon room (which
+  // would take the search branch) but must return to the SOURCE cave door; the
+  // cached *_exit vars hold that cave position, so force the cached branch.
+  bool force_cached = (g_rando_entrance_force_cached != 0);
+  g_rando_entrance_force_cached = 0;
+  // The source cave's room, captured beside the flag. Consume-at-top (same as the
+  // flag) so a stray non-cached exit can't leave it armed for a later one.
+  uint16 force_cached_room = g_rando_force_cached_room;
+  g_rando_force_cached_room = 0;
+  // Decoupled (D.4) — consume the entered-interior the SAME way (unconditionally
+  // at the top), so a mirror/special/ending warp can't leave it set for a later
+  // cave-class exit to misuse. Only the cave-class branch below acts on it.
+  uint16 decoupled_entered = Rando_DecoupledConsumeEntered();
+  // Cross + decoupled (Insanity + Crossed): consume the resolved one-way exit kind
+  // (0 none / 1 cave / 2 dungeon). A CAVE target forces the cached branch (replay
+  // that cave's arrival); a DUNGEON target forces the search branch at its room
+  // (coupled_exit_room was set to it at the entry hook). kind 0 leaves the normal
+  // branch selection. Consumed-at-top like the sibling exit-coupling globals.
+  uint8 cross_cave = 0xFF;
+  uint8 cross_kind = Rando_CrossDecoupledConsumeExit(&cross_cave);
+
+  // add-rando-inverted-dark-chapel-spawn: consume the Inverted spawn-select
+  // redirect the SAME way (clear the global into a local at the top) so a stray
+  // mirror / special / ending warp can't leave it armed for a later unrelated
+  // exit. The redirect drives the room-keyed SEARCH branch to OR 0x40 into the
+  // exit screen. As built this drives only Mountain Cave (0x03 -> 0x43); the Dark
+  // Chapel exits via its own cached *_exit cache (screen 0x53 baked in, see below)
+  // and Link's House is already 0x6C, so the redirect is a no-op for both.
+  bool inverted_spawn_redirect = (g_rando_inverted_spawn_redirect != 0);
+  g_rando_inverted_spawn_redirect = 0;
+
+  bool take_cached;
+  if (cross_kind != 0) {
+    take_cached = (cross_kind == 1);  // cave → cached replay; dungeon → search
+  } else {
+    take_cached = force_cached ||
+        (dungeon_room_index != 0x104 && dungeon_room_index < 0x180 && dungeon_room_index >= 0x100);
+  }
+  // add-rando-inverted-dark-chapel-spawn: the Dark Chapel interior is room 0x112
+  // (>= 0x100, != 0x104), so it takes the cached-exit branch below. The chapel spawn
+  // (Dungeon_LoadEntrance) pre-loads the genuine DW screen-0x53 arrival into the
+  // *_exit cache, so the cached branch replays the real chapel screen — same as the
+  // normal "walk into the dark sanctuary" entry. No screen-borrow / redirect needed.
+  if (take_cached) {
+    // Decoupled (D.4): on a cave-class exit, replay the target cave's captured
+    // arrival so Link emerges at a DIFFERENT door (it overwrites the live *_exit
+    // block + world flags + target room/door-settings). For cross-decoupled the
+    // target cave was resolved at entry (cross_cave); otherwise it's net[entered].
+    // No-op / coupled return when inactive or the target hasn't been captured.
+    bool decoupled_crossed = (cross_kind == 1)
+        ? Rando_CrossDecoupledReplayCave(cross_cave)
+        : Rando_DecoupledReplaceArrival(decoupled_entered);
+    // Cross-category coupled cave→dungeon (force_cached): the cached *_exit block
+    // returns Link to the source cave door, but dungeon_room_index still holds the
+    // loaded DUNGEON room (< 0x124), so LoadCachedEntranceProperties' vanilla
+    // room-keyed Y-adjust (`if (dungeon_room_index < 0x124) link_y -= 0x10`) would
+    // shift Link up 0x10px for caves whose OWN room is >= 0x124 (thief_hideout
+    // 0x124, thief_hideout_3 0x125, fairy_cave_5 0x126, heart_piece_cave_3 0x127).
+    // Restore the source cave room so the adjust keys off the cave. The decoupled
+    // paths already reset dungeon_room_index via their replay helpers, so guard on
+    // !decoupled_crossed. PLAYTEST-PENDING: confirm Link's emergence Y with an F12
+    // dump on a coupled cross seed whose cave→dungeon source room is >= 0x124.
+    if (force_cached && force_cached_room != 0 && !decoupled_crossed)
+      dungeon_room_index = force_cached_room;
     LoadCachedEntranceProperties();
+    if (decoupled_crossed) {
+      // A one-way decoupled exit can land Link in the OTHER world, but this cached
+      // path (unlike the mirror warp, ancilla.c) never re-evaluates Link's bunny
+      // form for the destination — leaving a DW→LW exit stuck as a Light-World
+      // bunny (and a LW→DW exit wrongly human). Re-derive it from the destination
+      // world + Moon Pearl, matching PreOverworld_LoadProperties / the mirror warp.
+      if (link_item_moon_pearl || !savegame_is_darkworld) {
+        ForceNonbunnyStatus();
+      } else {
+        link_is_bunny = link_is_bunny_mirror = 1;
+        link_player_handler_state = kPlayerState_PermaBunny;
+        LoadGearPalettes_bunny();
+      }
+    } else if (enhanced_features1 & kFeatures1_RandomizerActive) {
+      // add-rando-inverted-dark-chapel-spawn: a cached exit can cross worlds — the
+      // Inverted Dark Chapel is a Dark-World interior whose cached arrival is DW
+      // screen 0x53. LoadCachedEntranceProperties restores the screen index (world
+      // bit) but not savegame_is_darkworld / is_in_dark_world / Link's bunny form;
+      // sync them from the restored screen (mirroring the search branch). GATED on
+      // RandomizerActive (defense-in-depth): in vanilla a cached exit never changes
+      // the world — the entry screen's world bit always equals the unchanged
+      // savegame_is_darkworld, so the inner `if` is already a no-op — but gating
+      // guarantees the RAM-compare can't diverge even if a future vanilla path breaks
+      // that load-bearing invariant.
+      uint8 dest_dark = (overworld_screen_index & 0x40) ? 1 : 0;
+      if (dest_dark != (savegame_is_darkworld != 0)) {
+        savegame_is_darkworld = dest_dark;
+        is_in_dark_world = dest_dark;
+        if (link_item_moon_pearl || !dest_dark) {
+          ForceNonbunnyStatus();
+        } else {
+          link_is_bunny = link_is_bunny_mirror = 1;
+          link_player_handler_state = kPlayerState_PermaBunny;
+          LoadGearPalettes_bunny();
+        }
+      }
+    }
+    // add-rando-inverted-dark-chapel-spawn: position Link to re-enter the Dark Chapel.
+    // Screen 0x53's STATIC map already contains the enterable door — the entrance
+    // (ent[89], tilemap pos 0x2AA = col 21, row 5) fires when Link is FACING UP there,
+    // because the up-facing door check reads the cell one to the RIGHT (col 22 = map16
+    // 0xE0, whose subtiles are in kOverworld_Entrance_Tab0/1; asset-decode-verified).
+    // So NO entrance marker is needed (and must NOT be painted — 0xDA4/0xDA6 would
+    // overwrite that 0xE0 and kill the door). Runtime logs proved the trigger is a
+    // precise spot: Link must walk straight UP column 21 (x=0x758) into row 5. The
+    // generic cached `link_y -= 0x10` left Link NORTH of it; a south-facing exit made
+    // him turn before walking up and drift off the column to col 22, missing the door.
+    // Fix: clear any marker, pin Link to column 21 just SOUTH of the door, and face
+    // him UP so simply holding "up" walks him straight into it — exactly the genuine
+    // Link's-House->dark-sanctuary approach. (map16_load_src_off_exit=0x9C, set at
+    // spawn, keeps the tilemap aligned so 0xE0 lands at col 22.)
+    if (dungeon_room_index == 0x112 &&
+        (enhanced_features1 & kFeatures1_RandomizerActive) &&
+        Rando_GetActiveWorldState() == 2) {
+      ow_entrance_value = 0;          // no marker; the static 0xE0 door must survive
+      link_x_coord = 0x0758;          // column 21 — the chapel door's column (exact)
+      link_y_coord = 0x0466;          // row 6, just below the door (closer to the real
+                                      // exit spot; still south of the row-5 trigger so
+                                      // walking up re-enters)
+      WORD(link_direction_facing) = 2; // face DOWN: avoids auto-walking back into the door
+    }
   } else {
 
+    // If the player entered a shuffled dungeon door, key the exit search on the
+    // SOURCE dungeon's room (so they return to the door they entered) instead of
+    // the loaded dungeon's room. 0 = normal exit.
+    uint16 exit_room = (coupled_exit_room != 0) ? coupled_exit_room : dungeon_room_index;
     int k = 79;
-    do k--; while (kExitDataRooms[k] != dungeon_room_index);
+    do k--; while (k > 0 && kExitDataRooms[k] != exit_room);
+    // The decreasing search lands on slot 0 (a WRONG but in-bounds door) when
+    // exit_room isn't in kExitDataRooms. A dungeon-decoupled / cross-decoupled
+    // redirect can key the search on a SOURCE-dungeon room (coupled_exit_room)
+    // that has no overworld-exit entry; fall back to the coupled return-to-source
+    // (dungeon_room_index, which a real exit always carries) rather than slot 0.
+    // RandomizerActive-gated + only when the table miss happened on a coupled
+    // override — vanilla (coupled_exit_room == 0 ⇒ exit_room == dungeon_room_index)
+    // never re-searches, so the vanilla door choice stays byte-identical.
+    if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+        kExitDataRooms[k] != exit_room && exit_room != dungeon_room_index) {
+      k = 79;
+      do k--; while (k > 0 && kExitDataRooms[k] != dungeon_room_index);
+    }
+    uint16 chain_origin_room = 0;
+    if (enhanced_features1 & kFeatures1_RandomizerActive)
+      chain_origin_room = Chains_RuntimeConsumeMainExitOrigin(kExitDataRooms[k]);
+    if (chain_origin_room != 0 && chain_origin_room != exit_room) {
+      exit_room = chain_origin_room;
+      k = 79;
+      do k--; while (k > 0 && kExitDataRooms[k] != exit_room);
+    }
     BG1VOFS_copy2 = BG2VOFS_copy2 = BG1VOFS_copy = BG2VOFS_copy = kExitData_ScrollY[k];
     BG1HOFS_copy2 = BG2HOFS_copy2 = BG1HOFS_copy = BG2HOFS_copy = kExitData_ScrollX[k];
     link_y_coord = kExitData_YCoord[k];
@@ -1806,6 +2239,42 @@ void LoadOverworldFromDungeon() {  // 82e4a3
     overworld_unk3 = kExitData_Unk3[k];
     overworld_unk1_neg = -overworld_unk1;
     overworld_unk3_neg = -overworld_unk3;
+    // add-rando-inverted-dark-chapel-spawn: when this overworld load is an Inverted
+    // spawn-select respawn (flag armed in Module1B_SpawnSelect), force the anchor
+    // into the Dark World. Vanilla exit screens are LW (Sanctuary 0x13, Mountain
+    // Cave 0x03, Link's House 0x2C); ORing the world bit lands the DW mirror
+    // (0x53 "Dark Chapel" / 0x43 DW Death Mountain / 0x6C — the last already DW via
+    // the Link's-House asset override, so this is a no-op there). Setting the world
+    // bit HERE (before the sync block below) lets that block flip
+    // savegame_is_darkworld / is_in_dark_world / bunny for us — same path a
+    // cross-world dungeon exit uses. Done only in the room-keyed search branch, so
+    // a normal Sanctuary/Mountain-Cave *check* visit (flag not armed) is unaffected.
+    if (inverted_spawn_redirect) {
+      overworld_screen_index |= 0x40;
+      overworld_area_index |= 0x40;
+    }
+    // (The Dark Chapel, room 0x112, no longer reaches this search branch — it takes
+    // the cached-exit branch above with a pre-loaded genuine screen-0x53 arrival.
+    // Mountain Cave / Link's House still use this branch + the 0x40 redirect.)
+    // Dungeon decoupled (Insanity): a one-way dungeon exit can emerge in the OTHER
+    // world (the destination is a DIFFERENT dungeon's door). This search branch sets
+    // the screen index (world bit 0x40) but NOT savegame_is_darkworld / is_in_dark_
+    // world / Link's bunny form — the mirror warp normally does that. Sync them when
+    // the destination world differs from the entry world, else a cross-world dungeon
+    // exit leaves stale world flags (wrong area-head at the next screen edge) and a
+    // wrong/stuck bunny. No-op for coupled/vanilla exits (same world ⇒ no change).
+    uint8 dest_dark = (overworld_screen_index & 0x40) ? 1 : 0;
+    if (dest_dark != (savegame_is_darkworld != 0)) {
+      savegame_is_darkworld = dest_dark;
+      is_in_dark_world = dest_dark;
+      if (link_item_moon_pearl || !dest_dark) {
+        ForceNonbunnyStatus();
+      } else {
+        link_is_bunny = link_is_bunny_mirror = 1;
+        link_player_handler_state = kPlayerState_PermaBunny;
+        LoadGearPalettes_bunny();
+      }
+    }
   }
   Overworld_LoadNewScreenProperties();
 }
@@ -1984,6 +2453,42 @@ void FluteMenu_LoadTransport() {  // 82ec39
 }
 
 void Overworld_LoadBirdTravelPos(int k) {  // 82ec47
+  // add-rando-ow-warp-shuffle — under an active flute shuffle, slots 0-7
+  // install the per-seed candidate's arrival tableau (same field writes as
+  // the vanilla body below; the OwWarp selfcheck oracle pins the candidate
+  // columns byte-equal to the kBirdTravel_* rows for the vanilla screens).
+  // Whirlpool rows (k >= 9) never take this branch.
+  const RandoOwFluteCandidate *rc = Rando_OwWarp_FluteSpotForBirdIndex(k);
+  if (rc != NULL) {
+    num_memorized_tiles = 0;
+    BG1VOFS_copy2 = BG2VOFS_copy2 = BG1VOFS_copy = BG2VOFS_copy = rc->bg_y;
+    BG1HOFS_copy2 = BG2HOFS_copy2 = BG1HOFS_copy = BG2HOFS_copy = rc->bg_x;
+    link_y_coord = rc->link_y;
+    link_x_coord = rc->link_x;
+    overworld_unk1 = (uint16)rc->unk1;
+    overworld_unk3 = (uint16)rc->unk2;
+    overworld_unk1_neg = -overworld_unk1;
+    overworld_unk3_neg = -overworld_unk3;
+    overworld_area_index = overworld_screen_index = (uint8)rc->screen;
+    map16_load_src_off = rc->vram;
+    map16_load_var2 = (map16_load_src_off - 0x400 & 0xf80) >> 7;
+    map16_load_dst_off = (map16_load_src_off - 0x10 & 0x3e) >> 1;
+    camera_y_coord_scroll_low = rc->cam_y;
+    camera_y_coord_scroll_hi = camera_y_coord_scroll_low - 2;
+    camera_x_coord_scroll_low = rc->cam_x;
+    camera_x_coord_scroll_hi = camera_x_coord_scroll_low - 2;
+    ow_entrance_value = 0;
+    big_rock_starting_address = 0;
+    Overworld_LoadNewScreenProperties();
+    Sprite_ResetAll();
+    Sprite_ReloadAll_Overworld();
+    is_standing_in_doorway = 0;
+    // audit M2: the vanilla body below ends with this unconditional reset
+    // (select-interactive ancilla termination + run/aux/handler state);
+    // omitting it let live state carry across a shuffled-flute warp.
+    Dungeon_ResetTorchBackgroundAndPlayerInner();
+    return;
+  }
   BG1VOFS_copy2 = BG2VOFS_copy2 = BG1VOFS_copy = BG2VOFS_copy = kBirdTravel_ScrollY[k];
   BG1HOFS_copy2 = BG2HOFS_copy2 = BG1HOFS_copy = BG2HOFS_copy = kBirdTravel_ScrollX[k];
   link_y_coord = kBirdTravel_LinkYCoord[k];
@@ -2020,6 +2525,10 @@ void FluteMenu_LoadSelectedScreenPalettes() {  // 82ecdd
 
 void FindPartnerWhirlpoolExit() {  // 82ed08
   int j = FindInWordArray(kWhirlpoolAreas, overworld_screen_index, kWhirlpoolAreas_SIZE / 2);
+  // add-rando-ow-warp-shuffle — re-pair: swap the ENTERED row for the row
+  // whose (+9) tableau lands at the per-seed partner (identity when the
+  // axis is off; screen-keyed so table order cannot desync).
+  if (j >= 0) j = Rando_OwWarp_WhirlpoolBirdRow((uint8)j);
   if (j >= 0) {
     num_memorized_tiles = 0;
     Overworld_LoadBirdTravelPos(j + 9);
@@ -2087,13 +2596,39 @@ void Overworld_DrawQuadrantsAndOverlays() {  // 82eec5
     ow_entrance_value = 0;
   }
   Overworld_HandleOverlaysAndBombDoors();
+
+  // #82 Inverted overworld topology: after the screen's map16 buffer is built
+  // (quadrants + entrance markers + vanilla event overlays), apply the inverted
+  // per-screen tile-overlay set, mirroring z3randomizer's Overworld_LoadNewTiles
+  // hook ("executed right after the original tile load"). Gated on the active
+  // Inverted rando world-state so vanilla / Open / Standard / Retro screens are
+  // byte-identical. This is purely a render-buffer rewrite (consumed by the
+  // following Map16ToMap8); no game-logic / RAM-compare-relevant state changes.
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+      Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */) {
+    Overworld_ApplyInvertedTiles();
+  }
 }
 
 void Overworld_HandleOverlaysAndBombDoors() {  // 82ef29
-  if (overworld_screen_index == 0x33)
-    dung_bg2[340] = 0x20f;
-  else if (overworld_screen_index == 0x2f)
-    dung_bg2[1497] = 0x20f;
+  // #82 Inverted: the two hardcoded Light-World rocks (screens 0x33 / 0x2F) are
+  // removed in Inverted mode (z3randomizer inverted.asm HardcodedRocks: skip the
+  // 0x020F rock write when InvertedMode). Otherwise the LW (reached via mirror)
+  // keeps a rock that the inverted topology expects gone.
+  bool rando_inverted_ow =
+      (enhanced_features1 & kFeatures1_RandomizerActive) &&
+      Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */;
+  if (!rando_inverted_ow) {
+    // A quest can leave a tile out: its branch then always skips ($82:EF31,
+    // $82:EF3A).
+    uint16 tile = Mods_RomWord(0x82ef2a, 0x20f);
+    if (overworld_screen_index == 0x33 && Mods_RomByte(0x82ef31, 0xd0) == 0xd0)
+      dung_bg2[340] = tile;
+    else if (overworld_screen_index == 0x2f && Mods_RomByte(0x82ef3a, 0xd0) == 0xd0)
+      dung_bg2[1497] = tile;
+  }
+  if (rando_inverted_ow && BYTE(overworld_screen_index) == 0x47)
+    save_ow_event_info[0x47] |= 0x20;
   if (BYTE(overworld_screen_index) < 0x80 && save_ow_event_info[BYTE(overworld_screen_index)] & 0x20)
     Overworld_LoadEventOverlay();
   if (save_ow_event_info[BYTE(overworld_screen_index)] & 2) {
@@ -2385,7 +2920,6 @@ uint16 *BufferAndBuildMap16Stripes_X(uint16 *dst) {  // 82f3b9
     tmp[d] = (pos >= 0x2000) ? 0 : dung_bg2[pos >> 1];
     d = (d + 1) & 0x1f, pos += 128;
   }
-  const uint16 *map8 = GetMap16toMap8Table();
   uint16 r0 = 0, of = map16_load_dst_off;
   if (of >= 0x10)
     of &= 0xf, r0 = 0x400;
@@ -2395,13 +2929,15 @@ uint16 *BufferAndBuildMap16Stripes_X(uint16 *dst) {  // 82f3b9
     dst[33] = r0 + 1;
     dst++;
     for (int j = 0; j < 16; j++) {
-      int k = *tmp++;
+      uint16 k = *tmp++;
       assert(k < 0xea8);
-      const uint16 *s = map8 + k * 4;
-      dst[0] = s[0];
-      dst[33] = s[1];
-      dst[1] = s[2];
-      dst[34] = s[3];
+      const uint16 *s = Map16ToMap8Entry(k);
+      uint16 map8_words[4] = {s[0], s[1], s[2], s[3]};
+      Rando_PatchMedallionEntranceMap8(k, map8_words);
+      dst[0] = map8_words[0];
+      dst[33] = map8_words[1];
+      dst[1] = map8_words[2];
+      dst[34] = map8_words[3];
       dst += 2;
     }
     dst += 33;
@@ -2418,7 +2954,6 @@ uint16 *BufferAndBuildMap16Stripes_Y(uint16 *dst) {  // 82f482
     pos += 2;
     d = (d + 1) & 0x1f;
   }
-  const uint16 *map8 = GetMap16toMap8Table();
   uint16 r0 = 0, of = map16_load_var2;
   if (of >= 0x10)
     of &= 0xf, r0 = 0x800;
@@ -2426,13 +2961,15 @@ uint16 *BufferAndBuildMap16Stripes_Y(uint16 *dst) {  // 82f482
   for (int i = 0; i < 2; i++, r0 += 0x400) {
     *dst++ = r0;
     for (int j = 0; j < 16; j++) {
-      int k = *tmp++;
+      uint16 k = *tmp++;
       assert(k < 0xea8);
-      const uint16 *s = map8 + k * 4;
-      dst[0] = s[0];
-      dst[32] = s[2];
-      dst[1] = s[1];
-      dst[33] = s[3];
+      const uint16 *s = Map16ToMap8Entry(k);
+      uint16 map8_words[4] = {s[0], s[1], s[2], s[3]};
+      Rando_PatchMedallionEntranceMap8(k, map8_words);
+      dst[0] = map8_words[0];
+      dst[32] = map8_words[2];
+      dst[1] = map8_words[1];
+      dst[33] = map8_words[3];
       dst += 2;
     }
     dst += 32;
@@ -2442,10 +2979,12 @@ uint16 *BufferAndBuildMap16Stripes_Y(uint16 *dst) {  // 82f482
 
 void Overworld_DecompressAndDrawAllQuadrants() {  // 82f54a
   int si = overworld_screen_index;
+  ZeldaWideBeforeMapLoad(9);
   Overworld_DecompressAndDrawOneQuadrant((uint16 *)&g_ram[0x2000], si + 0);
   Overworld_DecompressAndDrawOneQuadrant((uint16 *)&g_ram[0x2040], si + 1);
   Overworld_DecompressAndDrawOneQuadrant((uint16 *)&g_ram[0x3000], si + 8);
   Overworld_DecompressAndDrawOneQuadrant((uint16 *)&g_ram[0x3040], si + 9);
+  ZeldaWideAfterMapLoad(9);
 }
 
 static const uint8 *GetOverworldHibytes(int i) {
@@ -2468,6 +3007,7 @@ void Overworld_DecompressAndDrawOneQuadrant(uint16 *dst, int screen) {  // 82f59
 
   map16_decode_last = 0xffff;
 
+  uint16 *qol_start = dst;
   uint16 *src = (uint16 *)&g_ram[0x14000];
   for (int j = 0; j < 16; j++) {
     for (int i = 0; i < 16; i++) {
@@ -2476,6 +3016,7 @@ void Overworld_DecompressAndDrawOneQuadrant(uint16 *dst, int screen) {  // 82f59
     }
     dst += 96;
   }
+  Overworld_QolShortcutTiles(qol_start,screen,64);
 }
 
 void Overworld_ParseMap32Definition(uint16 *dst, uint16 input) {  // 82f691
@@ -2529,6 +3070,98 @@ void Overworld_ParseMap32Definition(uint16 *dst, uint16 input) {  // 82f691
   dst[65] = WORD(map16_decode_3[input & 7]);
 }
 
+// Decompress_bank02 bounded by the destination's and the source's sizes:
+// -1 rather than writing or reading past either.
+static int DecompressBank02Bounded(uint8 *dst, int cap, const uint8 *src, size_t size) {
+  const uint8 *end = src + size;
+  int n = 0;
+  for (;;) {
+    if (src >= end)
+      return -1;
+    uint8 cmd = *src++;
+    if (cmd == 0xff)
+      return n;
+    int len;
+    if ((cmd & 0xe0) != 0xe0) {
+      len = (cmd & 0x1f) + 1;
+      cmd &= 0xe0;
+    } else {
+      if (src >= end)
+        return -1;
+      len = *src++ + ((cmd & 3) << 8) + 1;
+      cmd = (cmd << 3) & 0xe0;
+    }
+    if (len > cap - n)
+      return -1;
+    if (cmd == 0) {
+      if (end - src < len)
+        return -1;
+      memcpy(dst + n, src, len);
+      src += len, n += len;
+    } else if (cmd & 0x80) {
+      if (end - src < 2)
+        return -1;
+      int offs = src[0] << 8 | src[1];
+      src += 2;
+      if (offs > cap - len)
+        return -1;
+      for (int i = 0; i < len; i++)
+        dst[n++] = dst[offs + i];
+    } else if (!(cmd & 0x40)) {
+      if (src >= end)
+        return -1;
+      memset(dst + n, *src++, len);
+      n += len;
+    } else if (!(cmd & 0x20)) {
+      if (end - src < 2)
+        return -1;
+      for (int i = 0; i < len; i++)
+        dst[n++] = src[i & 1];
+      src += 2;
+    } else {
+      if (src >= end)
+        return -1;
+      uint8 v = *src++;
+      for (int i = 0; i < len; i++)
+        dst[n++] = v++;
+    }
+  }
+}
+
+// The map16 of one overworld screen, 32x32 entries row by row, as
+// Overworld_DecompressAndDrawOneQuadrant builds it but into dst: no WRAM is
+// touched. Without the overlays the game adds on entering an area
+// (Overworld_HandleOverlaysAndBombDoors). For the WIDE side bands, which
+// show screens the game has not loaded during a scroll.
+bool Overworld_DecodeScreenMap16(int screen, uint16 *dst) {
+  MemBlk hi_comp = kOverworld_Hibytes_Comp(screen);
+  MemBlk lo_comp = kOverworld_Lobytes_Comp(screen);
+  uint8 hi[0x300], lo[0x300];
+  if (!hi_comp.ptr || !lo_comp.ptr ||
+      DecompressBank02Bounded(hi, sizeof(hi), hi_comp.ptr, hi_comp.size) < 256 ||
+      DecompressBank02Bounded(lo, sizeof(lo), lo_comp.ptr, lo_comp.size) < 256)
+    return false;
+  const uint8 *tables[4] = { kMap32ToMap16_0, kMap32ToMap16_1, kMap32ToMap16_2, kMap32ToMap16_3 };
+  size_t sizes[4] = { kMap32ToMap16_0_SIZE, kMap32ToMap16_1_SIZE, kMap32ToMap16_2_SIZE, kMap32ToMap16_3_SIZE };
+  for (int i = 0; i < 256; i++) {
+    // Overworld_ParseMap32Definition, from the input it is given.
+    uint16 input = (uint16)((hi[i] << 8 | lo[i]) * 2);
+    uint16 a = input & ~7;
+    size_t x = (a >> 1) + (a >> 2);
+    int k = (input & 7) >> 1;
+    uint16 *out = dst + (i >> 4) * 64 + (i & 15) * 2;
+    for (int t = 0; t < 4; t++) {
+      if (x + 6 > sizes[t])
+        return false;
+      const uint8 *ov = tables[t] + x;
+      uint8 nibbles = ov[4 + (k >> 1)];
+      out[(t >> 1) * 32 + (t & 1)] = ov[k] | ((k & 1 ? nibbles & 0xf : nibbles >> 4) << 8);
+    }
+  }
+  Overworld_QolShortcutTiles(dst,screen,32);
+  return true;
+}
+
 void OverworldLoad_LoadSubOverlayMap32() {  // 82f7cb
   int si = overworld_screen_index;
   Overworld_DecompressAndDrawOneQuadrant((uint16 *)&g_ram[0x4000], si);
@@ -2555,8 +3188,6 @@ void Map16ToMap8(const uint8 *src, int r20) {  // 82fd46
 }
 
 void OverworldCopyMap16ToBuffer(const uint8 *src, uint16 r20, int r14, uint16 *r10) {  // 82fd87
-  const uint16 *map8 = GetMap16toMap8Table();
-
   int yr = map16_load_src_off - 0x410 & 0x1fff;
   int xr = map16_load_dst_off;
   uint16 *tmp = (uint16 *)(g_ram + 0x500);
@@ -2575,11 +3206,14 @@ void OverworldCopyMap16ToBuffer(const uint8 *src, uint16 r20, int r14, uint16 *r
   for (int i = 0; i < 2; i++, r0 += 0x400, r14 += 0x40) {
     *r10++ = r0 | r20;
     for (int j = 0; j < 16; j++, r14 += 4) {
-      const uint16 *m = map8 + 4 * *tmp++;
-      WORD(dung_bg2_attr_table[r14]) = WORD(m[0]);
-      WORD(dung_bg2_attr_table[r14 + 64]) = WORD(m[2]);
-      WORD(dung_bg2_attr_table[r14 + 2]) = WORD(m[1]);
-      WORD(dung_bg2_attr_table[r14 + 66]) = WORD(m[3]);
+      uint16 k = *tmp++;
+      const uint16 *m = Map16ToMap8Entry(k);
+      uint16 map8_words[4] = {m[0], m[1], m[2], m[3]};
+      Rando_PatchMedallionEntranceMap8(k, map8_words);
+      WORD(dung_bg2_attr_table[r14]) = WORD(map8_words[0]);
+      WORD(dung_bg2_attr_table[r14 + 64]) = WORD(map8_words[2]);
+      WORD(dung_bg2_attr_table[r14 + 2]) = WORD(map8_words[1]);
+      WORD(dung_bg2_attr_table[r14 + 66]) = WORD(map8_words[3]);
     }
   }
 
@@ -2734,11 +3368,29 @@ void Overworld_Memorize_Map16_Change(uint16 pos, uint16 value) {  // 8edd40
   num_memorized_tiles = x + 2;
 }
 
+static bool s_rando_peg_grant_blocked;
+
 void HandlePegPuzzles(uint16 pos) {  // 8edd67
   static const uint16 kLwTurtleRockPegPositions[3] = { 0x826, 0x5a0, 0x81a };
+  s_rando_peg_grant_blocked = false;
 
   if (overworld_screen_index == 7) {
-    if (save_ow_event_info[7] & 0x20)
+    // #82 Inverted: TurtleRockPegSolved. In Inverted the Turtle Rock entrance
+    // pegs are treated as already solved (the puzzle is pre-flat), per
+    // z3randomizer inverted.asm TurtleRockPegSolved which forces the
+    // peg-solved event test (`LDA $7EF287 : AND #$0020`) to always read 0x20.
+    // Mirror that here so the troll-peg hammer interaction is skipped under the
+    // active Inverted rando world-state (the peg puzzle behaves as complete).
+    // Vanilla / Open / Standard / Retro use the persisted solved-bit unchanged.
+    // NOTE: this guard covers only the LIGHT-world screen-7 peg approach. The
+    // actual Inverted "reach TR from the tail" access opens the entrance via the
+    // screen-0x47 (DW) auto-open in Overworld_HandleOverlaysAndBombDoors + the
+    // screen-0x47 collision table (tile_detect.c); this screen-7 pre-solve is
+    // belt-and-suspenders, not the load-bearing TR-open for the tail route.
+    bool inverted_rando =
+        (enhanced_features1 & kFeatures1_RandomizerActive) &&
+        Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */;
+    if (inverted_rando || (save_ow_event_info[7] & 0x20))
       return;
     if (word_7E04C8 != 0xffff && kLwTurtleRockPegPositions[word_7E04C8 >> 1] == pos) {
       WORD(sound_effect_1) = 0x2d00;
@@ -2754,8 +3406,22 @@ void HandlePegPuzzles(uint16 pos) {  // 8edd67
     }
   } else if (overworld_screen_index == 98) {
     if (++word_7E04C8 == 22) {
+      RandoGrantResult grant = Rando_GrantLocation(
+          LOC_Hammer_Pegs, ITEM_PieceOfHeart, 0x17,
+          kRandoGrantPresentation_Animated, 0, 0);
+      if (grant == kRandoGrantResult_Retryable ||
+          grant == kRandoGrantResult_Invalid) {
+        // The final peg remains standing and the persisted puzzle bits remain
+        // untouched, so a later hammer hit can retry the same transaction.
+        word_7E04C8 = 21;
+        s_rando_peg_grant_blocked = true;
+        return;
+      }
       save_ow_event_info[0x62] |= 0x20;
       sound_effect_2 = 27;
+      if (grant == kRandoGrantResult_Accepted ||
+          grant == kRandoGrantResult_AlreadyChecked)
+        save_ow_event_info[0x62] |= 0x40;
       door_open_closed_counter = 0x50;
       big_rock_starting_address = 0xd20;
       Overworld_DoMapUpdate32x32_B();
@@ -2795,11 +3461,10 @@ void Overworld_CheckSpecialSwitchArea() {  // 8ede49
 }
 
 const uint16 *Overworld_GetMap16OfLink_Mult8() {  // 8ede9a
-  const uint16 *map8 = GetMap16toMap8Table();
   uint16 xc = (link_x_coord + 8) >> 3, yc = link_y_coord + 12;
   uint16 pos = ((yc - overworld_offset_base_y) & overworld_offset_mask_y) * 8 +
                ((xc - overworld_offset_base_x) & overworld_offset_mask_x);
-  return map8 + dung_bg2[pos >> 1] * 4;
+  return Map16ToMap8Entry(dung_bg2[pos >> 1]);
 }
 
 void Palette_AnimGetMasterSword() {  // 8ef400
@@ -2873,9 +3538,102 @@ void Overworld_DwDeathMountainPaletteAnimation() {  // 8ef582
     main_palette_buffer[0x68 + i] = kDwPaletteAnim2[yy + i];
 }
 
+// A quest's overlays are its cartridge's own routines ($8E:F652 on), given
+// with its bytes (kModTable_RomBytes): they are run here, in the state the
+// game calls them in, A and X the screen times two, 16 bits, the data bank
+// $7E. They write tiles with a few instructions; the ones below are all the
+// routines of the quests seen use, even where a jump table entry lands in
+// the middle of an instruction. Y is what the caller left in it, unused by
+// them: 0 here.
+static void QuestOverlay_Write(uint32 addr, uint16 v) {
+  g_ram[addr & 0x1ffff] = v;
+  g_ram[(addr + 1) & 0x1ffff] = v >> 8;
+}
+
+static uint16 QuestOverlay_Read(uint32 addr) {
+  return g_ram[addr & 0x1ffff] | g_ram[(addr + 1) & 0x1ffff] << 8;
+}
+
+static bool Overworld_RunQuestOverlay(void) {
+  if (Mods_RomByte(0x8ef652, 0) != 0x8b)  // PHB: the quest gives them
+    return false;
+  uint16 a = overworld_screen_index * 2, x = a, y = 0;
+  uint32 c = 0, pc = 0x8e0000 | Mods_RomWord(0x8ef664 + a, 0), stack[8];
+  int sp = 0;
+  for (int n = 0; n < 20000; n++) {
+    uint8 op = Mods_RomByte(pc, 0), b = Mods_RomByte(pc + 1, 0);
+    uint16 w = Mods_RomWord(pc + 1, 0);
+    uint32 l = w | Mods_RomByte(pc + 3, 0) << 16, t;
+    switch (op) {
+    case 0xa9: a = w; pc += 3; break;  // LDA #
+    case 0xad: a = QuestOverlay_Read(0x7e0000 | w); pc += 3; break;  // LDA abs
+    case 0xbd: a = QuestOverlay_Read(0x7e0000 + w + x); pc += 3; break;  // LDA abs,X
+    case 0x8d: QuestOverlay_Write(0x7e0000 | w, a); pc += 3; break;  // STA abs
+    case 0x9d: QuestOverlay_Write(0x7e0000 + w + x, a); pc += 3; break;  // STA abs,X
+    case 0x99: QuestOverlay_Write(0x7e0000 + w + y, a); pc += 3; break;  // STA abs,Y
+    case 0x8f:  // STA long
+      if ((l >> 17) != 0x3f)
+        goto unknown;
+      QuestOverlay_Write(l, a), pc += 4;
+      break;
+    case 0x9c: QuestOverlay_Write(0x7e0000 | w, 0); pc += 3; break;  // STZ abs
+    case 0x9e: QuestOverlay_Write(0x7e0000 + w + x, 0); pc += 3; break;  // STZ abs,X
+    case 0x8e: QuestOverlay_Write(0x7e0000 | w, x); pc += 3; break;  // STX abs
+    case 0x8c: QuestOverlay_Write(0x7e0000 | w, y); pc += 3; break;  // STY abs
+    case 0x1a: a++; pc += 1; break;  // INC A
+    case 0x3a: a--; pc += 1; break;  // DEC A
+    case 0xa2: x = w; pc += 3; break;  // LDX #
+    case 0xa0: y = w; pc += 3; break;  // LDY #
+    case 0xb6: x = QuestOverlay_Read((uint16)(b + y)); pc += 2; break;  // LDX dp,Y
+    case 0xaa: x = a; pc += 1; break;  // TAX
+    case 0x8a: a = x; pc += 1; break;  // TXA
+    case 0xa8: y = a; pc += 1; break;  // TAY
+    case 0x98: a = y; pc += 1; break;  // TYA
+    case 0xe8: x++; pc += 1; break;  // INX
+    case 0xc8: y++; pc += 1; break;  // INY
+    case 0xca: x--; pc += 1; break;  // DEX
+    case 0x88: y--; pc += 1; break;  // DEY
+    case 0x18: c = 0; pc += 1; break;  // CLC
+    case 0x38: c = 1; pc += 1; break;  // SEC
+    case 0xb8: pc += 1; break;  // CLV
+    case 0x69: t = a + w + c; c = t >> 16; a = t; pc += 3; break;  // ADC #
+    case 0x29: a &= w; pc += 3; break;  // AND #
+    case 0x25: a &= QuestOverlay_Read(b); pc += 2; break;  // AND dp
+    case 0x01: a |= QuestOverlay_Read(0x7e0000 | QuestOverlay_Read((uint16)(b + x))); pc += 2; break;  // ORA (dp,X)
+    case 0x26:  // ROL dp
+      t = QuestOverlay_Read(b);
+      QuestOverlay_Write(b, t << 1 | c), c = t >> 15, pc += 2;
+      break;
+    case 0x06:  // ASL dp
+      t = QuestOverlay_Read(b);
+      QuestOverlay_Write(b, t << 1), c = t >> 15, pc += 2;
+      break;
+    case 0x4c: pc = 0x8e0000 | w; break;  // JMP abs
+    case 0x20:  // JSR abs
+      if (sp == 8)
+        goto unknown;
+      stack[sp++] = pc + 3, pc = 0x8e0000 | w;
+      break;
+    case 0x60:  // RTS
+      if (!sp)
+        return true;
+      pc = stack[--sp];
+      break;
+    default:
+    unknown:
+      fprintf(stderr, "Quest overlay of screen %d: $%02x at $%06x not run\n", overworld_screen_index, op,
+              (unsigned)pc);
+      return true;
+    }
+  }
+  return true;
+}
+
 void Overworld_LoadEventOverlay() {  // 8ef652
   int x;
   uint16 *dst = dung_bg2;
+  if (Overworld_RunQuestOverlay())
+    return;
   switch (overworld_screen_index) {
   case 0: case 1: case 2:
     dst[XY(11, 16)] = 0xe32;
@@ -3192,6 +3950,27 @@ void Ancilla_TerminateWaterfallSplashes() {  // 8ffd3c
 }
 
 void Overworld_GetPitDestination() {  // 9bb860
+  // Hole-only Inverted Ganon relocation: any fall on area 0x1B (LW Hyrule Castle)
+  // post-Agahnim routes to the Ganon room via entrance 0x7B — the same drop the
+  // DW pyramid uses (kFallHole entries 8-10, area 0x5B -> 0x7B). The only pit on
+  // 0x1B is the relocated Ganon pit (the 0x037 attr override in tile_detect.c), so
+  // a position match isn't needed. Gated on Inverted + the pyramid-hole bit, so
+  // non-Inverted / pre-Agahnim 0x1B is byte-identical (the dormant vanilla 0x1B
+  // fall-hole entry, pos 0x170 -> 0x7D, is unaffected outside this gate).
+  bool rando_inverted = (enhanced_features1 & kFeatures1_RandomizerActive) &&
+                        Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */;
+  if (rando_inverted && overworld_area_index == 0x1B &&
+      (save_ow_event_info[0x5B] & 0x20)) {
+    which_entrance = 0x7B;
+    byte_7E010F = 0;
+    g_rando_takeany_door_id = 0;
+    if (enhanced_features1 & kFeatures1_RandomizerActive)
+      g_ram[kRam_RandoOverworldDoor] = 0;  // a pit is not an overworld door
+    g_rando_entrance_exit_room = 0;
+    g_rando_entrance_force_cached = 0;
+    Rando_RecordEnteredFallhole();
+    return;
+  }
   uint16 x = (link_x_coord & ~7);
   uint16 y = (link_y_coord & ~7);
   uint16 pos = ((y - overworld_offset_base_y) & overworld_offset_mask_y) << 3;
@@ -3200,18 +3979,47 @@ void Overworld_GetPitDestination() {  // 9bb860
 
   int i = 36 / 2;
   for (;;) {
-    if (kFallHole_Pos[i] == pos && kFallHole_Area[i] == overworld_area_index)
+    // Inverted hole-only relocation: the DW pyramid (area 0x5B) is no longer a
+    // Ganon access — Ganon moved to the LW castle (0x1B, handled above). Its
+    // fall-hole entries (-> entrance 0x7B) must NOT match, so a fall at the
+    // pyramid drops to the Chris-Houlihan fallback below (kept in the DW), not to
+    // Ganon. Faithful to ALTTPR repointing the pyramid hole entrances off 0x5B
+    // (Rom.php:1842-1844). Non-Inverted is byte-identical.
+    if (kFallHole_Pos[i] == pos && kFallHole_Area[i] == overworld_area_index &&
+        !(rando_inverted && overworld_area_index == 0x5B))
       break;
     if (--i < 0) {
-      savegame_is_darkworld = 0;
+      // #82 Inverted: vanilla hardcodes the LIGHT world for the unmatched
+      // (Chris-Houlihan) fall-hole fallback because vanilla's home world is the
+      // LW. In Inverted the home world is the DARK world, so an unmatched pit
+      // must keep Link in the DW (0x40) rather than flipping him to the LW.
+      // Gated so vanilla / Open / Standard / Retro stay byte-identical.
+      savegame_is_darkworld = rando_inverted ? 0x40 : 0;
       // Chris Houlihan's room
       which_entrance = 130;
       byte_7E010F = 0;
+      g_rando_takeany_door_id = 0;  // fall-hole is never a take-any (Slice 3b)
+      if (enhanced_features1 & kFeatures1_RandomizerActive)
+        g_ram[kRam_RandoOverworldDoor] = 0;  // nor an overworld door (shop key)
+      g_rando_entrance_exit_room = 0;  // Phase C — clear stale dungeon-coupling room
+      g_rando_entrance_force_cached = 0;
       return;
     }
   }
   which_entrance = kFallHole_Entrances[i];
   byte_7E010F = 0;
+  g_rando_takeany_door_id = 0;  // fall-hole is never a take-any (Slice 3b)
+  if (enhanced_features1 & kFeatures1_RandomizerActive)
+    g_ram[kRam_RandoOverworldDoor] = 0;  // nor an overworld door (shop key)
+  // Phase C Stage 2 — a fall-hole is not a shuffled dungeon DOOR, so any pending
+  // dungeon-coupling source room from a prior door entry must not leak into this
+  // interior's exit. (Stage 3: also clear the cross cave→dungeon force-cached flag,
+  // or it would corrupt this interior's exit branch — matches the Houlihan path.)
+  g_rando_entrance_exit_room = 0;
+  g_rando_entrance_force_cached = 0;
+  // Decoupled / capture (D.3/D.4): a drop-in cave is entered by falling, so record
+  // it here (keyed by which_entrance) — lets it be captured and decouple its exit.
+  Rando_RecordEnteredFallhole();
 }
 
 void Overworld_UseEntrance() {  // 9bbbf4
@@ -3219,19 +4027,18 @@ void Overworld_UseEntrance() {  // 9bbbf4
   uint16 pos = ((yc - overworld_offset_base_y) & overworld_offset_mask_y) * 8 +
     ((xc - overworld_offset_base_x) & overworld_offset_mask_x);
 
-  int x = dung_bg2[pos >> 1] * 4;
-  const uint16 *map8p = GetMap16toMap8Table();
+  const uint16 *m = Map16ToMap8Entry(dung_bg2[pos >> 1]);
 
   if (!link_direction_facing) {
-    uint16 a = map8p[x + 1] & 0x41ff;
+    uint16 a = m[1] & 0x41ff;
     if (a == 0xe9)
       goto do_draw;
 
     if (a == 0x149 || a == 0x169)
       goto is_149_or_169;
 
-    x = dung_bg2[(pos >> 1) + 1] * 4;
-    a = map8p[x] & 0x41ff;
+    m = Map16ToMap8Entry(dung_bg2[(pos >> 1) + 1]);
+    a = m[0] & 0x41ff;
     if (a == 0x40e9) {
       pos -= 2;
 do_draw:
@@ -3260,13 +4067,27 @@ is_149_or_169:
     }
   }
 after:
-  if (!LookupInOwEntranceTab(map8p[x + 2] & 0x1ff, map8p[x + 3] & 0x1ff)) {
+  if (!LookupInOwEntranceTab(m[2] & 0x1ff, m[3] & 0x1ff)) {
     big_key_door_message_triggered = 0;
     return;
   }
 
   int lx = LookupInOwEntranceTab2(pos);
   if (lx < 0)
+    return;
+
+  // #82 Inverted: PreventEnterOnBonk (z3randomizer entrances.asm:194). In
+  // Inverted, while in the mirror-warp state (kPlayerState_Mirror == 0x14) a bonk
+  // while CROSSING worlds (overworld_screen_index & 0x40 !=
+  // last_light_vs_dark_world == WorldCache) must NOT open/enter the overworld
+  // door under Link. Upstream takes .done (enter normally) on the BEQ when the
+  // world bit MATCHES the cache, and falls through to block-entry when it
+  // differs — so the guard fires on `!=`. Gated so vanilla / Open / Standard /
+  // Retro enter byte-identically.
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+      Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */ &&
+      link_player_handler_state == kPlayerState_Mirror &&
+      (overworld_screen_index & 0x40) != last_light_vs_dark_world)
     return;
 
   if (!follower_dropped && (link_pose_for_item == 1 || !CanEnterWithTagalong(kOverworld_Entrance_Id[lx] - 1))) {
@@ -3277,6 +4098,62 @@ after:
     }
   } else {
     which_entrance = kOverworld_Entrance_Id[lx];
+    // D.3 capture-for-bake: record the entered door's vanilla cave interior in
+    // EVERY game (vanilla or rando) so the arrival capture works in any mode.
+    Rando_RecordEnteredDoorForCapture((uint16)lx);
+    // Phase B Slice 3b — Retro TakeAny redirect. `lx` is the overworld door
+    // row-index (== ALTTPR's X); door_id = lx+1. If this cave is an active
+    // take-any this seed, capture the door (the disambiguation key — the
+    // redirect overwrites which_entrance with the shared host-room entrance,
+    // destroying the source identity) and send the player into the take-any
+    // host room. See src/rando/rando.c / add-rando-retro-takeany/design.md §D1.
+    g_rando_takeany_door_id = 0;
+    if (enhanced_features1 & kFeatures1_RandomizerActive) {
+      // add-rando-shopsanity — record the entered door as ALTTPR's
+      // PreviousOverworldDoor (row index + 1; z3randomizer doorframefixes.asm
+      // StoreLastOverworldDoorID). This is the shop identity key:
+      // `which_entrance` cannot serve, because four Dark World shops share
+      // entrance id 0x60 (room 0x10F) and two share 0x58 (room 0x112). Stored
+      // in g_ram so a snapshot replay-restore — which restores g_ram but not C
+      // statics — keeps the shop the player is standing in resolvable. Gated on
+      // the rando bit because this byte is inside the rando-owned WRAM range
+      // (kRam_RandoOwned*), which must stay untouched in vanilla snapshots.
+      g_ram[kRam_RandoOverworldDoor] = (uint8)(lx + 1);
+      uint8 host = Rando_TakeAnyHostByDoorIndex((uint8)lx);
+      if (host) {
+        g_rando_takeany_door_id = (uint8)(lx + 1);
+        which_entrance = host;
+      }
+    }
+    // Phase C Stage 2 — dungeon entrance-shuffle coupling. If this door is a
+    // SHUFFLED dungeon door (which_entrance above now loads a DIFFERENT dungeon
+    // via the overlay), capture the SOURCE dungeon's room so the dungeon-exit
+    // search returns Link to THIS door (overworld.c "exit" path below), not the
+    // loaded dungeon's vanilla door. 0 for caves (auto-coupled) / unshuffled doors.
+    g_rando_entrance_exit_room = 0;
+    g_rando_entrance_force_cached = 0;
+    if (enhanced_features1 & kFeatures1_RandomizerActive) {
+      if (Chains_RuntimeRecordDoorEntry((uint16)lx))
+        Chains_ClearFollowerForChainStart();
+      g_rando_entrance_exit_room = Rando_EntranceCoupledExitRoom((uint16)lx);
+      // Dungeon decoupled (Insanity): a one-way dungeon exit overrides the coupled
+      // (return-to-source) room with the π_out target dungeon's room, so Link emerges
+      // at a DIFFERENT dungeon's overworld door. Non-zero only for a pooled dungeon
+      // door under dungeon-decoupled (self-maps return 0 → the coupled room stands).
+      uint16 ddx = Rando_EntranceDungeonDecoupledExitRoom((uint16)lx);
+      if (ddx != 0) g_rando_entrance_exit_room = ddx;
+      // Cross-category: a cave door redirected to a dungeon loads a dungeon room
+      // (search-exit class) but must return to the cave — force the cached exit.
+      if (g_rando_entrance_exit_room == 0)
+        g_rando_entrance_force_cached = Rando_EntranceForceCachedExit((uint16)lx) ? 1 : 0;
+      // Decoupled (D.4): remember which cave interior this door belongs to so the
+      // exit can emerge at net[interior]'s door. No-op unless decoupled is active.
+      Rando_DecoupledSetEnteredDoor((uint16)lx);
+      // Cross + decoupled: resolve this door's one-way exit target (cave or dungeon)
+      // and stash it; AUTHORITATIVE over the coupled exit above when active. No-op
+      // otherwise.
+      Rando_CrossDecoupledSetExit((uint16)lx);
+    }
     link_auxiliary_state = 0;
     link_incapacitated_timer = 0;
     main_module_index = 15;
@@ -3322,10 +4199,25 @@ uint16 Overworld_ToolAndTileInteraction(uint16 x, uint16 y) {  // 9bbd82
         index_of_interacting_tile = yv;
         yv = (attr == 0x72a) ? 0xdc8 : 0xdc7;
         uint32 result;
+        uint8 terrain_result;
 check_secret:
-        result = Overworld_RevealSecret(pos);
-        if (result != 0)
-          yv = result;
+        // add-rando-grass-rock-shuffle: hook the bush-cut / thick-grass-cut
+        // consume (yv 0xdc5/0xdc7/0xdc8). The shovel/dig path (yv==0xdc9) is a
+        // dig spot, NOT a terrain object — leave it to vanilla. On Suppress
+        // the placed item was granted; skip RevealSecret and set the 0xFF
+        // no-spawn sentinel (a ZERO would trigger the outdoor random-secret
+        // substitution) so nothing spawns and yv keeps its cut-tile value.
+        terrain_result = yv == 0xdc9 ? kRandoTerrain_Vanilla :
+            Rando_TerrainRevealHook(overworld_screen_index, pos);
+        if (terrain_result == kRandoTerrain_Retry)
+          return attr;
+        if (terrain_result == kRandoTerrain_Suppress) {
+          BYTE(dung_secrets_unk1) = 0xff;
+        } else {
+          result = Overworld_RevealSecret(pos);
+          if (result != 0)
+            yv = result;
+        }
 memoize_getout:
         overworld_tileattr[pos >> 1] = yv;
         Overworld_Memorize_Map16_Change(pos, yv);
@@ -3333,7 +4225,7 @@ memoize_getout:
         nmi_load_bg_from_vram = 1;
       }
       uint16 t;
-      t = GetMap16toMap8Table()[attr * 4 + ((y & 8) >> 2) + (x & 1)];
+      t = Map16ToMap8Entry(attr)[((y & 8) >> 2) + (x & 1)];
       attr = kMap8DataToTileAttr[t & 0x1ff];
       if (index_of_interacting_tile) {
         Sprite_SpawnImmediatelySmashedTerrain(index_of_interacting_tile, scratch_0, scratch_1);
@@ -3346,6 +4238,8 @@ memoize_getout:
     if (attr == 0x21b) {
       sound_effect_1 = 17;
       HandlePegPuzzles(pos);
+      if (s_rando_peg_grant_blocked)
+        return attr;
       yv = 0xdcb;
       goto memoize_getout;
     } else { // else_3
@@ -3358,7 +4252,7 @@ memoize_getout:
 }
 
 void Overworld_PickHammerSfx(uint16 a) {  // 9bbf1e
-  uint16 attr = kMap8DataToTileAttr[GetMap16toMap8Table()[a * 4] & 0x1ff];
+  uint16 attr = kMap8DataToTileAttr[Map16ToMap8Entry(a)[0] & 0x1ff];
   uint8 y;
   if (attr < 0x50) {
     return;
@@ -3393,21 +4287,35 @@ uint8 Overworld_HandleLiftableTiles(Point16U *pt_arg) {  // 9bbf9d
   } else if ((y = 0xdc7, a == 0x36) || (y = 0xdc8, a == 0x72a) || (y = 0xdca, a == 0x20f) || (y = 0xdca, a == 0x239) || (y = 0xdc6, a == 0x101)) {
     return Overworld_LiftingSmallObj(a, pos, y, pt);
   } else {
-    uint16 t = a * 4 + (pt.x & 8 ? 2 : 0) + (pt.y & 8 ? 1 : 0);
-    return kMap8DataToTileAttr[GetMap16toMap8Table()[t] & 0x1ff];
+    return kMap8DataToTileAttr[Map16ToMap8Entry(a)[(pt.x & 8 ? 2 : 0) + (pt.y & 8 ? 1 : 0)] & 0x1ff];
   }
 }
 
 uint8 Overworld_LiftingSmallObj(uint16 a, uint16 pos, uint16 y, Point16U pt) {  // 9bc008
-  uint16 secret = Overworld_RevealSecret(pos);
-  if (secret != 0)
-    y = secret;
+  // add-rando-grass-rock-shuffle: lift-consume of a bush / small rock. A sign
+  // (map16 0x101) also routes here but is NOT registered, so the hook returns
+  // Vanilla for it. On Suppress the placed item was granted; keep the lifted
+  // replacement tile (y) and set the 0xFF no-spawn sentinel.
+  uint8 terrain_result = Rando_TerrainRevealHook(overworld_screen_index, pos);
+  if (terrain_result == kRandoTerrain_Retry) {
+    // Return the "nothing was lifted" sentinel (0), as the dungeon counterpart
+    // does. Returning the success expression made a refused grant
+    // indistinguishable from a real lift, so the caller carried the object away
+    // while the tile stayed on screen -- a duplicated, re-liftable bush/rock.
+    return 0;
+  }
+  if (terrain_result == kRandoTerrain_Suppress) {
+    BYTE(dung_secrets_unk1) = 0xff;
+  } else {
+    uint16 secret = Overworld_RevealSecret(pos);
+    if (secret != 0)
+      y = secret;
+  }
   overworld_tileattr[pos >> 1] = y;
   Overworld_Memorize_Map16_Change(pos, y);
   Overworld_DrawMap16(pos, y);
   nmi_load_bg_from_vram = 1;
-  uint16 t = a * 4 + (pt.x & 8 ? 2 : 0) + (pt.y & 8 ? 1 : 0);
-  return kMap8DataToTileAttr[GetMap16toMap8Table()[t] & 0x1ff];
+  return kMap8DataToTileAttr[Map16ToMap8Entry(a)[(pt.x & 8 ? 2 : 0) + (pt.y & 8 ? 1 : 0)] & 0x1ff];
 }
 
 int Overworld_SmashRockPile(bool down_one_tile, Point16U *pt) {  // 9bc055
@@ -3431,13 +4339,33 @@ uint8 SmashRockPile_fromLift(uint16 a, uint16 pos, uint16 y, Point16U pt) {  // 
   static const int8 kBigRockTabY[] = { 0, 0, -64, -64 };
   static const int8 kBigRockTabX[] = { 0, -1, 0, -1 };
   pos = 2 * ((pos >> 1) + kBigRockTab1[y]);
+
+  // add-rando-grass-rock-shuffle: big-pile lift-consume, keyed on the pile
+  // ORIGIN pos (reassigned above — the registry key). A pile whose vanilla
+  // secret is the structural stairs reveal (data 0xffff) is excluded from the
+  // registry, so the hook returns Vanilla and the stairs branch below still
+  // runs. On Suppress the placed item was granted; no structural reveal.
+  uint16 secret;
+  uint8 terrain_result = Rando_TerrainRevealHook(overworld_screen_index, pos);
+  if (terrain_result == kRandoTerrain_Retry) {
+    // Return the "nothing was lifted" sentinel (0), as the dungeon counterpart
+    // does. Returning the success expression made a refused grant
+    // indistinguishable from a real lift, so the caller carried the object away
+    // while the tile stayed on screen -- a duplicated, re-liftable bush/rock.
+    return 0;
+  }
+
   big_rock_starting_address = pos;
   door_open_closed_counter = 40;
-
   *(uint16 *)&g_ram[0] = pt.y;
   *(uint16 *)&g_ram[2] = pt.x;
 
-  uint16 secret = Overworld_RevealSecret(pos);
+  if (terrain_result == kRandoTerrain_Suppress) {
+    BYTE(dung_secrets_unk1) = 0xff;
+    secret = 0;
+  } else {
+    secret = Overworld_RevealSecret(pos);
+  }
   pt.y = *(uint16 *)&g_ram[0];
   pt.x = *(uint16 *)&g_ram[2];
 
@@ -3451,8 +4379,7 @@ uint8 SmashRockPile_fromLift(uint16 a, uint16 pos, uint16 y, Point16U pt) {  // 
 
   Overworld_DoMapUpdate32x32_B(); // WARNING: The original destroys ram[0] and ram[2]
 
-  uint16 t = a * 4 + (pt.x & 8 ? 2 : 0) + (pt.y & 8 ? 1 : 0);
-  return kMap8DataToTileAttr[GetMap16toMap8Table()[t] & 0x1ff];
+  return kMap8DataToTileAttr[Map16ToMap8Entry(a)[(pt.x & 8 ? 2 : 0) + (pt.y & 8 ? 1 : 0)] & 0x1ff];
 }
 
 void Overworld_BombTiles32x32(uint16 x, uint16 y) {  // 9bc0f8
@@ -3487,9 +4414,21 @@ void Overworld_BombTile(int x, int y) {  // 9bc155
   } else {
     goto label_a;
   }
-  a = Overworld_RevealSecret(pos);
-  if (a == 0)
+  // add-rando-grass-rock-shuffle: bomb-consume of a bush / thick grass (this
+  // is the CONSUMING branch — the label_a probe below runs for non-consumed
+  // blast tiles and the super-bomb follower and must NOT be hooked). On
+  // Suppress the placed item was granted; draw the cut tile (j), no secret.
+  uint8 terrain_result = Rando_TerrainRevealHook(overworld_screen_index, pos);
+  if (terrain_result == kRandoTerrain_Retry)
+    return;
+  if (terrain_result == kRandoTerrain_Suppress) {
+    BYTE(dung_secrets_unk1) = 0xff;
     a = j;
+  } else {
+    a = Overworld_RevealSecret(pos);
+    if (a == 0)
+      a = j;
+  }
   dung_bg2[pos >> 1] = a;
   Overworld_Memorize_Map16_Change(pos, a);
   Overworld_DrawMap16(pos, a);
@@ -3537,17 +4476,58 @@ void OpenGargoylesDomain() {  // 9bc264
 }
 
 void CreatePyramidHole() {  // 9bc2a7
-  Overworld_DrawMap16_Persist(0x3bc, 0xe3f);
-  Overworld_DrawMap16_Persist(0x3be, 0xe40);
-  Overworld_DrawMap16_Persist(0x3c0, 0xe41);
-  Overworld_DrawMap16_Persist(0x43c, 0xe42);
-  Overworld_DrawMap16_Persist(0x43e, 0xe43);
-  Overworld_DrawMap16_Persist(0x440, 0xe44);
-  Overworld_DrawMap16_Persist(0x4bc, 0xe45);
-  Overworld_DrawMap16_Persist(0x4be, 0xe46);
-  Overworld_DrawMap16_Persist(0x4c0, 0xe47);
+  // #82 Inverted: the animated post-bat-slam pyramid hole. In Inverted the
+  // pyramid sits at a different screen position than vanilla DW screen 0x5B,
+  // so the carved hole occupies a different map16 footprint (z3randomizer
+  // inverted.asm Overworld_CreatePyramidHoleModified .invertedBehavior). The
+  // *static* (reload-the-screen-with-hole-already-present) inverted overlay is
+  // already handled by the OWW_CUSTOM_MAP1B_AGA branch in
+  // Overworld_ApplyInvertedTiles (inverted_maps_apply.c) on inverted screen
+  // 0x1B. To keep the animated reveal and the static reload byte-identical, the
+  // positions/tiles below are exactly the (pos, tile) pairs the MAP1B_AGA
+  // stripe stream expands to (see kInvertedMapData screen 0x1B): a 0x046D base
+  // tile, then 0xE39 and two 4-wide RLEINC runs 0xE3A.. / 0xE3E.. and the
+  // 0x490/0x491 debris pair. Gated on the Inverted rando world-state so vanilla
+  // / Open / Standard / Retro carve the original footprint unchanged. This only
+  // rewrites the live map16 buffer + queues the matching VRAM upload (via
+  // Overworld_DrawMap16_Persist); the event bit / SFX / reachability bump below
+  // are shared.
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+      Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */) {
+    // Hole-only relocation: carve the no-art Ganon pit on screen 0x1B (a 2-tone
+    // dark diamond). The pyramid-facade/hole blocks (0x046d/0x0e39../0x0490/
+    // 0x0491) are deliberately NOT placed here — they render as garbage with the
+    // castle gfx/palette; the pit blocks live in the InvertedHoleBlocks_Install
+    // map16 shadow. Footprint + block layout are shared with the static reload
+    // paint in Overworld_ApplyInvertedTiles (inverted_maps_apply.c).
+    //
+    // Only animate the carve when actually on the castle screen (0x1B). The
+    // retreat-bat slam can fire while the player is at the DW pyramid (0x5B —
+    // the bat isn't repositioned to the castle in this fork), and carving the pit
+    // blocks there would draw a spurious dark hole on the pyramid. When the carve
+    // is skipped, the static reload paint in Overworld_ApplyInvertedTiles draws
+    // the pit the next time the player loads screen 0x1B (gated on the same
+    // post-Agahnim bit set below), so the castle hole still appears.
+    if ((uint8)overworld_screen_index == 0x1B)
+      Inverted_CarveCastleHole();
+  } else {
+    Overworld_DrawMap16_Persist(0x3bc, 0xe3f);
+    Overworld_DrawMap16_Persist(0x3be, 0xe40);
+    Overworld_DrawMap16_Persist(0x3c0, 0xe41);
+    Overworld_DrawMap16_Persist(0x43c, 0xe42);
+    Overworld_DrawMap16_Persist(0x43e, 0xe43);
+    Overworld_DrawMap16_Persist(0x440, 0xe44);
+    Overworld_DrawMap16_Persist(0x4bc, 0xe45);
+    Overworld_DrawMap16_Persist(0x4be, 0xe46);
+    Overworld_DrawMap16_Persist(0x4c0, 0xe47);
+  }
   WORD(sound_effect_ambient) = 0x3515;
   save_ow_event_info[0x5b] |= 0x20;
+  // Phase B Slice 1 §38 — Pyramid-hole creation opens a new path to GT
+  // (post-Aga2). Reachability state changes; bump the tracker counter so
+  // its memoized reachability cache invalidates.
+  if (enhanced_features1 & kFeatures1_RandomizerActive)
+    Rando_MarkLocationChecked(LOC_Agahnim_2);
   sound_effect_2 = 3;
   nmi_load_bg_from_vram = 1;
 }
@@ -3607,7 +4587,7 @@ void Overworld_DrawMap16_Persist(uint16 pos, uint16 value) {  // 9bc97c
 void Overworld_DrawMap16(uint16 pos, uint16 value) {  // 9bc980
   pos = Overworld_FindMap16VRAMAddress(pos);
   uint16 *dst = &vram_upload_data[vram_upload_offset >> 1];
-  const uint16 *src = GetMap16toMap8Table() + value * 4;
+  const uint16 *src = Map16ToMap8Entry(value);
   dst[0] = swap16(pos);
   dst[1] = 0x300;
   dst[2] = src[0];
@@ -3624,7 +4604,7 @@ void Overworld_AlterTileHardcore(uint16 pos, uint16 value) {  // 9bc9de
   dung_bg2[pos >> 1] = value;
   pos = Overworld_FindMap16VRAMAddress(pos);
   uint16 *dst = &vram_upload_data[vram_upload_offset >> 1];
-  const uint16 *src = GetMap16toMap8Table() + value * 4;
+  const uint16 *src = Map16ToMap8Entry(value);
   dst[0] = swap16(pos);
   dst[1] = 0x300;
   dst[2] = src[0];
@@ -3642,6 +4622,17 @@ uint16 Overworld_FindMap16VRAMAddress(uint16 addr) {  // 9bca69
 }
 
 void Overworld_AnimateEntrance() {  // 9bcac4
+  // #82 Inverted: AnimatedEntranceFix (z3randomizer entrances.asm:215). In
+  // Inverted, when in the LIGHT world (overworld_screen_index & 0x40 == 0) the
+  // overworld entrance-open animation is suppressed and the cutscene trigger is
+  // cleared (the inverted LW topology has no animated entrances to play). Gated
+  // so vanilla / Open / Standard / Retro run the animation byte-identically.
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+      Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */ &&
+      !(overworld_screen_index & 0x40)) {
+    trigger_special_entrance = 0;
+    return;
+  }
   uint8 j = trigger_special_entrance;
   flag_is_link_immobilized = j;
   flag_unk1 = j;
@@ -4091,3 +5082,191 @@ void OverworldEntrance_AdvanceAndBoom() {  // 9bd00e
   sound_effect_2 = 7;
 }
 
+// ---------------------------------------------------------------------------
+// --dump-terrain-table (dev/codegen): enumerate every consumable overworld
+// terrain object (bushes, thick grass, small rocks, big rock piles; signs and
+// dash-only bonk piles reported-but-excluded) as GROUND TRUTH from the engine
+// itself, for assets/scripts/gen_terrain_tables.py (grass/rock drop shuffle,
+// openspec change add-rando-grass-rock-shuffle Phase 1). Mirrors the
+// --dump-pot-table philosophy: extract from the authoritative engine build
+// rather than re-deriving map32->map16 decode + overlays in Python.
+//
+// Per parent area (screens 0x00-0x7F; specials >= 0x80 can't reveal secrets)
+// this replicates ONLY the map16-buffer build of a full screen load:
+// Overworld_LoadGFXAndScreenSize + Overworld_DecompressAndDrawAllQuadrants,
+// then the overlay set of Overworld_DrawQuadrantsAndOverlays /
+// Overworld_HandleOverlaysAndBombDoors -- replicated below with an explicit
+// `inverted` flag instead of the live rando world-state gate (KEEP IN SYNC
+// with those functions). No gfx/palette/sprite/VRAM work runs (headless-safe:
+// every write path here is a direct dung_bg2/g_ram buffer write).
+//
+// State profiles cover the persistent tile states the registry invariant
+// cares about (present-with-identical-class in EVERY state, else excluded):
+// vanilla / vanilla+event-overlays (save_ow_event_info bits 0x20|0x02 set for
+// ALL screens, so cross-screen reads like the inverted 0x1B hole gate on
+// 0x5B see them) / inverted / inverted+events / vanilla pre-rescue
+// (sram_progress_indicator < 3 -- the inverted map stream has one
+// phase-dependent write).
+static void TerrainDump_BuildScreen(uint8 scr, bool inverted, bool events) {
+  overworld_screen_index = scr;
+  ow_entrance_value = 0;
+  Overworld_LoadGFXAndScreenSize();
+  Overworld_DecompressAndDrawAllQuadrants();
+  // Mirror of Overworld_HandleOverlaysAndBombDoors (see KEEP IN SYNC above):
+  // hardcoded LW rocks (skipped in inverted), event overlay (bit 0x20; forced
+  // on 0x47 in inverted -- TurtleRockEntranceFix), secondary overlay (bit 2),
+  // then the inverted per-screen tile overrides.
+  if (!inverted) {
+    if (scr == 0x33)
+      dung_bg2[340] = 0x20f;
+    else if (scr == 0x2f)
+      dung_bg2[1497] = 0x20f;
+  }
+  // Overworld_LoadEventOverlay's switch asserts on the screens vanilla never
+  // sets bit 0x20 for (its final case group) — skip those here since the
+  // profile sets the bit blanket-wide. KEEP IN SYNC with that switch.
+  bool has_event_overlay =
+      !(scr == 0x72 || scr == 0x73 || scr == 0x74 || scr == 0x75 ||
+        scr == 0x76 || scr == 0x7a || scr == 0x7c || scr == 0x7d ||
+        scr == 0x7e || scr == 0x7f);
+  if ((events || (inverted && scr == 0x47)) && has_event_overlay)
+    Overworld_LoadEventOverlay();
+  if (events) {
+    uint16 so = kSecondaryOverlayPerOw[scr];
+    if (so) {
+      int pos = so >> 1;
+      dung_bg2[pos + 0] = 0xdb4;
+      dung_bg2[pos + 1] = 0xdb5;
+    }
+  }
+  if (inverted)
+    Overworld_ApplyInvertedTiles();
+}
+
+int Overworld_DumpTerrainTable(const char *path) {
+  FILE *f = fopen(path, "wb");
+  if (!f) {
+    fprintf(stderr, "--dump-terrain-table: cannot open %s\n", path);
+    return 1;
+  }
+  // Emitted lines:
+  //   A scr size            -- parent area header (small|big)
+  //   S scr pos data        -- every kOverworldSecrets entry (static per screen)
+  //   T prof scr pos m16 kind a0 a1 a2 a3 content
+  //                         -- one consumable object under state profile prof
+  //                            (kind: B/b bush LW/DW-id, G thick grass, R/r
+  //                            small rock ids 0x20f/0x239, P/Q lift-pile
+  //                            origins, D dash-pile origin (bonk; excluded),
+  //                            S sign (excluded); content = secret byte or -1)
+  //   U prof scr pos m16 a0 a1 a2 a3
+  //                         -- map16 with a liftable attr (0x50..0x57) NOT in
+  //                            the engine's reveal-helper id sets (coverage
+  //                            assert input; tasks.md 1.3)
+  fprintf(f, "# zelda3 terrain dump v1 (add-rando-grass-rock-shuffle Phase 1)\n"
+             "# profiles: 0=vanilla 1=vanilla+events 2=inverted 3=inverted+events 4=vanilla-prerescue\n");
+  static const struct { uint8 inv, ev, prog; } kProf[5] = {
+    {0, 0, 3}, {0, 1, 3}, {1, 0, 3}, {1, 1, 3}, {0, 0, 1},
+  };
+  // stderr summary: per-kind counts, profile 0, split LW/DW.
+  int hist[9][2];
+  memset(hist, 0, sizeof hist);
+  static const char kKinds[9] = { 'B', 'b', 'G', 'R', 'r', 'P', 'Q', 'D', 'S' };
+  int areas = 0, unknown = 0;
+  for (int scr = 0; scr < 0x80; scr++) {
+    overworld_screen_index = (uint16)scr;
+    Overworld_LoadGFXAndScreenSize();
+    int w6 = scr & 0x3f;
+    if (overworld_offset_base_y != ((w6 >> 3) * 512) ||
+        overworld_offset_base_x != ((w6 & 7) * 64))
+      continue;  // child screen of a big area -- the parent covers it
+    bool small = kOverworldMapIsSmall[w6] != 0;
+    areas++;
+    fprintf(f, "A %02x %s\n", scr, small ? "small" : "big");
+    const uint8 *sp = kOverworldSecrets + kOverworldSecrets_Offs[scr];
+    for (;;) {
+      uint16 x = *(const uint16 *)sp;
+      if (x == 0xffff)
+        break;
+      fprintf(f, "S %02x %04x %d\n", scr, x & 0x7fff, sp[2]);
+      sp += 3;
+    }
+    for (int pi = 0; pi < 5; pi++) {
+      memset(save_ow_event_info, kProf[pi].ev ? 0x22 : 0, 0x80);
+      sram_progress_indicator = kProf[pi].prog;
+      TerrainDump_BuildScreen((uint8)scr, kProf[pi].inv != 0, kProf[pi].ev != 0);
+      int w = small ? 32 : 64;
+      for (int row = 0; row < w; row++) {
+        for (int col = 0; col < w; col++) {
+          uint16 m16 = dung_bg2[row * 64 + col];
+          uint16 pos = (uint16)(row * 128 + col * 2);
+          const uint16 *m8 = GetMap16toMap8Table() + m16 * 4;
+          uint8 a0 = kMap8DataToTileAttr[m8[0] & 0x1ff];
+          uint8 a1 = kMap8DataToTileAttr[m8[1] & 0x1ff];
+          uint8 a2 = kMap8DataToTileAttr[m8[2] & 0x1ff];
+          uint8 a3 = kMap8DataToTileAttr[m8[3] & 0x1ff];
+          int kind_idx = -1;
+          bool skip_quadrant = false;
+          switch (m16) {
+          case 0x036: kind_idx = 0; break;  // bush (LW-id; cut/lift/bomb/dash)
+          case 0x72a: kind_idx = 1; break;  // bush (DW-id)
+          case 0x37e: kind_idx = 2; break;  // thick grass (cut/bomb only)
+          case 0x20f: kind_idx = 3; break;  // small rock (Overworld_LiftingSmallObj)
+          case 0x239: kind_idx = 4; break;  // small rock (2nd id)
+          case 0x36d: kind_idx = 5; break;  // lift-pile A origin (top-left quad)
+          case 0x23b: kind_idx = 6; break;  // lift-pile B origin
+          case 0x226: kind_idx = 7; break;  // dash-pile origin (bonk class; excluded)
+          case 0x101: kind_idx = 8; break;  // sign (excluded from the feature)
+          // non-origin pile quadrants -- recognized so they don't hit the U report
+          case 0x36e: case 0x374: case 0x375:
+          case 0x23c: case 0x23d: case 0x23e:
+          case 0x227: case 0x228: case 0x229:
+            skip_quadrant = true;
+            break;
+          default: break;
+          }
+          if (skip_quadrant)
+            continue;
+          if (kind_idx < 0) {
+            if ((a0 >= 0x50 && a0 < 0x58) || (a1 >= 0x50 && a1 < 0x58) ||
+                (a2 >= 0x50 && a2 < 0x58) || (a3 >= 0x50 && a3 < 0x58)) {
+              fprintf(f, "U %d %02x %04x %03x %02x %02x %02x %02x\n",
+                      pi, scr, pos, m16, a0, a1, a2, a3);
+              unknown++;
+            }
+            continue;
+          }
+          int content = -1;
+          const uint8 *p2 = kOverworldSecrets + kOverworldSecrets_Offs[scr];
+          for (;;) {
+            uint16 x = *(const uint16 *)p2;
+            if (x == 0xffff)
+              break;
+            if ((x & 0x7fff) == pos) {
+              content = p2[2];
+              break;
+            }
+            p2 += 3;
+          }
+          fprintf(f, "T %d %02x %04x %03x %c %02x %02x %02x %02x %d\n",
+                  pi, scr, pos, m16, kKinds[kind_idx], a0, a1, a2, a3, content);
+          if (pi == 0)
+            hist[kind_idx][scr >= 0x40]++;
+        }
+      }
+    }
+  }
+  fclose(f);
+  fprintf(stderr, "--dump-terrain-table: %d parent areas -> %s\n", areas, path);
+  fprintf(stderr, "  profile-0 counts (kind: LW+DW=total):\n");
+  int total = 0;
+  for (int k = 0; k < 9; k++) {
+    fprintf(stderr, "    %c: %d+%d=%d\n", kKinds[k], hist[k][0], hist[k][1],
+            hist[k][0] + hist[k][1]);
+    if (k <= 6)  // B b G R r P Q = in-scope candidates (D/S excluded)
+      total += hist[k][0] + hist[k][1];
+  }
+  fprintf(stderr, "  in-scope candidate total (profile 0, B+b+G+R+r+P+Q): %d\n", total);
+  if (unknown)
+    fprintf(stderr, "  WARNING: %d unknown-liftable (U) lines -- extend the id sets\n", unknown);
+  return 0;
+}

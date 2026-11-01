@@ -4,6 +4,10 @@ build/
 build-3ds/
 .DS_Store
 
+# Local Python caches from generators and host tests.
+__pycache__/
+*.py[cod]
+
 # Release staging/output folders. Public artifacts belong on GitHub Releases,
 # not in the source tree.
 Release/

@@ -1,0 +1,118 @@
+# 01_eastern_palace.yaml — Eastern Palace Standard world-state.
+#
+# Phase B Slice 2 §47 (landed 2026-05-27 via the kGenVer 12→13 bump).
+# Standard EP locations were previously authored only in
+# `logic_examples/01_eastern_palace.yaml` (not scanned by codegen).
+# Result: EP locations defaulted to TRUE / FALSE for can_reach /
+# always_allow, which over-approximated reachability. Inverted EP's
+# H2-audit fix authored the Inverted-specific predicates explicitly;
+# this file fills the Standard gap with the same precision.
+#
+# Translation discipline (audit.md §0.10.2):
+#   - Mechanically translated from `app/Region/Standard/EasternPalace.php`.
+#   - Macros (`CanShootArrowsL1`, `CanKillArmosKnights`, `HasSword`)
+#     stay canonical in `macros.yaml`; not re-declared here.
+#   - Predicates cite PHP file:line ranges.
+
+format_version: 1
+
+regions:
+  # Cross-file region reference (overworld parent). Canonical declaration
+  # lives in `40_lightworld_northwest.yaml`.
+  - id: LightWorld_NorthEast
+    name: "Light World - North East (stub)"
+    source: "stub for cross-file region reference"
+
+  - id: EasternPalace_Lobby
+    name: "Eastern Palace - Lobby"
+    dungeon: EasternPalace
+    source: "app/Region/Standard/EasternPalace.php:21-50"
+
+  - id: EasternPalace_PastArmos
+    name: "Eastern Palace - Past Armos"
+    dungeon: EasternPalace
+    parent: EasternPalace_Lobby
+    source: "app/Region/Standard/EasternPalace.php:56-60"
+
+edges:
+  - from: LightWorld_NorthEast
+    to: EasternPalace_Lobby
+    # Trivial entrance — entrance-side gates handled by the overworld
+    # region's edges, not the in-dungeon edge.
+    predicate: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthEast.php (entrance wiring)"
+
+  - from: EasternPalace_Lobby
+    to: EasternPalace_PastArmos
+    # Boss-room access: arrows (Armos Knights), light (Lamp; PHP's FireRod
+    # alternative is gated behind itemPlacement=='advanced' which Phase A
+    # drops per audit §0.10.2), and the Big Key.
+    predicate: "CanShootArrowsL1() AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_EasternPalace)"
+    source: "app/Region/Standard/EasternPalace.php:56 (boss can_complete closure)"
+
+locations:
+  - id: "Eastern Palace - Compass Chest"
+    region: EasternPalace_Lobby
+    type: Chest
+    vanilla_item: Compass_EasternPalace
+    dungeon_item_class: compass
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/EasternPalace.php:51"
+
+  - id: "Eastern Palace - Big Chest"
+    region: EasternPalace_Lobby
+    type: BigChest
+    vanilla_item: BigKey_EasternPalace
+    can_reach: "HAS_ITEM(BigKey_EasternPalace)"
+    # Big Chest accepts any dungeon item from its own dungeon under
+    # dungeon-mode; always_allow overrides any general fill restriction.
+    always_allow: "OP_ITEM_IS(Compass_EasternPalace) OR OP_ITEM_IS(Map_EasternPalace)"
+    source: "app/Region/Standard/EasternPalace.php:52, 102-105"
+
+  - id: "Eastern Palace - Cannonball Chest"
+    region: EasternPalace_Lobby
+    type: Chest
+    vanilla_item: Rupee100
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/EasternPalace.php:53"
+
+  - id: "Eastern Palace - Big Key Chest"
+    region: EasternPalace_Lobby
+    type: Chest
+    vanilla_item: BigKey_EasternPalace
+    dungeon_item_class: big_key
+    # Dark room — needs the Lamp. PHP's FireRod-substitute branch
+    # (`itemPlacement === 'advanced' && FireRod`) is Phase B; defaults
+    # drop the substitute branch per audit §0.10.2.
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav())"
+    source: "app/Region/Standard/EasternPalace.php:76-78"
+
+  - id: "Eastern Palace - Map Chest"
+    region: EasternPalace_Lobby
+    type: Chest
+    vanilla_item: Map_EasternPalace
+    dungeon_item_class: map
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/EasternPalace.php:55"
+
+  # Boss + Prize predicates mirror PHP `EasternPalace.php:84-105`:
+  #   canShootArrows AND (has(Lamp) || (itemPlacement=='advanced' && FireRod))
+  #   AND has(BigKeyP1) AND canBeat(Armos Knights)
+  # Phase A drops the itemPlacement=advanced FireRod alt per audit §0.10.2.
+  # The CanShootArrows and Lamp gates were previously omitted here and
+  # silently overrode the stricter predicates in `logic.yaml` via the
+  # codegen last-wins merge — the placer could route through the boss
+  # without bow / lamp. Restored.
+  - id: "Eastern Palace - Boss"
+    region: EasternPalace_PastArmos
+    type: Drop
+    vanilla_item: BossHeartContainer
+    can_reach: "CanShootArrowsL1() AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_EasternPalace) AND CanKillBoss(EasternPalace)"
+    source: "app/Region/Standard/EasternPalace.php:84-105"
+
+  - id: "Eastern Palace - Prize"
+    region: EasternPalace_PastArmos
+    type: Prize_Pendant
+    vanilla_item: Prize_GreenPendant
+    can_reach: "CanShootArrowsL1() AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_EasternPalace) AND CanKillBoss(EasternPalace)"
+    source: "app/Region/Standard/EasternPalace.php:58, 84-105 (Prize = Boss can_complete)"

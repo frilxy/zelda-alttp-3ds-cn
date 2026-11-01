@@ -6,6 +6,7 @@ E12's captured subtract/full-exception pixels. This is a sensitivity test,
 not a claim that all physical TEV operations have that error.
 """
 from pathlib import Path
+from host_test_support import devkitpro_root
 import argparse,subprocess,tempfile
 r=Path(__file__).resolve().parents[3]
 p=argparse.ArgumentParser();p.add_argument('--e12-capture',type=Path);a=p.parse_args()
@@ -93,5 +94,5 @@ int main(int argc,char **argv){
 '''.replace('FUNCTION',s[start:end])
 with tempfile.TemporaryDirectory(prefix='alttp-tev-') as t:
  p=Path(t);(p/'test.c').write_text(code)
- subprocess.run(['cc','-O1','-fsanitize=address,undefined','-I/opt/devkitpro/libctru/include',str(p/'test.c'),'-o',str(p/'test')],check=True)
+ subprocess.run(['cc','-O1','-fsanitize=address,undefined','-I'+str(devkitpro_root()/'libctru/include'),str(p/'test.c'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test'),*([str(a.e12_capture.resolve())] if a.e12_capture else [])],check=True)

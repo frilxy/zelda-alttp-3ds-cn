@@ -1,6 +1,3 @@
-#ifdef __3DS__
-#include "platform_3ds.h"
-#endif
 #include "nmi.h"
 #include "zelda_rtl.h"
 #include "variables.h"
@@ -9,12 +6,26 @@
 #include "snes/ppu.h"
 #include "assets.h"
 #include "audio.h"
+#include "localized.h"
+#include "language_cart.h"
+#include "rando/shuffle_cosmetic.h"
+#include "rando/rando.h"  // Rando_PotOverlayInjectCgram (gold pot "check" glint)
 
 static const uint8 kNmiVramAddrs[] = {
   0, 0, 4, 8, 12, 8, 12, 0, 4, 0, 8, 4, 12, 4, 12, 0,
   8, 16, 20, 24, 28, 24, 28, 16, 20, 16, 24, 20, 28, 20, 28, 16,
   24, 96, 104,
 };
+// The last two are the BG3 tilemap, which the French Canadian cartridge keeps
+// at $7800 rather than $6000 ($80:9859).
+static const uint8 kNmiVramAddrs_Bg3Loc[2] = { 120, 124 };
+
+static uint8 NmiVramAddr(int i) {
+  int bg3 = (int)countof(kNmiVramAddrs) - 2;
+  if (g_loc_rom && i >= bg3)
+    return kNmiVramAddrs_Bg3Loc[i - bg3];
+  return kNmiVramAddrs[i];
+}
 static PlayerHandlerFunc *const kNmiSubroutines[25] = {
   &NMI_UploadTilemap_doNothing,
   &NMI_UploadTilemap,
@@ -106,7 +117,13 @@ void WritePpuRegisters() {
     zelda_ppu_write(M7Y, M7Y_copy >> 8);
   }
   zelda_ppu_write(BG12NBA, 0x22);
-  zelda_ppu_write(BG34NBA, 7);
+  if (g_loc_rom) {
+    // BG3 characters at $6000, and BG3SC from its mirror ($80:814C).
+    zelda_ppu_write(BG3SC, BG3SC_copy);
+    zelda_ppu_write(BG34NBA, 6);
+  } else {
+    zelda_ppu_write(BG34NBA, 7);
+  }
 }
 
 static void Interrupt_NMI_AudioParts_Locked() {
@@ -199,6 +216,46 @@ void NMI_DoUpdates() {  // 8089e0
     memcpy(&g_zenv.vram[0x4320], &g_ram[dma_source_addr_19], 0x40);
     memcpy(&g_zenv.vram[0x4340], &g_ram[0xbd80], 0x40);
 
+    // add-rando-shopsanity — the two private shop check-slot icon quads
+    // (pos 0 = bird quad chars 0x0E/0x0F+0x1E/0x1F, pos 1 = the shop sheet
+    // zero quad page-1 0x0C/0x0D+0x1C/0x1D; pos 2 rides the recv slot's own
+    // upload above). Armed only while shop check slots draw. The FINAL
+    // decrement restores the borrowed chars — the bird quad from the bird's
+    // staging (an overworld NPC reading these chars must never see icon
+    // pixels), the page-1 quad back to zero — so no stale icon tiles
+    // outlive the shop visit (external-review P2).
+    if (g_rando_shop_icon_upload_frames) {
+      g_rando_shop_icon_upload_frames--;
+      if (g_rando_shop_icon_upload_frames) {
+        memcpy(&g_zenv.vram[0x40e0], g_rando_shop_icon_tiles[0], 0x40);
+        memcpy(&g_zenv.vram[0x41e0], g_rando_shop_icon_tiles[0] + 0x40, 0x40);
+        memcpy(&g_zenv.vram[0x50c0], g_rando_shop_icon_tiles[1], 0x40);
+        memcpy(&g_zenv.vram[0x51c0], g_rando_shop_icon_tiles[1] + 0x40, 0x40);
+      } else {
+        memcpy(&g_zenv.vram[0x40e0], &g_ram[dma_source_addr_20], 0x40);
+        memcpy(&g_zenv.vram[0x41e0], &g_ram[dma_source_addr_21], 0x40);
+        memset(&g_zenv.vram[0x50c0], 0, 0x40);
+        memset(&g_zenv.vram[0x51c0], 0, 0x40);
+      }
+    }
+
+    // rando — OW check-glint private sparkle into char 0x0F (see
+    // kRandoGlintTile4bpp). 0x0F has ZERO draw-table references anywhere
+    // (unlike 0x0E, which several overworld NPCs reference — external-review
+    // P2); it is bird-block real estate, so the final decrement restores the
+    // bird's staging byte for that char, and the block is placed BEFORE the
+    // travel-bird upload so an active flight overwrites it (the bird
+    // animates correctly; the glint shows wing pixels those seconds).
+    if (g_rando_glint_upload_frames) {
+      g_rando_glint_upload_frames--;
+      if (g_rando_glint_upload_frames) {
+        memcpy(&g_zenv.vram[0x40f0],
+               kRandoGlintTile4bpp[(frame_counter >> 2) & 3], 0x20);
+      } else {
+        memcpy(&g_zenv.vram[0x40f0], &g_ram[dma_source_addr_20 + 0x20], 0x20);
+      }
+    }
+
     if (BYTE(flag_travel_bird)) {
       memcpy(&g_zenv.vram[0x40e0], &g_ram[dma_source_addr_20], 0x40);
       memcpy(&g_zenv.vram[0x41e0], &g_ram[dma_source_addr_21], 0x40);
@@ -218,14 +275,18 @@ void NMI_DoUpdates() {  // 8089e0
     }
   }
 
-  if (flag_update_cgram_in_nmi) {
-#ifdef __3DS__
-    if (Platform3DS_GetHardwareProfile()->live_palette_upload)
-      PpuUpdateCgram(g_zenv.ppu, main_palette_buffer);
-    else
-#endif
-      memcpy(g_zenv.ppu->cgram, main_palette_buffer, 0x200);
-  }
+  bool cgram_rebuilt_this_nmi = flag_update_cgram_in_nmi != 0;
+  uint16 next_cgram[0x100];
+  memcpy(next_cgram, cgram_rebuilt_this_nmi ? main_palette_buffer : g_zenv.ppu->cgram,
+         sizeof(next_cgram));
+  if (cgram_rebuilt_this_nmi)
+    Cosmetic_ApplyPaletteCgram(next_cgram, 0x100);
+
+  // Runtime check overlays own sprite-palette rows for only the frame they draw.
+  // If CGRAM was rebuilt above, that fresh transformed copy is the new baseline;
+  // otherwise restore prior overlay rows from their saved transformed baseline.
+  Rando_OverlayPaletteApplyCgram(next_cgram, cgram_rebuilt_this_nmi);
+  PpuUpdateCgram(g_zenv.ppu, next_cgram);
 
   flag_update_hud_in_nmi = 0;
   flag_update_cgram_in_nmi = 0;
@@ -245,6 +306,22 @@ void NMI_DoUpdates() {  // 8089e0
     case 8: p = kBgTilemap_4; break;
     case 9: p = kBgTilemap_5; break;
     default: assert(0);
+    }
+    if (g_loc_rom && nmi_load_bg_from_vram >= 3 && nmi_load_bg_from_vram != 4) {
+      // The cartridge's own screens, from its three interleaved pointer
+      // columns ($80:932A in the French Canadian one).
+      p = Loc_BgTilemap(nmi_load_bg_from_vram);
+    } else if (LanguageCart_UsaLayout() && nmi_load_bg_from_vram >= 3 &&
+               nmi_load_bg_from_vram != 4) {
+      // A translation built from the USA cartridge: its own screens (file
+      // select, copy, erase, name), through its pointer columns at $80:937A,
+      // which it may have pointed elsewhere.
+      uint8 col[3];
+      for (int c = 0; c < 3; c++)
+        col[c] = *LanguageCart_Bytes(0x80937a + c * 9 + nmi_load_bg_from_vram, 1);
+      const uint8 *own = LanguageCart_Bytes(col[2] << 16 | col[1] << 8 | col[0], 4);
+      if (own)
+        p = own;
     }
     HandleStripes14(p);
     if (nmi_load_bg_from_vram == 1)
@@ -288,7 +365,7 @@ void NMI_DoUpdates() {  // 8089e0
 }
 
 void NMI_UploadTilemap() {  // 808cb0
-  memcpy(&g_zenv.vram[kNmiVramAddrs[BYTE(nmi_load_target_addr)] << 8], &g_ram[0x1000], 0x800);
+  memcpy(&g_zenv.vram[NmiVramAddr(BYTE(nmi_load_target_addr)) << 8], &g_ram[0x1000], 0x800);
 
   *(uint16 *)&g_ram[0x1000] = 0;
   nmi_disable_core_updates = 0;
@@ -298,7 +375,8 @@ void NMI_UploadTilemap_doNothing() {  // 808ce3
 }
 
 void NMI_UploadBG3Text() {  // 808ce4
-  memcpy(&g_zenv.vram[0x7c00], &g_ram[0x10000], 0x7e0);
+  // $6C00 in the French Canadian cartridge ($80:8CA1).
+  memcpy(&g_zenv.vram[g_loc_rom ? 0x6c00 : 0x7c00], &g_ram[0x10000], 0x7e0);
   nmi_disable_core_updates = 0;
 }
 
@@ -416,7 +494,9 @@ void NMI_UploadDarkWorldMap() {  // 808ff3
 }
 
 void NMI_UploadGameOverText() {  // 809038
-  CopyToVram(0x7800, &g_ram[0x2000], 0x800);
+  // $6800 in the French Canadian cartridge ($80:8FEA), which leaves the
+  // second upload where it was.
+  CopyToVram(g_loc_rom ? 0x6800 : 0x7800, &g_ram[0x2000], 0x800);
   CopyToVram(0x7d00, &g_ram[0x3400], 0x600);
 }
 
@@ -473,4 +553,3 @@ void NMI_UpdateIRQGFX() {  // 809347
     nmi_flag_update_polyhedral = 0;
   }
 }
-

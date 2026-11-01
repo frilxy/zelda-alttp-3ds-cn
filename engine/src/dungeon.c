@@ -10,11 +10,33 @@
 #include "ancilla.h"
 #include "ending.h"
 #include "player.h"
+#include "mods.h"
 #include "misc.h"
 #include "player_oam.h"
 #include "tagalong.h"
 #include "messaging.h"
 #include "assets.h"
+#include "features.h"
+#include "rando/rando.h"
+#include "rando/souls.h"  // add-enemy-souls (kill-gate hold in RoomTag_GanonDoor)
+#include "rando/dungeon_ids.h"
+#include "rando/item_ids.h"
+#include "rando/location_ids.h"
+#include "rando/shuffle_boss.h"  // BossShuffle_RenderHomeRoom (boss-shuffle render)
+#include "rando/door_runtime.h"  // door-shuffle redirect hooks (add-rando-door-shuffle)
+#include "rando/chain_seams.gen.h"
+#include "rando/chains_runtime.h"
+
+// Room previews use private WRAM. Other threads and external game systems
+// continue seeing the live g_ram while the existing object decoder runs.
+static uint8 *g_dungeon_draw_ram = g_ram;
+static bool g_dungeon_preview;
+#define g_ram g_dungeon_draw_ram
+
+static bool CutsceneFastForwardEnabled(void) {
+  return (enhanced_features0 & kFeatures0_CutsceneFastForward) &&
+         !ZeldaIsEmulatorAttached();
+}
 
 // todo: move to config
 static const uint16 kBossRooms[] = {
@@ -2071,15 +2093,29 @@ void Dungeon_StartInterRoomTrans_Left() {
         BYTE(dungeon_room_index_prev) = dungeon_room_index2;
         Dungeon_AdjustAfterSpiralStairs();
       }
-      dungeon_room_index--;
+      // door shuffle: the redirect is consulted exactly where the positional
+      // room-index change happens; identity/off takes the vanilla line.
+      if (!Rando_DoorTransOverride(kDoorTblDir_West)) {
+        uint16 source_room = dungeon_room_index;
+        uint16 destination_room = (uint8)(dungeon_room_index - 1);
+        if (Chains_TryTerminalOutboundSeam(kChainSeamKind_Door, kDoorTblDir_West,
+                                           source_room, destination_room, 0xFF))
+          return;
+        if (Chains_TryBossSeamHop(kChainSeamKind_Door, kDoorTblDir_West,
+                                  source_room, destination_room, 0xFF))
+          return;
+        dungeon_room_index--;
+      }
     }
     submodule_index = 2;
-    if (room_transitioning_flags & 1) {
-      link_is_on_lower_level ^= 1;
-      link_is_on_lower_level_mirror = link_is_on_lower_level;
-    }
-    if (room_transitioning_flags & 2) {
-      cur_palace_index_x2 ^= 2;
+    if (!Rando_DoorTransConsumedToggles()) {
+      if (room_transitioning_flags & 1) {
+        link_is_on_lower_level ^= 1;
+        link_is_on_lower_level_mirror = link_is_on_lower_level;
+      }
+      if (room_transitioning_flags & 2) {
+        cur_palace_index_x2 ^= 2;
+      }
     }
   }
   room_transitioning_flags = 0;
@@ -2120,14 +2156,27 @@ void Dungeon_StartInterRoomTrans_Up() {
       BYTE(dungeon_room_index_prev) = BYTE(dungeon_room_index2);
       Dungeon_AdjustAfterSpiralStairs();
     }
-    BYTE(dungeon_room_index) -= 0x10;
-    submodule_index = 2;
-    if (room_transitioning_flags & 1) {
-      link_is_on_lower_level ^= 1;
-      link_is_on_lower_level_mirror = link_is_on_lower_level;
+    // door shuffle redirect (no-op when off / identity / staircase context).
+    if (!Rando_DoorTransOverride(kDoorTblDir_North)) {
+      uint16 source_room = dungeon_room_index;
+      uint16 destination_room = (uint8)(dungeon_room_index - 0x10);
+      if (Chains_TryTerminalOutboundSeam(kChainSeamKind_Door, kDoorTblDir_North,
+                                         source_room, destination_room, 0xFF))
+        return;
+      if (Chains_TryBossSeamHop(kChainSeamKind_Door, kDoorTblDir_North,
+                                source_room, destination_room, 0xFF))
+        return;
+      BYTE(dungeon_room_index) -= 0x10;
     }
-    if (room_transitioning_flags & 2) {
-      cur_palace_index_x2 ^= 2;
+    submodule_index = 2;
+    if (!Rando_DoorTransConsumedToggles()) {
+      if (room_transitioning_flags & 1) {
+        link_is_on_lower_level ^= 1;
+        link_is_on_lower_level_mirror = link_is_on_lower_level;
+      }
+      if (room_transitioning_flags & 2) {
+        cur_palace_index_x2 ^= 2;
+      }
     }
   }
   room_transitioning_flags = 0;
@@ -2155,14 +2204,27 @@ void Dungeon_StartInterRoomTrans_Down() {
       BYTE(dungeon_room_index_prev) = dungeon_room_index2;
       Dungeon_AdjustAfterSpiralStairs();
     }
-    BYTE(dungeon_room_index) += 16;
-    submodule_index = 2;
-    if (room_transitioning_flags & 1) {
-      link_is_on_lower_level ^= 1;
-      link_is_on_lower_level_mirror = link_is_on_lower_level;
+    // door shuffle redirect (no-op when off / identity / staircase context).
+    if (!Rando_DoorTransOverride(kDoorTblDir_South)) {
+      uint16 source_room = dungeon_room_index;
+      uint16 destination_room = (uint8)(dungeon_room_index + 0x10);
+      if (Chains_TryTerminalOutboundSeam(kChainSeamKind_Door, kDoorTblDir_South,
+                                         source_room, destination_room, 0xFF))
+        return;
+      if (Chains_TryBossSeamHop(kChainSeamKind_Door, kDoorTblDir_South,
+                                source_room, destination_room, 0xFF))
+        return;
+      BYTE(dungeon_room_index) += 16;
     }
-    if (room_transitioning_flags & 2) {
-      cur_palace_index_x2 ^= 2;
+    submodule_index = 2;
+    if (!Rando_DoorTransConsumedToggles()) {
+      if (room_transitioning_flags & 1) {
+        link_is_on_lower_level ^= 1;
+        link_is_on_lower_level_mirror = link_is_on_lower_level;
+      }
+      if (room_transitioning_flags & 2) {
+        cur_palace_index_x2 ^= 2;
+      }
     }
   }
   room_transitioning_flags = 0;
@@ -2350,6 +2412,11 @@ step12:
     m = kUpperBitmasks[dung_bg2_attr_table[dung_cur_door_pos] & 7];
     dung_door_opened_incl_adjacent |= m;
     dung_door_opened |= m;
+    // door-shuffle: a relocated key door's logical partner half is NOT the
+    // physically adjacent room (which the vanilla adjacency sync covers), so
+    // mirror the open bit into the partner's room/slot explicitly. No-op for
+    // vanilla doors / big-key doors / door shuffle off.
+    Rando_DoorKeyOpenMirror(dungeon_room_index, dung_bg2_attr_table[dung_cur_door_pos] & 7);
     ctr = 4;
   }
   door_open_closed_counter = ctr;
@@ -2375,6 +2442,23 @@ middle:
 
 const DungPalInfo *GetDungPalInfo(int idx) {
   return &kDungPalinfos[idx];
+}
+
+// Sprite-palette signature for a dungeon room: the (sp0l, sp5l, sp6l) triple
+// packed as pal1<<16 | pal2<<8 | pal3, resolved from the room header's palinfo
+// index (`hdr[1]` → kDungPalinfos). Returns 0xFFFFFFFF when the room or palinfo
+// index is out of range. Used by enemy shuffle's dungeon palette gate so it can
+// stay free of the dungeon headers (forward-declared there). Pure.
+uint32 Dungeon_GetSpritePaletteSig(int room) {
+  uint32 nrooms = kDungeonRoomHeadersOffs_SIZE / (uint32)sizeof(kDungeonRoomHeadersOffs[0]);
+  if (room < 0 || (uint32)room >= nrooms)
+    return 0xFFFFFFFFu;
+  const uint8 *hdr = GetRoomHeaderPtr(room);
+  uint8 idx = hdr[1];
+  if (idx >= 41)  // kDungPalinfos has 41 entries
+    return 0xFFFFFFFFu;
+  const DungPalInfo *dpi = &kDungPalinfos[idx];
+  return ((uint32)dpi->pal1 << 16) | ((uint32)dpi->pal2 << 8) | (uint32)dpi->pal3;
 }
 
 uint16 Dungeon_GetTeleMsg(int room) {
@@ -2497,12 +2581,18 @@ void PrepareDungeonExitFromBossFight() {  // 80f945
   dung_savegame_state_bits |= 0x8000;
   Dungeon_FlagRoomData_Quadrants();
 
-  int j = FindInByteArray(kDungeonExit_From, BYTE(dungeon_room_index), countof(kDungeonExit_From));
+  // As the quest's cartridge has the tables ($80:F92D, $80:F939).
+  int j = FindInByteArray(MODS_U8(kDungeonExit_From, 0x80f92d), BYTE(dungeon_room_index), countof(kDungeonExit_From));
   assert(j >= 0);
-  BYTE(dungeon_room_index) = kDungeonExit_To[j];
+  BYTE(dungeon_room_index) = MODS_U8(kDungeonExit_To, 0x80f939)[j];
   if (BYTE(dungeon_room_index) == 0x20) {
     sram_progress_indicator = 3;
     save_ow_event_info[2] |= 0x20;
+    // Phase B Slice 1 §38 — Master Sword pulled (sram_progress_indicator=3
+    // is the canonical post-pedestal world-state per audit.md §0.4a).
+    // Reachability state changes; bump the counter.
+    if (enhanced_features1 & kFeatures1_RandomizerActive)
+      Rando_BumpReachabilityCounter();
     savegame_is_darkworld ^= 0x40;
     Sprite_LoadGraphicsProperties_light_world_only();
     Ancilla_TerminateSelectInteractives(0);
@@ -2542,6 +2632,7 @@ void SavePalaceDeaths() {  // 80f9dd
 }
 
 void Dungeon_LoadRoom() {  // 81873a
+  ZeldaWideBeforeMapLoad(7);
   Dungeon_LoadHeader();
   dung_unk6 = 0;
 
@@ -2590,6 +2681,7 @@ void Dungeon_LoadRoom() {  // 81873a
   dung_door_switch_triggered = 0;
   dung_num_star_shaped_switches = 0;
   dung_misc_objs_index = 0;
+  Rando_PotOverlayReset();  // fresh per-room gold "check"-pot overlay capture list
   dung_index_of_torches = 0;
   dung_num_chests_x2 = 0;
   dung_num_bigkey_locks_x2 = 0;
@@ -2639,6 +2731,8 @@ void Dungeon_LoadRoom() {  // 81873a
   uint16 t;
 
   dung_index_of_torches = dung_index_of_torches_start = dung_misc_objs_index;
+  // A quest's cartridge can end the torches' list elsewhere ($81:88C1).
+  uint16 torch_end = Mods_RomWord(0x8188c1, 0x120);
   int i = 0;
   do {
     if (dung_torch_data[i >> 1] == dungeon_room_index) {
@@ -2656,9 +2750,55 @@ void Dungeon_LoadRoom() {  // 81873a
       t = dung_torch_data[i >> 1];
       i += 2;
     } while (t != 0xffff);
-  } while (i != 0x120);
+  } while (i != torch_end);
 
-  dung_load_ptr_offs = 0x120;
+  dung_load_ptr_offs = torch_end;
+  ZeldaWideAfterMapLoad(7);
+}
+
+// Headless pot enumeration for the --dump-pot-table dev/codegen tool (feeds
+// assets/scripts/gen_pot_tables.py). Replicates ONLY Dungeon_LoadRoom's floor +
+// four object-draw passes (the 2656-2678 block) — deliberately NOT the torch /
+// pushable-block tails, which walk asset/g_ram tables not set up in a bare
+// headless loop (they crash) and aren't needed for pot geometry. After this
+// returns, dung_replacement_tile_state[i] == 0x1111 marks a pot whose runtime
+// identity is dung_object_tilemap_pos[i] — the exact pos4 RevealPotItem matches.
+// Zeroes the dungeon room-build scratch (0x400..0x600: every dung object-index
+// counter + the 16-entry replacement/tilemap arrays) first, so per-object index
+// counters don't accumulate across rooms and OOB-write their parallel arrays.
+void Dungeon_DrawRoomObjectsHeadless(uint16 room) {
+  memset(&g_ram[0x400], 0, 0x200);
+  dungeon_room_index = room;
+  const uint8 *cur_p0 = GetDungeonRoomLayout(room);
+  dung_load_ptr_offs = 0;
+  RoomDraw_DrawFloors(cur_p0);
+  uint16 old_offs = dung_load_ptr_offs;
+  dung_layout_and_starting_quadrant = cur_p0[dung_load_ptr_offs];
+  const uint8 *cur_p1 = GetDefaultRoomLayout(dung_layout_and_starting_quadrant >> 2);
+  dung_load_ptr_offs = 0;
+  RoomDraw_DrawAllObjects(cur_p1);
+  dung_load_ptr_offs = old_offs + 1;
+  RoomDraw_DrawAllObjects(cur_p0);
+  dung_load_ptr_offs += 2;
+  memcpy(&dung_line_ptrs_row0, kDungeon_DrawObjectOffsets_BG2, 33);
+  RoomDraw_DrawAllObjects(cur_p0);
+  dung_load_ptr_offs += 2;
+  memcpy(&dung_line_ptrs_row0, kDungeon_DrawObjectOffsets_BG1, 33);
+  RoomDraw_DrawAllObjects(cur_p0);
+}
+
+bool Dungeon_DecodeRoomMaps(uint16 room, uint16 *maps) {
+  if (room >= 0x140 || !maps || g_dungeon_preview) return false;
+  static uint8 scratch[0x20000];
+  uint8 *live = g_dungeon_draw_ram;
+  memcpy(scratch, live, sizeof(scratch));
+  g_dungeon_draw_ram = scratch;
+  g_dungeon_preview = true;
+  Dungeon_DrawRoomObjectsHeadless(room);
+  memcpy(maps, scratch + 0x2000, 0x4000);
+  g_dungeon_preview = false;
+  g_dungeon_draw_ram = live;
+  return true;
 }
 
 void RoomDraw_DrawAllObjects(const uint8 *level_data) {  // 8188e4
@@ -2671,11 +2811,19 @@ void RoomDraw_DrawAllObjects(const uint8 *level_data) {  // 8188e4
       break;
     RoomData_DrawObject(d, level_data);
   }
+  // door-shuffle kind overlay: the door words after the 0xfff0 marker are the
+  // same list GetRoomDoorInfo(dungeon_room_index) points at; route the fetch
+  // through the overlay so relocated/un-keyed door KINDS draw and register
+  // (door_type_and_slot[]) consistently with the other two list consumers
+  // (Dungeon_LoadHeader, Dungeon_LoadAdjacentRoomDoors). Identity when door
+  // shuffle is off.
+  int door_index = 0;
   for (;;) {
     dung_load_ptr_offs += 2;
     uint16 d = WORD(level_data[dung_load_ptr_offs]);
     if (d == 0xffff)
       return;
+    d = Rando_DoorListWord(dungeon_room_index, door_index++, d);
     RoomData_DrawObject_Door(d);
   }
 }
@@ -3599,6 +3747,9 @@ void RoomDraw_SinglePot(const uint16 *src, uint16 *dst, uint16 dsto) {  // 81b39
   dung_replacement_tile_state[i] = 0x1111;
   dung_object_pos_in_objdata[i] = dung_load_ptr_offs;
   dung_object_tilemap_pos[i] = (dsto * 2) | (dung_line_ptrs_row0 != 0x4000 ? 0 : 0x2000);
+  // replacement_tilemap_* is the floor tile RESTORED at this spot when the pot is
+  // lifted — i.e. the ground UNDER the pot. It must stay vanilla; recoloring it
+  // (the original Phase 4 bug) tinted the ground under the pot instead of the pot.
   replacement_tilemap_UL[i] = 0x0d0e;
   replacement_tilemap_LL[i] = 0x0d1e;
   replacement_tilemap_UR[i] = 0x4d0e;
@@ -3606,6 +3757,14 @@ void RoomDraw_SinglePot(const uint16 *src, uint16 *dst, uint16 dsto) {  // 81b39
   if (savegame_is_darkworld)
     src = SrcPtr(0xe92);
   RoomDraw_Rightwards2x2(src, dst);
+  // add-rando-pot-sanity — register an in-scope, un-checked pot for the gold
+  // "check" overlay (Module07_Dungeon draws an animated gold glint over it; see
+  // Rando_PotOverlay* in rando.h). dung_object_tilemap_pos[i] (set above) is the
+  // (dsto*2 | BG-half) pos4 the pot lookup keys on. This supersedes the interim
+  // BG palette swap, which recolored the whole pot tile (including the floor
+  // pixels in its corners) with a theme-dependent row. Inert off-rando / for
+  // checked / out-of-scope pots, so the non-rando draw path is byte-identical.
+  if (!g_dungeon_preview) Rando_PotOverlayCapture(dungeon_room_index, dung_object_tilemap_pos[i]);
 }
 
 void RoomDraw_BombableFloor(const uint16 *src, uint16 *dst, uint16 dsto) {  // 81b3e1
@@ -3704,6 +3863,26 @@ void Dungeon_LoadHeader() {  // 81b564
   palette_sp6l = dpi->pal3;
   aux_tile_theme_index = hdr_ptr[2];
   sprite_graphics_index = hdr_ptr[3] + 0x40;
+  // Boss-shuffle RENDER: a shuffled boss room loads the ASSIGNED boss's sprite
+  // graphics AND sprite palette (from its home boss room's header), so the
+  // substituted boss draws with the correct tiles AND colors instead of the
+  // vanilla boss's. The room's BG palette (palette_main_indoors) stays THIS
+  // room's so the room itself looks unchanged — only the boss's sprite palette
+  // slots (sp0l/sp5l/sp6l) follow the boss. Boss rooms are boss-only, so taking
+  // the home room's sprite palette can't mis-color a non-boss sprite. Returns
+  // 0xFFFF (no redirect) when boss shuffle is off / not a shuffled boss room —
+  // then everything keeps the vanilla values above (byte-identical).
+  {
+    uint16 boss_gfx_room = BossShuffle_RenderHomeRoom(dungeon_room_index);
+    if (boss_gfx_room != 0xFFFF) {
+      const uint8 *bh = GetRoomHeaderPtr(boss_gfx_room);
+      sprite_graphics_index = bh[3] + 0x40;
+      const DungPalInfo *bdpi = &kDungPalinfos[bh[1]];
+      palette_sp0l = bdpi->pal1;
+      palette_sp5l = bdpi->pal2;
+      palette_sp6l = bdpi->pal3;
+    }
+  }
   dung_hdr_collision_2 = hdr_ptr[4];
   dung_hdr_tag[0] = hdr_ptr[5];
   dung_hdr_tag[1] = hdr_ptr[6];
@@ -3726,11 +3905,22 @@ void Dungeon_LoadHeader() {  // 81b564
   dung_door_opened_incl_adjacent = dung_door_opened | 0xf00;
   dung_savegame_state_bits = (x & 0xff0) << 4;
   dung_quadrants_visited = x & 0xf;
+  // door-shuffle kind overlay: un-chosen vanilla stair-key locks render open
+  // (their StairKey kind stays; Door_Up_StairMaskLocked's opened arm draws no
+  // lock and Dungeon_LoadSingleDoorAttribute writes no f0 attr). 0 when door
+  // shuffle is off.
+  x = Rando_DoorPreopenBits(dungeon_room_index);
+  dung_door_opened |= x;
+  dung_door_opened_incl_adjacent |= x;
 
   const uint16 *dp = GetRoomDoorInfo(dungeon_room_index);
   int i = 0;
-  for (; dp[i] != 0xffff; i++)
-    dung_door_tilemap_address[i] = dp[i];
+  for (; dp[i] != 0xffff; i++) {
+    // door-shuffle kind overlay on the raw door-word copy: the adjacency scan
+    // below reads kinds from these words (dung_door_tilemap_address holds the
+    // raw list until RoomDraw replaces it with tilemap addresses).
+    dung_door_tilemap_address[i] = Rando_DoorListWord(dungeon_room_index, i, dp[i]);
+  }
   dung_door_tilemap_address[i] = 0;
 
   if (((dungeon_room_index - 1) & 0xf) != 0xf)
@@ -3778,6 +3968,16 @@ void Dungeon_CheckAdjacentRoomsForOpenDoors(int idx, int room) {  // 81b759
             // not trapdoor
             if (!(adjacent_doors_flags & kUpperBitmasks[i]))
               break;
+            // door-shuffle: a re-stitched pool/key door's open state is owned
+            // by its own room's save bits (+ the key-open partner mirror in
+            // Dungeon_OpeningLockedDoor_Combined). The PHYSICAL neighbor at
+            // the matching slot is not its logical partner, so its open flag
+            // must not leak — otherwise a kind<0x02/==0x40 neighbor door
+            // (unconditionally flagged open in Dungeon_LoadAdjacentRoomDoors)
+            // pre-opens a relocated key door unpaid. Trapdoor arm above is
+            // untouched (it tests room continuity, not the neighbor's flags).
+            if (Rando_DoorAdjOpenSuppressed(dungeon_room_index, j))
+              break;
           }
           dung_door_opened_incl_adjacent |= kUpperBitmasks[j];
           break;
@@ -3792,6 +3992,11 @@ void Dungeon_LoadAdjacentRoomDoors(int room) {  // 81b7ef
   adjacent_doors_flags = (save_dung_info[room] & 0xf000) | 0xf00;
   for (int i = 0; ; i++) {
     uint16 a = dp[i];
+    // door-shuffle kind overlay on the NEIGHBOR's list: a relocated key door
+    // there must read kind 0x1C (so the kind<0x02 unconditional-open branch
+    // below cannot flag it) and an un-keyed one must read Normal.
+    if (a != 0xffff)
+      a = Rando_DoorListWord((uint16)room, i, a);
     adjacent_doors[i] = a;
     if (a == 0xffff)
       break;
@@ -4279,7 +4484,8 @@ void Dungeon_FlipCrystalPegAttribute() {  // 81c22a
 
 void Dungeon_HandleRoomTags() {  // 81c2fd
   if (!flag_skip_call_tag_routines) {
-    Dungeon_DetectStaircase();
+    if (Dungeon_DetectStaircase())
+      return;
 
     // Dungeon_DetectStaircase might change the submodule, so avoid
     // calling the tag routines cause they could also change the submodule,
@@ -4299,10 +4505,10 @@ void Dungeon_HandleRoomTags() {  // 81c2fd
 void Dung_TagRoutine_0x00(int k) {  // 81c328
 }
 
-void Dungeon_DetectStaircase() {  // 81c329
+bool Dungeon_DetectStaircase() {  // 81c329
   int k = link_direction & 12;
   if (!k)
-    return;
+    return false;
 
   static const int8 kBuggyLookup[] = { 7, 24, 8, 8, 0, 0, -1, 17 };
   int pos = ((link_y_coord + kBuggyLookup[k >> 1]) & 0x1f8) << 3;
@@ -4311,15 +4517,15 @@ void Dungeon_DetectStaircase() {  // 81c329
 
   uint8 at = dung_bg2_attr_table[pos + (k == 4 ? 0x80 : 0)];
   if (!(at == 0x26 || at == 0x38 || at == 0x39 || at == 0x5e || at == 0x5f))
-    return;
+    return false;
 
   uint8 attr2 = dung_bg2_attr_table[pos + XY(0, 1)];
   if ((attr2 & 0xf8) != 0x30)
-    return;
+    return false;
 
   if (link_state_bits & 0x80) {
     link_y_coord = link_y_coord_prev;
-    return;
+    return false;
   }
 
   which_staircase_index = attr2;
@@ -4329,15 +4535,33 @@ void Dungeon_DetectStaircase() {  // 81c329
 
   if (at == 0x38 || at == 0x39) {
     staircase_var1 = 0x20;
+    // door shuffle §2d: the Trans_* edge-door hook is a no-op in staircase
+    // context — the header-dest override below is the sole spiral authority.
+    Rando_DoorStaircaseContext(true);
     if (at == 0x38)
       Dungeon_StartInterRoomTrans_Up();
     else
       Dungeon_StartInterRoomTrans_Down();
+    Rando_DoorStaircaseContext(false);
   }
 
   int j = (which_staircase_index & 3);
-  BYTE(dungeon_room_index) = dung_hdr_travel_destinations[j + 1];
-  cur_staircase_plane = dung_hdr_staircase_plane[j];
+  // door shuffle: spiral destination override, keyed (room, slot, attr) at
+  // the read site (the destination's own header reload is untouched).
+  uint8 destination_room = Rando_DoorSpiralDest(
+      dungeon_room_index_prev, j, at, dung_hdr_travel_destinations[j + 1]);
+  if (Chains_TryTerminalOutboundSeam(kChainSeamKind_Stair, kChainSeamDir_None,
+                                     dungeon_room_index_prev, destination_room,
+                                     (uint8)(j + 1)))
+    return true;
+  if (Chains_TryBossSeamHop(kChainSeamKind_Stair, kChainSeamDir_None,
+                            dungeon_room_index_prev, destination_room,
+                            (uint8)(j + 1)))
+    return true;
+  BYTE(dungeon_room_index) = destination_room;
+  // door shuffle: the header plane describes the VANILLA destination; a
+  // redirected spiral substitutes the shuffled destination's plane class.
+  cur_staircase_plane = Rando_DoorSpiralPlane(dung_hdr_staircase_plane[j]);
   byte_7E0492 = (link_is_on_lower_level || link_is_on_lower_level_mirror) ? 2 : 0;
   subsubmodule_index = 0;
   bitmask_of_dragstate = 0;
@@ -4355,6 +4579,7 @@ void Dungeon_DetectStaircase() {  // 81c329
     UsedForStraightInterRoomStaircase();
     submodule_index = 14;
   }
+  return false;
 }
 
 void RoomTag_NorthWestTrigger(int k) {  // 81c432
@@ -4457,8 +4682,24 @@ void RoomTag_RoomTrigger_BlockDoor(int k) {  // 81c4e7
 
 // Used for bosses
 void RoomTag_PrizeTriggerDoorDoor(int k) {  // 81c508
-  int t = savegame_is_darkworld ? link_has_crystals : link_which_pendants;
-  if (t & kDungeonCrystalPendantBit[BYTE(cur_palace_index_x2) >> 1]) {
+  // "Has THIS dungeon's prize been collected?" gate that opens the trapdoor/door.
+  // Vanilla keys off the dungeon's fixed pendant/crystal bit, but under
+  // prize_shuffle the placed prize grants a DIFFERENT bit than the dungeon's
+  // vanilla one (so the vanilla-bit test can falsely stay closed -> softlock, or
+  // open on another dungeon's prize). Gate on the rando prize LOCATION instead,
+  // mirroring RoomTag_GetHeartForPrize. Inert in the identity/default case where
+  // the placed prize is the dungeon's vanilla prize. (Gameplay path — verify by
+  // playtest with a non-identity prize_shuffle seed.)
+  uint8 didx = BYTE(cur_palace_index_x2) >> 1;
+  bool prize_collected;
+  if (enhanced_features1 & kFeatures1_RandomizerActive) {
+    uint16 ploc = Rando_GetBossPrizeLocation(didx);
+    prize_collected = (ploc != 0xFFFFu) && Rando_IsLocationChecked(ploc);
+  } else {
+    int t = savegame_is_darkworld ? link_has_crystals : link_which_pendants;
+    prize_collected = (t & kDungeonCrystalPendantBit[didx]) != 0;
+  }
+  if (prize_collected) {
     dung_flag_trapdoors_down = 0;
     dung_cur_door_pos = 0;
     door_animation_step_indicator = 0;
@@ -4578,21 +4819,93 @@ void Dung_TagRoutine_BlastWallStuff(int k) {  // 81c68c
   AncillaAdd_BlastWall();
 }
 
+// rando: correct falling prize color under prize_shuffle — PLAYTEST REQUIRED.
+// Maps a dungeon's boss-prize FALLING-SPRITE index to the PLACED prize's color
+// when prize_shuffle reassigned it. Returns `vanilla_idx` (the dungeon's vanilla
+// kBossFinishedFallingItem value) unless rando is active AND the placed prize is
+// a known pendant/crystal. Used ONLY to recolor the falling sprite; the rando
+// boss-prize grant happens later when Link receives that sprite.
+//
+// Index spaces differ:
+//   `didx` = cur_palace_index_x2>>1 (game dungeon id; indexes kBossFinishedFallingItem).
+//   prize-assignment array = rando_logic / kDungeonPrizeLocations order.
+// Rando_PrizeRandoDungeonFromGameDungeon maps didx -> prize-assignment index
+// (0xFF = no prize dungeon: HCE / HC / HCT / GT).
+//
+// Placed-prize value encoding (see PrizeIcon / Goal_IsCompletable pendant ids):
+//   0=Green, 1=Red, 2=Blue, 3..9=Crystal1..7.
+// kFallingItem_Type[7] = {0x10,0x37,0x39,0x38,0x26,0xf,0x20} (ancilla.c) maps
+// the falling INDEX to a receive-item color code used at pickup: idx1=0x37 green, idx2=0x39
+// red, idx3=0x38 blue, idx6=0x20 crystal (the code every vanilla crystal
+// dungeon's boss uses; idx4=0x26 is NOT a boss-prize sprite). So:
+//   Green(0)->1  Red(1)->2  Blue(2)->3  Crystal(3..9)->6.
+// (Identity check: EP didx2 vanilla green -> kBossFinishedFallingItem[2]=1; this
+// helper also returns 1 for Green, so the default/identity seed is unchanged.)
+static uint8 RandoFallingPrizeIndex(uint8 didx, uint8 vanilla_idx) {
+  if (!(enhanced_features1 & kFeatures1_RandomizerActive))
+    return vanilla_idx;
+  const uint8 *assign = Rando_GetDungeonPrizeAssignment();
+  if (assign == NULL)
+    return vanilla_idx;
+  uint8 aidx = Rando_PrizeRandoDungeonFromGameDungeon(didx);
+  if (aidx == 0xFF)
+    return vanilla_idx;
+  uint8 prize = assign[aidx];
+  switch (prize) {
+    case 0: return 1;  // Green pendant  -> 0x37
+    case 1: return 2;  // Red pendant    -> 0x39
+    case 2: return 3;  // Blue pendant   -> 0x38
+    default:
+      if (prize >= 3 && prize <= 9)
+        return 6;      // Crystal -> 0x20 (the canonical boss crystal falling
+                       // sprite; every vanilla crystal dungeon uses index 6).
+      return vanilla_idx;  // unknown prize id: leave vanilla visual untouched
+  }
+}
+
 // Used for bosses
 void RoomTag_GetHeartForPrize(int k) {  // 81c709
   static const uint8 kBossFinishedFallingItem[13] = { 0, 0, 1, 2, 0, 6, 6, 6, 6, 6, 3, 6, 6 };
   if (!(dung_savegame_state_bits & 0x8000))
     return;
+  uint8 didx = BYTE(cur_palace_index_x2) >> 1;
   int t = savegame_is_darkworld ? link_has_crystals : link_which_pendants;
-  if (!(t & kDungeonCrystalPendantBit[BYTE(cur_palace_index_x2) >> 1])) {
+  // "Have I already collected THIS dungeon's prize?" gate. Vanilla keys off
+  // the dungeon's fixed pendant/crystal bit (kDungeonCrystalPendantBit[didx]),
+  // but under prize_shuffle the placed prize grants a DIFFERENT bit than the
+  // dungeon's vanilla one — so the vanilla-bit test both falsely closes (some
+  // other dungeon's prize already set this bit, so the prize is skipped and no
+  // reward is granted) and falsely stays open. Gate on the rando prize
+  // LOCATION instead; the dispatch below marks it checked, closing the gate
+  // after collection.
+  bool prize_uncollected;
+  if (enhanced_features1 & kFeatures1_RandomizerActive) {
+    uint16 ploc = Rando_GetBossPrizeLocation(didx);
+    prize_uncollected = (ploc != 0xFFFFu) && !Rando_IsLocationChecked(ploc);
+  } else {
+    prize_uncollected = !(t & kDungeonCrystalPendantBit[didx]);
+  }
+  if (prize_uncollected) {
     byte_7E04C2 = 128;
-    if (Ancilla_SpawnFallingPrize(kBossFinishedFallingItem[BYTE(cur_palace_index_x2) >> 1]) < 0)
-      return; // Zelda bugfix. Price won't spawn if we're out of ancillas
+    // Rando boss-prize dispatch happens when the falling prize is received, not
+    // when it spawns. That preserves vanilla retry behavior: falling before
+    // pickup leaves the prize uncollected and lets it respawn on re-entry.
+    // Recolor only the spawned falling-prize sprite to the placed prize.
+    {
+      uint8 fdidx = BYTE(cur_palace_index_x2) >> 1;
+      uint8 fidx = RandoFallingPrizeIndex(fdidx, kBossFinishedFallingItem[fdidx]);
+      if (Ancilla_SpawnFallingPrize(fidx) < 0)
+        return; // Zelda bugfix. Price won't spawn if we're out of ancillas
+    }
   }
   dung_hdr_tag[k] = 0;
 }
 
 void RoomTag_Agahnim(int k) {  // 81c74e
+  // add-enemy-souls: needs no suppressed-spawn hold (unlike RoomTag_GanonDoor)
+  // — it fires on the post-defeat state bit (dung_savegame_state_bits &
+  // 0x8000), not a live-sprite scan, and that bit is only set by actually
+  // beating Agahnim, which a suppressed Agahnim can never be.
   if (!(save_ow_event_info[0x5b] & 0x20) && dung_savegame_state_bits & 0x8000) {
     Palette_RevertTranslucencySwap();
     dung_hdr_tag[0] = 0;
@@ -4601,6 +4914,11 @@ void RoomTag_Agahnim(int k) {  // 81c74e
 }
 
 void RoomTag_GanonDoor(int tagidx) {  // 81c767
+  // add-enemy-souls — this tag has its own any-active-sprite loop instead of
+  // Sprite_CheckIfScreenIsClear, so it needs the same kill-gate hold: a
+  // soul-suppressed Ganon must not count as already dealt with.
+  if (Souls_RoomSuppressedCount())
+    return;
   for (int k = 15; k >= 0; k--) {
     if (sprite_state[k] == 4 || !(sprite_flags4[k] & 64) && sprite_state[k])
       return;
@@ -4618,6 +4936,11 @@ void RoomTag_GanonDoor(int tagidx) {  // 81c767
 }
 
 void RoomTag_KillRoomBlock(int k) {  // 81c7a2
+  // add-enemy-souls: no explicit hold needed — the gate is the
+  // Sprite_CheckIfScreenIsClear call below, which already reports not-clear
+  // while suppressed spawns exist. (The only room carrying this tag, TR
+  // 0x004, has no soul-mapped residents; gen_soul_room_tables.py fails
+  // generation if that ever changes.)
   if (link_x_coord & 0x100 && link_y_coord & 0x100) {
     if (Sprite_CheckIfScreenIsClear()) {
       sound_effect_2 = 0x1b;
@@ -4850,7 +5173,12 @@ void RoomTag_WaterGate(int k) {  // 81cb49
   CGADSUB_copy = 0x62;
   save_ow_event_info[0x3b] |= 32;
   save_ow_event_info[0x7b] |= 32;
-  save_dung_info[0x28] |= 0x100;
+  // The cartridge ORs 1 into the high byte it reads at $7E:F051; a quest
+  // whose code reads it elsewhere (Echoes of the Past: $A6:3651, open bus,
+  // which gives the bank byte, the last one on the bus) stores that byte.
+  uint32 at = Mods_RomByte(0x81cba3, 0x7e) << 16 | Mods_RomWord(0x81cba1, 0xf051);
+  uint8 hi = at == 0x7ef051 ? save_dung_info[0x28] >> 8 : at >> 16;
+  save_dung_info[0x28] = (save_dung_info[0x28] & 0xff) | (hi | 1) << 8;
   RoomTag_OperateWaterFlooring();
   water_hdma_var0 = ((watergate_pos & 0x7e) << 2) + (dung_draw_width_indicator * 16 + dung_loade_bgoffs_h_copy + 40);
   word_7E0678 = spotlight_y_upper = (watergate_pos & 0x1f80) >> 4;
@@ -5059,6 +5387,8 @@ void Dungeon_ProcessTorchesAndDoors() {  // 81ce70
         goto not_openable;
 
       uint8 door_type = door_type_and_slot[k] & 0xfe;
+      bool is_small_key_door = door_type >= kDoorType_SmallKeyDoor &&
+                               door_type < 0x2c && door_type != 0x2a;
       if (door_type == kDoorType_BreakableWall) {
         if (link_is_running && link_dash_ctr < 63) {
           dung_cur_door_pos = pos;
@@ -5084,8 +5414,23 @@ void Dungeon_ProcessTorchesAndDoors() {  // 81ce70
           dialogue_message_index = 0x7a;
           Main_ShowTextMessage();
         }
-      } else if (door_type >= kDoorType_SmallKeyDoor && door_type < 0x2c && door_type != 0x2a && link_num_keys != 0) {
+      } else if (is_small_key_door && Rando_DoorKeySlotAlreadyOpen(k)) {
+        // door-shuffle: the SAME-room partner half already paid for this key
+        // pair (Rando_DoorKeyOpenMirror set our bit live, but the f0 lock
+        // attr is only rebuilt on room load) — open without consuming.
+        goto has_key_for_door;
+      } else if (is_small_key_door && Rando_HasSkeletonKey()) {
+        // Bonus-only Skeleton Key: take the normal persistent small-key-door
+        // success path without spending either a dungeon key or Retro's shared
+        // GenericKey counter. The big-key branch above remains independent.
+        goto has_key_for_door;
+      } else if (is_small_key_door && link_num_keys != 0) {
+        // rando-exempt: consumption — small key spent on locked door. (audit.md §0.2.4)
         link_num_keys -= 1;
+        // rando-exempt: consumption write-through — under Retro genericKeys the
+        // live counter is backed by the shared pool slot; persist the spend
+        // immediately so it survives even without an exit-save. (audit.md §0.2.4)
+        if (Rando_IsGenericKeysActive()) link_generic_keys = link_num_keys;
 has_key_for_door:
         door_animation_step_indicator = 0;
         dung_cur_door_pos = pos;
@@ -5181,7 +5526,6 @@ handle_62:
       if (dungeon_room_index == 0x65)
         dung_savegame_state_bits |= 0x1000;
       Point16U pt;
-      printf("Wtf is R6\n");
       ThievesAttic_DrawLightenedHole(0, 0, &pt);
       sound_effect_2 = 0x1b;
       return;
@@ -5446,7 +5790,7 @@ uint16 Dungeon_CheckForAndIDLiftableTile() {  // 81d748
     return 0xffff;  // clc
 
   uint16 rt = dung_replacement_tile_state[attr & 0xf];
-  if (rt == 0)
+  if (rt == 0 || rt == 0xfffe)
     return 0xffff;
   if ((rt & 0xf0f0) == 0x2020)
     return 0x55;
@@ -5454,6 +5798,15 @@ uint16 Dungeon_CheckForAndIDLiftableTile() {  // 81d748
 }
 
 void Dungeon_PushBlock_Handler() {  // 81d81b
+  if(enhanced_features1&kFeatures1_QolRepeatBlocks)for(int i=0;i<(dung_index_of_torches_start>>1)&&i<16;i++) {
+    unsigned p=(dung_object_tilemap_pos[i]&0x3fff)>>1;
+    if(p+65>=0x2000 || dung_replacement_tile_state[i]>0 && dung_replacement_tile_state[i]!=0xffff)continue;
+    if(dung_bg2_attr_table[p]==0x27 && dung_bg2[p]==0x922 && dung_bg2[p+1]==0x923 &&
+       dung_bg2[p+64]==0x932 && dung_bg2[p+65]==0x933) {
+      dung_replacement_tile_state[i]=0xfffe;
+      Dungeon_Store2x2(p,0x922,0x932,0x923,0x933,0x70|i);
+    }
+  }
   while (dung_misc_objs_index != dung_index_of_torches_start) {
     int k = dung_misc_objs_index >> 1;
     int st = dung_replacement_tile_state[k];
@@ -5509,9 +5862,10 @@ void PushBlock_CheckForPit(uint8 y) {  // 81d8d4
     related_to_trapdoors_somehow = dung_flag_trapdoors_down ^ 1;
     dung_replacement_tile_state[y] = 4;
   } else {
-    dung_replacement_tile_state[y] = 0xffff;
+    dung_replacement_tile_state[y] = (enhanced_features1 & kFeatures1_QolManaged) ? 0xfffd : 0xffff;
   }
-  Dungeon_Store2x2(p, 0x922, 0x932, 0x923, 0x933, 0x27);
+  uint8 block_attr=(enhanced_features1 & kFeatures1_QolManaged) && attr!=0x23 ? 0x70|y : 0x27;
+  Dungeon_Store2x2(p, 0x922, 0x932, 0x923, 0x933, block_attr);
 }
 
 uint8 Dungeon_LiftAndReplaceLiftable(Point16U *pt) {  // 81d9ec
@@ -5536,7 +5890,21 @@ uint8 Dungeon_LiftAndReplaceLiftable(Point16U *pt) {  // 81d9ec
 
   if ((rt & 0xf0f0) == 0x1010) {
     dung_misc_objs_index = attr * 2;
-    RevealPotItem(xy, dung_object_tilemap_pos[attr]);
+    uint16 pos4 = dung_object_tilemap_pos[attr];
+    uint8 pot_result = Rando_PotBreakHook(dungeon_room_index, pos4);
+    if (pot_result == kRandoPot_Retry) {
+      // The caller (Link_APress_LiftCarryThrow) spawns a throwable from *pt
+      // WITHOUT checking this return, so leaving it unwritten spawned an object
+      // at uninitialized stack coordinates. Write the block position exactly as
+      // the success path does before bailing; the 0 return still tells any
+      // caller that does check that nothing was lifted.
+      ManipBlock_Something(pt);
+      return 0;
+    }
+    if (pot_result == kRandoPot_Suppress)
+      BYTE(dung_secrets_unk1) = 0;
+    else
+      RevealPotItem(xy, pos4, true);  // genuine pot (0x1010-gated lift)
     RoomDraw_16x16Single(dung_misc_objs_index);
     ManipBlock_Something(pt);
     return kDungeon_QueryIfTileLiftable_rv[rt & 0xf];
@@ -5550,7 +5918,7 @@ uint8 Dungeon_LiftAndReplaceLiftable(Point16U *pt) {  // 81d9ec
 
 uint8 ThievesAttic_DrawLightenedHole(uint16 pos6, uint16 a, Point16U *pt) {  // 81da71
   dung_misc_objs_index = a;
-  RevealPotItem(pos6, dung_object_tilemap_pos[a >> 1]);
+  RevealPotItem(pos6, dung_object_tilemap_pos[a >> 1], false);  // 0x2020 hole, NOT a pot — never fire the grant hook
   RoomDraw_16x16Single(a);
   RoomDraw_16x16Single(a + 2);
   RoomDraw_16x16Single(a + 4);
@@ -5577,7 +5945,14 @@ uint8 HandleItemTileAction_Dungeon(uint16 x, uint16 y) {  // 81dabb
       sound_effect_1 = 0x11;
     } else if ((tile2 & 0xf0f0) == 0x1010) {  // Pot
       dung_misc_objs_index = (tile & 0xf) * 2;
-      RevealPotItem(pos, dung_object_tilemap_pos[tile & 0xf]);
+      uint16 pos4 = dung_object_tilemap_pos[tile & 0xf];
+      uint8 pot_result = Rando_PotBreakHook(dungeon_room_index, pos4);
+      if (pot_result == kRandoPot_Retry)
+        return 0;
+      if (pot_result == kRandoPot_Suppress)
+        BYTE(dung_secrets_unk1) = 0;
+      else
+        RevealPotItem(pos, pos4, true);  // genuine pot (0x1010-gated sword-break)
       RoomDraw_16x16Single(dung_misc_objs_index);
       Point16U pt;
       ManipBlock_Something(&pt);
@@ -5595,8 +5970,9 @@ void ManipBlock_Something(Point16U *pt) {  // 81db41
   pt->y = (link_y_coord & 0xfe00) | ((pos & 0x1f80) >> 4);
 }
 
-void RevealPotItem(uint16 pos6, uint16 pos4) {  // 81e6b2
+void RevealPotItem(uint16 pos6, uint16 pos4, bool is_pot) {  // 81e6b2
   BYTE(dung_secrets_unk1) = 0;
+  (void)is_pot;  // callers own the pre-consumption rando transaction
 
   const uint8 *src_ptr = kDungeonSecrets + WORD(kDungeonSecrets[dungeon_room_index * 2]);
 
@@ -5701,10 +6077,13 @@ void Dungeon_DeleteRupeeTile(uint16 x, uint16 y) {  // 81e8bd
 
 // This doesn't return exactly like the original
 // Also returns in scratch_0
-uint8 OpenChestForItem(uint8 tile, int *chest_position) {  // 81eb66
+uint8 OpenChestForItem(uint8 tile, int *chest_position,
+                       RandoGrantResult *grant_result) {  // 81eb66
   static const uint16 kChestOpenMasks[] = { 0x100, 0x200, 0x400, 0x800, 0x1000, 0x2000 };
+  if (grant_result != NULL)
+    *grant_result = kRandoGrantResult_NotActive;
   if (tile == 0x63)
-    return OpenMiniGameChest(chest_position);
+    return OpenMiniGameChest(chest_position, grant_result);
 
   int chest_idx = tile - 0x58, chest_idx_org = chest_idx;
 
@@ -5745,10 +6124,28 @@ uint8 OpenChestForItem(uint8 tile, int *chest_position) {  // 81eb66
             Main_ShowTextMessage();
             return 0xff;
           }
+          if (grant_result != NULL) {
+            *grant_result = Rando_ChestGrant(
+                dungeon_room_index, (uint8)chest_idx_org, data,
+                kRandoGrantPresentation_Animated, 1,
+                (uint16)(loc + 2));
+            if (*grant_result == kRandoGrantResult_Retryable ||
+                *grant_result == kRandoGrantResult_Invalid)
+              return 0xff;
+          }
           dung_savegame_state_bits |= kChestOpenMasks[chest_idx_org];
           OpenBigChest(loc, chest_position);
           return data;
         } else {
+          if (grant_result != NULL) {
+            *grant_result = Rando_ChestGrant(
+                dungeon_room_index, (uint8)chest_idx_org, data,
+                kRandoGrantPresentation_Animated, 1,
+                (uint16)(loc & 0x7fff));
+            if (*grant_result == kRandoGrantResult_Retryable ||
+                *grant_result == kRandoGrantResult_Invalid)
+              return 0xff;
+          }
           dung_savegame_state_bits |= kChestOpenMasks[chest_idx_org];
           ptr = SrcPtr(0x14A4);
           pos = loc >> 1;
@@ -5825,8 +6222,8 @@ void OpenBigChest(uint16 loc, int *chest_position) {  // 81ed05
   byte_7E0B9E = 1;
 }
 
-uint8 OpenMiniGameChest(int *chest_position) {  // 81edab
-  int t;
+uint8 OpenMiniGameChest(int *chest_position,
+                        RandoGrantResult *grant_result) {  // 81edab
   if (minigame_credits == 0) {
     dialogue_message_index = 0x163;
     Main_ShowTextMessage();
@@ -5837,7 +6234,6 @@ uint8 OpenMiniGameChest(int *chest_position) {  // 81edab
     Main_ShowTextMessage();
     return 0xff;
   }
-  minigame_credits--;
 
   int pos = ((link_y_coord - 4) & 0x1f8) * 8;
   pos |= ((link_x_coord + 7) & 0x1f8) >> 3;
@@ -5849,44 +6245,9 @@ uint8 OpenMiniGameChest(int *chest_position) {  // 81edab
   }
 
   *chest_position = pos * 2;
-
-  WORD(dung_bg2_attr_table[pos + XY(0, 0)]) = 0x202;
-  WORD(dung_bg2_attr_table[pos + XY(0, 1)]) = 0x202;
-
-  const uint16 *src = SrcPtr(0x14A4);
-
-  int pos_wrong = pos + XY(0, 2);  // zelda bug?
-  dung_bg2[pos_wrong + XY(0, 0)] = src[0];
-  dung_bg2[pos_wrong + XY(0, 1)] = src[1];
-  dung_bg2[pos_wrong + XY(1, 0)] = src[2];
-  dung_bg2[pos_wrong + XY(1, 1)] = src[3];
-
-  // The orig asm code seems to access invalid vram here because it indexes by 0x14a4
-  uint16 *dst = &vram_upload_data[vram_upload_offset >> 1];
-  dst[0] = Dungeon_MapVramAddr(pos + 0);
-  dst[3] = Dungeon_MapVramAddr(pos + 64);
-  dst[6] = Dungeon_MapVramAddr(pos + 1);
-  dst[9] = Dungeon_MapVramAddr(pos + 65);
-
-  dst[2] = src[0];
-  dst[5] = src[1];
-  dst[8] = src[2];
-  dst[11] = src[3];
-
-  dst[1] = 0x100;
-  dst[4] = 0x100;
-  dst[7] = 0x100;
-  dst[10] = 0x100;
-
-  dst[12] = 0xffff;
-
-  vram_upload_offset += 24;
-
-  uint8 rv;
-
   uint16 r16 = some_menu_ctr;
-
-  t = GetRandomNumber();
+  int t = GetRandomNumber();
+  uint8 rv;
   if (BYTE(dungeon_room_index) == 0) {
     t = t & 0xf;
     rv = kDungeon_RupeeChestMinigamePrizes[t & 0xf];
@@ -5899,15 +6260,60 @@ uint8 OpenMiniGameChest(int *chest_position) {  // 81edab
     if (t >= 2 && t == r16) {
       t = (t + 1) & 7;
     }
+    // Easy minigames (kFeatures0_EasyMinigames; rando-on, vanilla opt-in): win
+    // the rare prize
+    // (the placed item) on the first chest, matching ALTTPR RigChestRNG. The
+    // once-per-savegame gate below still applies - after the win, t==7 degrades
+    // to a consolation prize, so this can't farm.
+    if ((enhanced_features1 & kFeatures1_RandomizerActive) ||
+        (enhanced_features0 & kFeatures0_EasyMinigames))
+      t = 7;
     if (t == 7) {
       if (dung_savegame_state_bits & 0x4000) {
         t = 0;
       } else {
+        if (grant_result != NULL) {
+          *grant_result = Rando_GrantLocation(
+              LOC_Chest_Game, ITEM_PieceOfHeart, 0x17,
+              kRandoGrantPresentation_Animated, 1,
+              (uint16)*chest_position);
+          if (*grant_result == kRandoGrantResult_Retryable ||
+              *grant_result == kRandoGrantResult_Invalid)
+            return 0xff;
+        }
         dung_savegame_state_bits |= 0x4000;
       }
     }
     rv = kDungeon_MinigameChestPrizes1[t];
   }
+
+  // Only after the grant is accepted (or proves inactive) may the caller-owned
+  // purchase credit, win bit, and physical chest become irreversible.
+  minigame_credits--;
+  WORD(dung_bg2_attr_table[pos + XY(0, 0)]) = 0x202;
+  WORD(dung_bg2_attr_table[pos + XY(0, 1)]) = 0x202;
+
+  const uint16 *src = SrcPtr(0x14A4);
+  int pos_wrong = pos + XY(0, 2);  // zelda bug?
+  dung_bg2[pos_wrong + XY(0, 0)] = src[0];
+  dung_bg2[pos_wrong + XY(0, 1)] = src[1];
+  dung_bg2[pos_wrong + XY(1, 0)] = src[2];
+  dung_bg2[pos_wrong + XY(1, 1)] = src[3];
+
+  // The orig asm code seems to access invalid vram here because it indexes by 0x14a4
+  uint16 *dst = &vram_upload_data[vram_upload_offset >> 1];
+  dst[0] = Dungeon_MapVramAddr(pos + 0);
+  dst[3] = Dungeon_MapVramAddr(pos + 64);
+  dst[6] = Dungeon_MapVramAddr(pos + 1);
+  dst[9] = Dungeon_MapVramAddr(pos + 65);
+  dst[2] = src[0];
+  dst[5] = src[1];
+  dst[8] = src[2];
+  dst[11] = src[3];
+  dst[1] = dst[4] = dst[7] = dst[10] = 0x100;
+  dst[12] = 0xffff;
+  vram_upload_offset += 24;
+
   some_menu_ctr = t;
   nmi_load_bg_from_vram = 1;
   sound_effect_2 = 14;
@@ -6417,7 +6823,16 @@ void Module_PreDungeon() {  // 82821e
 
   Dungeon_LoadEntrance();
   uint8 d = cur_palace_index_x2;
-  link_num_keys = (d != 0xff) ? link_keys_earned_per_dungeon[d == 2 ? 0 : (d >> 1)] : 0xff;
+  // rando-exempt: state-shuffle — restore per-dungeon key count when entering
+  // dungeon (or sentinel 0xff outside). Not a grant. (audit.md §0.2.2)
+  // Under Retro genericKeys, restore the live counter from the shared pool slot
+  // instead — keys are fungible across dungeons. The per-dungeon array is only
+  // indexed in-dungeon (d != 0xff); indexing it with the sentinel would be OOB.
+  link_num_keys = (d != 0xff)
+                      ? (Rando_IsGenericKeysActive()
+                             ? link_generic_keys
+                             : link_keys_earned_per_dungeon[d == 2 ? 0 : (d >> 1)])
+                      : 0xff;
   Hud_Rebuild();
   dung_num_lit_torches = 0;
   hdr_dungeon_dark_with_lantern = 0;
@@ -6501,7 +6916,198 @@ void LoadOWMusicIfNeeded() {  // 82854c
   LoadOverworldSongs();
 }
 
+static bool RandoPot_AllocateGoldOverlayOam(void);
+static bool RandoPot_DrawGoldGlintAt(int gx, int gy, uint8 tile, uint8 flags);
+
+// Draw the animated gold "check" glint over each in-scope un-checked pot and
+// enemy-drop check that needs a neutral marker. Called right after Sprite_Main
+// (while BG2*OFS_copy2 still hold the adjusted BG2 render scroll the room's
+// sprites used, before they are restored just below), so the glints track their
+// targets pixel-for-pixel. Pure OAM + PPU-cgram (NMI injects the gold) — no g_ram
+// divergence; inert off-rando / when no checks need a glint.
+static void RandoPot_DrawGoldOverlay(void) {
+  if (!(enhanced_features1 & kFeatures1_RandomizerActive))
+    return;
+  Rando_ObjScratchRestoreVisible();
+  uint8 n = Rando_PotOverlayCount();
+  uint16 enemy_mask = 0;
+  for (int k = 0; k < 16; k++) {
+    if (Rando_EnemyDropMarkerNeedsOverlay(k))
+      enemy_mask |= (uint16)(1u << k);
+  }
+  if (n == 0 && enemy_mask == 0)
+    return;
+  uint8 fallback_count = n;
+  for (uint16 m = enemy_mask; m != 0; m >>= 1)
+    fallback_count += (uint8)(m & 1);
+  Rando_EnemyMarkerBeginOverlay(fallback_count);
+  // Exact enemy item markers must win both OAM and palette priority over the
+  // neutral gold glint fallback when OAM remains after reserving one fallback
+  // entry per visible check. Draw them before choosing the glint palette so the
+  // palette scan below sees their final OAM rows and avoids recoloring them.
+  uint16 enemy_glint_mask = 0;
+  for (int k = 0; k < 16; k++) {
+    if (!(enemy_mask & (uint16)(1u << k)))
+      continue;
+    if (Rando_TryDrawEnemyDropMarkerOverlay(k))
+      continue;
+    if (Rando_EnemyDropMarkerWantsGlint(k, NULL))
+      enemy_glint_mask |= (uint16)(1u << k);
+  }
+  if (n == 0 && enemy_glint_mask == 0)
+    return;
+  // Reserve a sprite sub-palette row no on-screen sprite uses this frame (NMI
+  // golds it). All 8 rows are allocated in a dungeon, so we pick dynamically and
+  // NEVER take Link's equipment rows 3/5/7 (Link draws after us; an earlier
+  // fixed row 7 painted Link gold, and sword/shield can land on rows 3/5).
+  // OAM for this frame is built (we run after
+  // Sprite_Main); ClearOamBuffer sets unused slots to y=0xf0, the one sentinel
+  // the PPU hides. Values 0xf1..0xff wrap onto the top scanlines and count as
+  // visible. If every row is busy, skip the glint (rare).
+  uint8 used = (1u << 3) | (1u << 5) | (1u << 7);
+  for (int i = 0; i < 128; i++) {
+    if (oam_buf[i].y != 0xf0)
+      used |= 1u << ((oam_buf[i].flags >> 1) & 7);
+  }
+  int prow = -1;
+  for (int r = 0; r < 8; r++) {
+    if (!(used & (1u << r))) { prow = r; break; }
+  }
+  if (prow < 0)
+    return;
+  // Twinkle: cycle the glint glyph and bob it a couple of pixels.
+  static const uint8 kGlint_Char[4] = {0x80, 0x83, 0xb7, 0xc7};
+  uint8 tile = kGlint_Char[(frame_counter >> 2) & 3];
+  int bob = (frame_counter >> 3) & 3;   // 0..3 px upward
+  // palette = the reserved row; 0x20 = OBJ priority 2 (normal sprite).
+  uint8 flags = (uint8)((prow << 1) | 0x20);
+  bool drew_glint = false;
+  for (uint8 k = 0; k < n; k++) {
+    uint16 pos = Rando_PotOverlayPos(k);
+    // Skip if the pot was lifted/checked mid-room (the BG pot is already floor).
+    if (!Rando_PotShouldRecolor(dungeon_room_index, pos))
+      continue;
+    // World coords from the tilemap pos (ManipBlock_Something idiom; a dungeon
+    // room is one 512-aligned supertile, so link's high bits are the shared room
+    // origin for every pot in the room).
+    uint16 wx = (link_x_coord & 0xfe00) | ((pos & 0x007e) << 2);
+    uint16 wy = (link_y_coord & 0xfe00) | ((pos & 0x1f80) >> 4);
+    // Screen coords: same world-minus-camera convention Sprite_PrepOamCoord used.
+    int sx = (uint16)(wx - BG2HOFS_copy2);
+    int sy = (uint16)(wy - BG2VOFS_copy2);
+    // Center the 8x8 glint on the 16x16 pot, less the bob. Cull fully-off-screen
+    // (and skip the left/top fringe to avoid an OAM coordinate wrap).
+    int gx = sx + 4;
+    int gy = sy + 2 - bob;
+    if (gx < 0 || gx > 248 || gy < 0 || gy > 216)
+      continue;
+    drew_glint |= RandoPot_DrawGoldGlintAt(gx, gy, tile, flags);
+  }
+  for (int k = 0; k < 16; k++) {
+    if (!(enemy_glint_mask & (uint16)(1u << k)))
+      continue;
+    int dy = 0;
+    if (!Rando_EnemyDropMarkerWantsGlint(k, &dy))
+      continue;
+    int sx = (uint16)(Sprite_GetX(k) - BG2HOFS_copy2);
+    int sy = (uint16)(Sprite_GetY(k) - BG2VOFS_copy2) - sprite_z[k];
+    int gx = sx + 4;
+    int gy = sy + dy - bob;
+    if (gx < 0 || gx > 248 || gy < 0 || gy > 216)
+      continue;
+    drew_glint |= RandoPot_DrawGoldGlintAt(gx, gy, tile, flags);
+  }
+  if (drew_glint)
+    Rando_OverlayPaletteRequestGold((uint8)prow);
+}
+
+static bool RandoPot_DrawGoldGlintAt(int gx, int gy, uint8 tile, uint8 flags) {
+  if (!RandoPot_AllocateGoldOverlayOam())
+    return false;
+  SetOamHelper0(GetOamCurPtr(), (uint16)gx, (uint16)gy, tile, flags, 0);
+  return true;
+}
+
+static bool RandoPot_AllocateGoldOverlayOam(void) {
+  if (sort_sprites_setting) {
+    return Rando_EnemyMarkerClaimFallbackOam();
+  } else {
+    if (oam_region_base[0] + 4 >= 0x171)
+      return false;
+    Oam_AllocateFromRegionA(4);
+  }
+  return true;
+}
+
+int RandoPot_OverlayOamSelfCheck(void) {
+  uint8 saved_sort = sort_sprites_setting;
+  uint16 saved_oam_cur = oam_cur_ptr;
+  uint16 saved_oam_ext = oam_ext_cur_ptr;
+  OamEnt saved_oam[128];
+  uint8 saved_ext[128];
+  memcpy(saved_oam, oam_buf, sizeof(saved_oam));
+  memcpy(saved_ext, bytewise_extended_oam, sizeof(saved_ext));
+  uint16 saved_regions[6];
+  for (int i = 0; i < 6; i++)
+    saved_regions[i] = oam_region_base[i];
+
+  int fail = 0;
+  sort_sprites_setting = 1;
+  Oam_ResetRegionBases();
+  for (int i = 0; i < 128; i++)
+    oam_buf[i].y = 0;
+  for (int i = 0x30 / 4; i < 0xC0 / 4; i++)
+    oam_buf[i].y = 0xF0;
+  for (int i = 0x120 / 4; i < 0x140 / 4; i++)
+    oam_buf[i].y = 0xF0;
+  Rando_EnemyMarkerBeginOverlay(1);
+  if (!RandoPot_AllocateGoldOverlayOam() || oam_cur_ptr != 0x0830)
+    fail = 1;
+
+  oam_cur_ptr = 0xdead;
+  for (int i = 0x30 / 4; i < 0xC0 / 4; i++)
+    oam_buf[i].y = 0;
+  Rando_EnemyMarkerBeginOverlay(1);
+  if (!RandoPot_AllocateGoldOverlayOam() || oam_cur_ptr != 0x0920)
+    fail = 1;
+
+  oam_cur_ptr = 0xdead;
+  oam_buf[0x120 / 4].y = 0;
+  Rando_EnemyMarkerBeginOverlay(1);
+  if (!RandoPot_AllocateGoldOverlayOam() || oam_cur_ptr != 0x0924)
+    fail = 1;
+
+  oam_cur_ptr = 0xdead;
+  for (int i = 0x120 / 4; i < 0x140 / 4; i++)
+    oam_buf[i].y = 0;
+  Rando_EnemyMarkerBeginOverlay(1);
+  if (RandoPot_AllocateGoldOverlayOam() || oam_cur_ptr != 0xdead)
+    fail = 1;
+
+  sort_sprites_setting = 0;
+  Oam_ResetRegionBases();
+  if (!RandoPot_AllocateGoldOverlayOam() || oam_cur_ptr != 0x0830)
+    fail = 1;
+  oam_cur_ptr = 0xbeef;
+  oam_region_base[0] = 0x170;
+  if (RandoPot_AllocateGoldOverlayOam() || oam_cur_ptr != 0xbeef)
+    fail = 1;
+
+  sort_sprites_setting = saved_sort;
+  oam_cur_ptr = saved_oam_cur;
+  oam_ext_cur_ptr = saved_oam_ext;
+  memcpy(oam_buf, saved_oam, sizeof(saved_oam));
+  memcpy(bytewise_extended_oam, saved_ext, sizeof(saved_ext));
+  for (int i = 0; i < 6; i++)
+    oam_region_base[i] = saved_regions[i];
+  Rando_EnemyMarkerBeginOverlay(0);
+  return fail;
+}
+
 void Module07_Dungeon() {  // 8287a2
+  if (Chains_TryClearedTerminalReentryExit())
+    return;
+
   Dungeon_HandleLayerEffect();
   kDungeonSubmodules[submodule_index]();
 
@@ -6525,6 +7131,7 @@ void Module07_Dungeon() {  // 8287a2
     Dungeon_TryScreenEdgeTransition();
 skip:
   OrientLampLightCone();
+  ZeldaWideBeforeSprites();
 
   int bg2x = BG2HOFS_copy2;
   int bg2y = BG2VOFS_copy2;
@@ -6543,6 +7150,7 @@ skip:
 
   Sprite_Dungeon_DrawAllPushBlocks();
   Sprite_Main();
+  RandoPot_DrawGoldOverlay();  // gold "check" glints over in-scope un-checked pots
 
   BG2HOFS_copy2 = bg2x;
   BG2VOFS_copy2 = bg2y;
@@ -6591,6 +7199,12 @@ void Dungeon_HandleEdgeTransitionMovement(int dir) {  // 8288c5
   }
 }
 
+// A quest can take the map away: its branch then always skips ($82:8908).
+static bool DungeonMapAllowed(void) {
+  return (uint8)cur_palace_index_x2 != 0xff && (uint8)dungeon_room_index &&
+         Mods_RomByte(0x828908, 0xf0) == 0xf0;
+}
+
 void Module07_00_PlayerControl() {  // 8288de
   if (!(flag_custom_spell_anim_active | flag_is_link_immobilized | flag_block_link_menu)) {
     if (filtered_joypad_H & 0x10) {  // start
@@ -6599,8 +7213,9 @@ void Module07_00_PlayerControl() {  // 8288de
       saved_module_for_menu = main_module_index;
       main_module_index = 14;
       return;
-    } else if (DidPressButtonForMap()) {  // x
-      if ((uint8)cur_palace_index_x2 != 0xff && (uint8)dungeon_room_index) {
+    } else if (DidPressButtonForMap() && (hud_cur_item_x || DungeonMapAllowed())) {  // x
+      // The game looks at select when X does not open the map ($82:891B).
+      if (DungeonMapAllowed()) {
         overworld_map_state = 0;
         submodule_index = 3;
         saved_module_for_menu = main_module_index;
@@ -6833,7 +7448,7 @@ void Dungeon_PlayMusicIfDefeated() {  // 828bd7
   if (dungeon_room_index != 18) {
     x = 0x10;
     if (dungeon_room_index != 2) {
-      if (FindInWordArray(kBossRooms, dungeon_room_index, countof(kBossRooms)) < 0)
+      if (FindInWordArray(MODS_U16(kBossRooms, 0x828954), dungeon_room_index, countof(kBossRooms)) < 0)
         return;
       if (Sprite_CheckIfScreenIsClear())
         return;
@@ -6949,6 +7564,12 @@ void Dungeon_InitializeRoomFromSpecial() {  // 828ce2
   LoadTransAuxGFX();
   Dungeon_LoadCustomTileAttr();
   BYTE(dungeon_room_index2) = BYTE(dungeon_room_index);
+  // door shuffle: a redirected spiral keeps the vanilla grid-granular
+  // adjustment above (prev = source room) but the destination staircase's
+  // intra-room position may differ — apply the slot delta now that the
+  // destination room's attr table is loaded. No-op unless a spiral redirect
+  // is pending.
+  Rando_DoorSpiralFixup();
   Follower_Initialize();
   subsubmodule_index += 1;
 }
@@ -7385,6 +8006,10 @@ void Module07_0E_00_InitPriorityAndScreens() {  // 8291c4
 void Module07_0E_13_SetRoomAndLayerAndCache() {  // 8291dd
   link_is_on_lower_level_mirror = kTeleportPitLevel1[cur_staircase_plane];
   link_is_on_lower_level = kTeleportPitLevel2[cur_staircase_plane];
+  // door shuffle: cur_staircase_plane came from the SOURCE room's header and
+  // describes the vanilla destination; on a redirected spiral the destination
+  // door record overrides the layer (no-op when no redirect is pending).
+  Rando_DoorSpiralLayerFix();
   TM_copy |= 0x10;
   TS_copy &= 0xf;
   if (!(which_staircase_index & 4))
@@ -7684,7 +8309,10 @@ void Module07_17_PressurePlate() {  // 8297c8
 void Module07_18_RescuedMaiden() {  // 82980a
   switch (subsubmodule_index) {
   case 0:
-    PaletteFilter_RestoreBGSubstractiveStrict();
+    do {
+      PaletteFilter_RestoreBGSubstractiveStrict();
+    } while (CutsceneFastForwardEnabled() &&
+             BYTE(darkening_or_lightening_screen) != 255);
     main_palette_buffer[0] = main_palette_buffer[32];
     if (BYTE(darkening_or_lightening_screen) != 255)
       return;
@@ -7703,7 +8331,7 @@ void Module07_18_RescuedMaiden() {  // 82980a
     PaletteFilter_Crystal();
     TS_copy = 1;
     flag_is_link_immobilized = 2;
-    int j = FindInWordArray(kBossRooms, dungeon_room_index, countof(kBossRooms)) - 4;
+    int j = FindInWordArray(MODS_U16(kBossRooms, 0x828954), dungeon_room_index, countof(kBossRooms)) - 4;
     uint16 *dst = &dung_bg1[kCrystal_Tab0[j] >> 1];
     for (int n = 0, t = 0; n != 4; n++) {
       for (int i = 0; i != 8; i++, t++) {
@@ -7832,7 +8460,15 @@ void Module11_02_LoadEntrance() {  // 829b1c
   Dungeon_LoadEntrance();
 
   uint8 dung = BYTE(cur_palace_index_x2);
-  link_num_keys = (dung != 255) ? link_keys_earned_per_dungeon[((dung == 2) ? 0 : dung) >> 1] : 255;
+  // rando-exempt: state-shuffle — restore per-dungeon key count on entrance
+  // load (or 0xff sentinel outside). Not a grant. (audit.md §0.2.2)
+  // Under Retro genericKeys, restore the live counter from the shared pool slot.
+  // The per-dungeon array is only indexed in-dungeon (dung != 255).
+  link_num_keys = (dung != 255)
+                      ? (Rando_IsGenericKeysActive()
+                             ? link_generic_keys
+                             : link_keys_earned_per_dungeon[((dung == 2) ? 0 : dung) >> 1])
+                      : 255;
   Hud_Rebuild();
   link_this_controls_sprite_oam = 4;
   player_near_pit_state = 3;
@@ -7902,6 +8538,13 @@ void SaveDungeonKeys() {  // 82a1c7
   uint8 idx = cur_palace_index_x2;
   if (idx == 0xff)
     return;
+  // rando-exempt: state-shuffle — under Retro genericKeys, persist the live
+  // count back to the shared pool slot instead of the per-dungeon slot. Not a
+  // grant. (audit.md §0.2.2)
+  if (Rando_IsGenericKeysActive()) {
+    link_generic_keys = link_num_keys;
+    return;
+  }
   if (idx == 2)
     idx = 0;
   link_keys_earned_per_dungeon[idx >> 1] = link_num_keys;
@@ -7984,15 +8627,28 @@ void Dungeon_StartInterRoomTrans_Right() {  // 82b63a
         BYTE(dungeon_room_index_prev) = dungeon_room_index2;
         Dungeon_AdjustAfterSpiralStairs();
       }
-      dungeon_room_index += 1;
+      // door shuffle redirect (no-op when off / identity / staircase context).
+      if (!Rando_DoorTransOverride(kDoorTblDir_East)) {
+        uint16 source_room = dungeon_room_index;
+        uint16 destination_room = (uint8)(dungeon_room_index + 1);
+        if (Chains_TryTerminalOutboundSeam(kChainSeamKind_Door, kDoorTblDir_East,
+                                           source_room, destination_room, 0xFF))
+          return;
+        if (Chains_TryBossSeamHop(kChainSeamKind_Door, kDoorTblDir_East,
+                                  source_room, destination_room, 0xFF))
+          return;
+        dungeon_room_index += 1;
+      }
     }
     submodule_index = 2;
-    if (room_transitioning_flags & 1) {
-      link_is_on_lower_level ^= 1;
-      link_is_on_lower_level_mirror = link_is_on_lower_level;
-    }
-    if (room_transitioning_flags & 2) {
-      cur_palace_index_x2 ^= 2;
+    if (!Rando_DoorTransConsumedToggles()) {
+      if (room_transitioning_flags & 1) {
+        link_is_on_lower_level ^= 1;
+        link_is_on_lower_level_mirror = link_is_on_lower_level;
+      }
+      if (room_transitioning_flags & 2) {
+        cur_palace_index_x2 ^= 2;
+      }
     }
   }
   room_transitioning_flags = 0;
@@ -8178,14 +8834,17 @@ void DungeonTransition_ScrollRoom() {  // 82be03
       link_y_coord += kStaircaseTab3[i];
   }
 
-  if ((t & 0x1fc) == (&up_down_scroll_target)[i]) {
+  bool scroll_done = (t & 0x1fc) == (&up_down_scroll_target)[i];
+  if (scroll_done) {
     SetAndSaveVisitedQuadrantFlags();
     subsubmodule_index++;
     transition_counter = 0;
     if (submodule_index == 2)
       WaterFlood_BuildOneQuadrantForVRAM();
   }
-
+  // door shuffle: pan a redirected arrival's deferred perpendicular fine
+  // alignment in during the scroll (no-op when nothing is armed).
+  Rando_DoorScrollFinePan(scroll_done);
 }
 
 void Module07_11_0A_ScrollCamera() {  // 82be75
@@ -8223,6 +8882,7 @@ void SubtileTransitionCalculateLanding() {  // 82c12c
     BYTE(link_x_coord) = v;
   else
     BYTE(link_y_coord) = v;
+  Rando_DoorLandingPageFix();
   link_visibility_status = 0;
 }
 
@@ -8292,9 +8952,10 @@ void Dungeon_LoadAndDrawRoom() {  // 82c57b
 void Dungeon_LoadEntrance() {  // 82d8b3
   player_is_indoors = 1;
 
+  bool chains_skip_exit_cache = Chains_ConsumeHopPending();
   if (death_var5) {
     death_var5 = 0;
-  } else {
+  } else if (!chains_skip_exit_cache) {
     overworld_area_index_exit = overworld_area_index;
     TM_copy_exit = WORD(TM_copy);
     BG2VOFS_copy2_exit = BG2VOFS_copy2;
@@ -8320,10 +8981,27 @@ void Dungeon_LoadEntrance() {  // 82d8b3
     main_tile_theme_index_exit = main_tile_theme_index;
     aux_tile_theme_index_exit = aux_tile_theme_index;
     sprite_graphics_index_exit = sprite_graphics_index;
+    // Snapshot this door's just-cached overworld arrival into the persisted
+    // capture table (any mode). The decoupled runtime replays it; it also feeds
+    // the optional bake. Only the non-death entry path caches a real arrival.
+    Rando_CaptureArrivalForBake();
   }
   bg1_y_offset = bg1_x_offset = 0;
   WORD(death_var5) = 0;
-  if (WORD(follower_indicator) == 4 || WORD(death_var4)) {
+  // add-rando-inverted-dark-chapel-spawn: the Inverted "Dark Chapel" spawn-select
+  // slot (which_starting_point 1) is the vanilla Dark Chapel room (0x112), reached
+  // via overworld door 0x5A and exiting to DW screen 0x53 — NOT the Light-World
+  // Sanctuary (kStartingPoint slot 1 = room 0x12). Room 0x112 has no kStartingPoint
+  // row, so load it through its real entrance (door 0x5A, via kEntranceData) and
+  // pre-set the cached overworld arrival below so walking back out returns to the
+  // Dark World at screen 0x53. Gated on the active Inverted slot; vanilla / Open /
+  // Standard / Retro keep the kStartingPoint Sanctuary spawn (RAM-compare safe).
+  bool inv_dark_chapel =
+      (enhanced_features1 & kFeatures1_RandomizerActive) &&
+      Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */ &&
+      which_starting_point == 1 &&
+      (WORD(follower_indicator) == 4 || WORD(death_var4));
+  if ((WORD(follower_indicator) == 4 || WORD(death_var4)) && !inv_dark_chapel) {
     int i = which_starting_point;
     WORD(which_entrance) = kStartingPoint_entrance[i];
     dungeon_room_index = dungeon_room_index2 = kStartingPoint_rooms[i];
@@ -8367,8 +9045,14 @@ void Dungeon_LoadEntrance() {  // 82d8b3
     queued_music_control = kStartingPoint_musicTrack[i];
     if (i == 0 && sram_progress_indicator == 0)
       queued_music_control = 0xff;
-    death_var4 = 0;
+    death_var4 = 0;  // INVARIANT: this branch consumes the spawn signal. Any branch
+                     // that DIVERTS from it (e.g. the inv_dark_chapel entrance-path
+                     // spawn below) MUST also clear death_var4, or the stale flag
+                     // re-routes the NEXT Dungeon_LoadEntrance back here and discards
+                     // its which_entrance (the Dark Chapel re-entry→Link's-House bug).
   } else {
+    if (inv_dark_chapel)
+      WORD(which_entrance) = 0x5A;  // Dark Chapel overworld door 0x5A -> room 0x112
     int i = which_entrance;
     dungeon_room_index = dungeon_room_index2 = kEntranceData_rooms[i];
     BG1VOFS_copy = BG2VOFS_copy = BG1VOFS_copy2 = BG2VOFS_copy2 = kEntranceData_scrollY[i];
@@ -8418,6 +9102,92 @@ void Dungeon_LoadEntrance() {  // 82d8b3
     if (dungeon_room_index >= 0x100)
       dung_cur_floor = 0;
   }
+  // add-rando-inverted-dark-chapel-spawn: finish the Dark Chapel (room 0x112) spawn.
+  // The entrance load above placed Link via the chapel's own door (0x5A); this block
+  // (1) clears the spawn signal so a later door re-entry isn't misrouted to the
+  // kStartingPoint/Link's-House path, (2) pre-loads the *_exit cache with the chapel's
+  // genuine Dark-World screen-0x53 arrival so the NATURAL cached-exit branch (room >=
+  // 0x100) returns Link there on the way out, and (3) repositions Link to the altar.
+  // No search-branch borrow / screen-bit redirect — the cached exit + this genuine
+  // cache makes exit + walk-back-in behave like the normal "walk into the dark
+  // sanctuary" path.
+  if (inv_dark_chapel) {
+    // Clear the spawn-select signal. The vanilla kStartingPoint branch clears
+    // death_var4 (line ~8555); this entrance-path chapel spawn must too. Otherwise
+    // it persists, and a later WALK-IN through the chapel door — which correctly
+    // sets which_entrance=0x5A — re-enters Dungeon_LoadEntrance with death_var4 still
+    // 1 but which_starting_point no longer 1, so the gate at the top routes into the
+    // kStartingPoint branch and loads kStartingPoint_rooms[which_starting_point]
+    // (= Link's House), throwing away which_entrance=0x5A. Log-confirmed: re-entry
+    // fired which_entrance=0x5A but produced NO entrance-path DLE line — it took the
+    // kStartingPoint branch. Clearing death_var4 here makes re-entry load room 0x112.
+    WORD(death_var4) = 0;
+    // EXIT cache: replay the chapel's GENUINE Dark-World overworld arrival (screen
+    // 0x53) when Link leaves. Room 0x112 (>= 0x100, != 0x104) naturally takes the
+    // cached-exit branch in LoadOverworldFromDungeon, which restores this *_exit
+    // block via LoadCachedEntranceProperties — the same screen the normal "walk to
+    // the dark sanctuary and enter" path caches on entry (Dungeon_LoadEntrance, the
+    // non-death branch above). A menu spawn has no real overworld state to cache, so
+    // without this the cached exit replayed garbage; the earlier Sanctuary-room
+    // borrow (g_rando_entrance_exit_room=0x12 + a 0x40 screen-bit redirect) loaded
+    // the *Light-World Sanctuary* screen tagged as 0x53 — a counterfeit whose door
+    // tile sits two rows north of the chapel's, so re-entry never matched the chapel
+    // entrance (F12: lx=89/id=0x5A by position, but the door-tile check failed) and
+    // fell through to Link's House. These values are an F12 capture of *_exit taken
+    // standing inside room 0x112 after a genuine door entry — the chapel door is
+    // fixed, so they are deterministic (like the altar coordinates below).
+    overworld_area_index_exit = 0x0053;
+    WORD(TM_copy_exit) = 0x0016;
+    BG2VOFS_copy2_exit = 0x0400;
+    BG2HOFS_copy2_exit = 0x06DA;
+    link_y_coord_exit = 0x0456;
+    link_x_coord_exit = 0x0758;
+    overworld_screen_index_exit = 0x0053;
+    map16_load_src_off_exit = 0x009C;  // genuine; 0x009A (wrong-folder dump) shifted the
+                                       // tilemap so the chapel door tile mis-read (tab=0)
+    camera_y_coord_scroll_low_exit = 0x046F;
+    camera_x_coord_scroll_low_exit = 0x075F;
+    ow_scroll_vars0_exit.ystart = 0x0400;
+    ow_scroll_vars0_exit.yend   = 0x051E;
+    ow_scroll_vars0_exit.xstart = 0x0600;
+    ow_scroll_vars0_exit.xend   = 0x0700;
+    up_down_scroll_target_exit       = 0x0320;
+    up_down_scroll_target_end_exit   = 0x0600;
+    left_right_scroll_target_exit    = 0x0500;
+    left_right_scroll_target_end_exit = 0x0800;
+    byte_7EC164 = 0x00;
+    main_tile_theme_index_exit  = 0x21;
+    aux_tile_theme_index_exit   = 0x40;
+    sprite_graphics_index_exit  = 0x13;
+    overworld_unk1_exit     = 0x0000;
+    overworld_unk1_neg_exit = 0x0000;
+    overworld_unk3_exit     = 0x0006;   // genuine; wrong-folder dump had the sign flipped
+    overworld_unk3_neg_exit = 0xFFFA;   // (0xFFF6 / 0x000A) -> choppy camera on exit
+    // Wake at the chapel ALTAR, not the south entrance door kEntranceData[0x5A]
+    // computes (player_y ~0x23D8). Room 0x112's interior is NOT a +0x2000 shift of
+    // the Sanctuary's, so a derived altar landed Link in a wall — these coordinates
+    // come from a runtime F12 dump taken standing on the altar tile, captured into
+    // the same framing set the entrance load writes (link / BG scroll / camera /
+    // quadrant / lower-level). room_bounds/theme/music from the entrance load stay
+    // correct for room 0x112; only what moving door->altar changes is overridden.
+    link_x_coord = 0x0478;
+    link_y_coord = 0x22AE;
+    link_direction_facing = 2;  // face down, like the vanilla Sanctuary wake-up
+    BG1VOFS_copy = BG2VOFS_copy = BG1VOFS_copy2 = BG2VOFS_copy2 = 0x2242;
+    BG1HOFS_copy = BG2HOFS_copy = BG1HOFS_copy2 = BG2HOFS_copy2 = 0x0400;
+    camera_y_coord_scroll_low = 0x00B9;
+    camera_y_coord_scroll_hi = camera_y_coord_scroll_low + 2;
+    camera_x_coord_scroll_low = 0x007F;
+    camera_x_coord_scroll_hi = camera_x_coord_scroll_low + 2;
+    quadrant_fullsize_x = 0;
+    quadrant_fullsize_y = 2;
+    link_quadrant_x = 0;
+    link_quadrant_y = 0;
+    link_is_on_lower_level = 0;
+    link_is_on_lower_level_mirror = 0;
+    is_standing_in_doorway = 0;  // altar tile is not a doorway
+  }
+  Chains_TryApplyBossEntranceLanding();
   player_oam_x_offset = player_oam_y_offset = 0x80;
   link_direction_mask_a = link_direction_mask_b = 0xf;
   BYTE(link_z_coord) = link_actual_vel_z = 0xff;
@@ -8793,4 +9563,3 @@ void CrystalCutscene_SpawnMaiden() {  // 9ecd48
   dung_floor_y_offs = 0x30 - (uint8)BG1VOFS_copy2;
   dung_hdr_collision_2_mirror = 1;
 }
-

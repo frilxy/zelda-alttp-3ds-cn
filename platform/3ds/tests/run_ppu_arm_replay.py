@@ -7,10 +7,13 @@ from pathlib import Path
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_CODE
 from unicorn.arm_const import UC_ARM_REG_SP, UC_ARM_REG_LR, UC_ARM_REG_R0, UC_ARM_REG_PC
 root=Path(__file__).resolve().parents[3]
-p=argparse.ArgumentParser();p.add_argument('dump',type=Path);args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('dump',type=Path)
+# The candidate's render flags: 49 is the Old 3DS set (NewRenderer, Old3DS,
+# FastPaths); 33 is what the New 3DS and the other platforms run with.
+p.add_argument('--flags',type=int,default=49);args=p.parse_args()
 tools=Path(os.environ.get('DEVKITARM','/opt/devkitpro/devkitARM'))/'bin'
 def cbytes(name,b):return 'static const unsigned char '+name+'[]={'+','.join(map(str,b))+'};\n'
-reference=subprocess.check_output(['git','show','ce53c44:app/jni/src/snes/ppu.c'],cwd=root,text=True)
+reference=subprocess.check_output(['git','show','ce53c44:engine/snes/ppu.c'],cwd=root,text=True)
 exports=re.findall(r'^(?:Ppu\*|void|int|uint8_t)\s+((?:ppu_|Ppu)[A-Za-z0-9_]+)\(',reference,re.M)
 loader=(root/'platform/3ds/tests/ppu_old3ds_test.c').read_text()
 start=loader.index('  const unsigned regs[][2]');end=loader.index('  snprintf(path, sizeof(path), "%s/ppu.txt"',start)
@@ -38,7 +41,7 @@ ppu_saveload(p,load,&ptr);memcpy(p->oam,ram+0x800,sizeof(p->oam));
 '''+setup+'''} ppus[1].retained=&retained;ppus[1].retainedAttempted=true; }
 unsigned run(unsigned v){
 Ppu*p=&ppus[v];
-if(v)PpuBeginDrawing(p,(uint8_t*)output,2048,17);
+if(v)PpuBeginDrawing(p,(uint8_t*)output,2048,'''+str(args.flags)+''');
 else ref_PpuBeginDrawing(p,(uint8_t*)output,2048,17);
 for(int y=1;y<=240;y++){if(v)ppu_runLine(p,y);else ref_ppu_runLine(p,y);}
 return 0;}

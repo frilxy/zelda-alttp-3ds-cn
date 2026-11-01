@@ -1,5 +1,6 @@
 #include "player.h"
 #include "zelda_rtl.h"
+#include "mods.h"
 #include "variables.h"
 #include "tile_detect.h"
 #include "ancilla.h"
@@ -12,6 +13,12 @@
 #include "misc.h"
 #include "player_oam.h"
 #include "sprite_main.h"
+#include "features.h"
+#include "rando/rando.h"
+#include "rando/chain_seams.gen.h"
+#include "rando/chains_runtime.h"
+#include "rando/item_ids.h"
+#include "rando/location_ids.h"
 
 static bool g_ApplyLinksMovementToCamera_called;
 
@@ -24,8 +31,11 @@ static const uint8 kLinkSpinGraphicsByDir[] = {
 };
 static const uint8 kLinkSpinDelays[] = { 1, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 5 };
 static const uint8 kGrabWallDirs[] = { 4, 8, 1, 2 };
-static const uint8 kGrabWall_AnimSteps[] = { 0, 1, 2, 3, 1, 2, 3 };
-static const uint8 kGrabWall_AnimTimer[] = { 0, 5, 5, 12, 5, 5, 12 };
+// The last pull reads entry 7 of both, one past the ROM tables: the timer
+// table is followed by the steps ($07:B31B, 0), the steps by code (LDA,
+// 0xA5). LinkState_TreePull resets both right after.
+static const uint8 kGrabWall_AnimSteps[] = { 0, 1, 2, 3, 1, 2, 3, 0xa5 };
+static const uint8 kGrabWall_AnimTimer[] = { 0, 5, 5, 12, 5, 5, 12, 0 };
 static const uint8 kCapeDepletionTimers[] = { 4, 8, 8 };
 static const int8 kAvoidJudder1[] = { 0, 1, 2, 3, 4, 5, 6, 7, 7, 6, 5, 4, 3, 2, 1, 0, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2, 3, 4, 5, 6, 7 };
 static const int8 kLink_DoMoveXCoord_Outdoors_Helper2_y[2] = { -8, 8 };
@@ -86,6 +96,39 @@ static inline uint8 BitSum4(uint8 t) {
   return (t & 1) + ((t >> 1) & 1) + ((t >> 2) & 1) + ((t >> 3) & 1);
 }
 
+// JP-1.0 glitch restoration — runtime gate.
+//
+// Returns true when the player has opted into the JP-1.0 glitch set AND the
+// original ROM is NOT attached for side-by-side comparison (so the US-1.0 RAM
+// compare stays clean when the flag is off or the emulator is on).
+//
+// FAITHFUL to JP 1.0, per the JP-vs-US 65816 ROM diff. Each restored glitch
+// corresponds to an EXACT instruction the US 1.0 release ADDED; gating that one
+// site reproduces JP-1.0 behavior byte-for-byte:
+//   - Fake Flippers: US adds a per-frame flipper recheck in the swim *handler*
+//     (PlayerHandler_04_Swimming) — the ONLY JP<->US swim delta. The swim-ENTRY
+//     ejects (CheckAbilityToSwim, LinkState_CrossingWorlds) are byte-identical
+//     JP<->US and are NOT gated: walk-into-water still ejects a flipperless Link
+//     in both versions. The glitch is reached only via the un-flipper-checked
+//     ledge/recoil entry sites (Link enters swim state directly), exactly as on
+//     JP 1.0. There is NO "8-frame grace" counter in the ROM — that was a
+//     runner-technique description, not JP code; JP simply omits the recheck.
+//   - Death Hole: US adds `link_disable_sprite_damage++` per pit-fall frame;
+//     JP omits it.
+//   - Itemdash + Spindash + Superspeed (ONE guard): US adds a StartDash guard
+//     that skips the whole item-and-sword block (Link_HandleYItem AND
+//     Link_HandleSwordCooldown) on the dash-start frame; JP runs it. Y-item =
+//     Itemdash; spin-charge pipeline = Spindash; the armed speed=0x10 state
+//     either leaves (then walking off a staircase) = Superspeed. All playtested.
+//   - Mirror Block Erase: in the indoor mirror path (DoSwordInteractionWithTiles_
+//     Mirror), JP clears the changeable-dungeon-object indices BEFORE saving the
+//     room; US 1.0 reordered the save ahead of the (now-conditional) clear, so a
+//     mid-push block is no longer flagged absent / erased on the mirror reload.
+static bool JpGlitchEnabled(void) {
+  return (enhanced_features0 & kFeatures0_RestoreJpGlitches) &&
+         !ZeldaIsEmulatorAttached();
+}
+
 void Dungeon_HandleLayerChange() {  // 81ff05
   link_is_on_lower_level_mirror = 1;
   if (kind_of_in_room_staircase == 0)
@@ -125,6 +168,10 @@ void CacheCameraProperties() {  // 81ff28
 void CheckAbilityToSwim() {  // 81ffb6
   if (!link_is_bunny_mirror && link_item_flippers)
     return;
+  // NOTE: this swim-ENTRY eject is byte-identical JP<->US — do NOT gate it for
+  // Fake Flippers (gating it lets Link walk straight into water, which is the
+  // "always swim" bug, not the glitch). The only JP<->US delta is the per-frame
+  // recheck in PlayerHandler_04_Swimming. See JpGlitchEnabled.
   if (link_item_moon_pearl)
     link_is_bunny_mirror = 0;
   link_visibility_status = 0xc;
@@ -233,6 +280,7 @@ void HandleLink_From1D() {  // 878130
   }
 }
 
+
 void PlayerHandler_00_Ground_3() {  // 8781a0
   g_ApplyLinksMovementToCamera_called = false;
 
@@ -242,7 +290,16 @@ void PlayerHandler_00_Ground_3() {  // 8781a0
 
   if (!Link_HandleToss()) {
     Link_HandleAPress();
-    if ((link_state_bits | link_grabbing_wall) == 0 && link_unk_master_sword == 0 && link_player_handler_state != kPlayerState_StartDash) {
+    // JP-1.0 Itemdash + Spindash + Superspeed (FAITHFUL — JP-vs-US ROM diff): US
+    // 1.0 ADDED the StartDash term to skip this ENTIRE item-and-sword block on the
+    // dash-start frame; JP 1.0 runs it unconditionally. One guard, three glitches:
+    // Link_HandleYItem (below) = item-use-while-dashing (Itemdash; Hookdash/
+    // Medalliondash arm Superspeed); Link_HandleSwordCooldown (the button_b_frames
+    // spin-charge pipeline) = spin-while-dashing (Spindash). Superspeed is the
+    // armed link_speed_setting==0x10 + walking-control state either leaves, then
+    // activated by walking off a manual staircase. Playtest-confirmed (all three).
+    if ((link_state_bits | link_grabbing_wall) == 0 && link_unk_master_sword == 0 &&
+        (JpGlitchEnabled() || link_player_handler_state != kPlayerState_StartDash)) {
       Link_HandleYItem();
       // Ensure we're not handling potions. Things further
       // down don't assume this and change the module indexes randomly.
@@ -253,7 +310,14 @@ void PlayerHandler_00_Ground_3() {  // 8781a0
           link_player_handler_state == kPlayerState_Ether ||
           link_player_handler_state == kPlayerState_Quake))
         goto getout_clear_vel;
-      if (sram_progress_indicator != 0) {
+      // Vanilla gated the swing pipeline on sram_progress_indicator != 0 as a
+      // proxy for "Link has been given a sword" — safe in vanilla because the
+      // indicator only flips at Uncle's death scene, which always grants the
+      // sword too. Rando decouples those: Uncle can give non-sword items, and
+      // chests can grant a sword pre-Uncle. Gate on inventory directly so the
+      // pipeline runs iff Link actually has a usable sword.
+      uint8 sword = link_sword_type;
+      if (sword != 0 && sword != 0xFF) {
         Link_HandleSwordCooldown();
         if (link_player_handler_state == 3)
           goto getout_clear_vel;
@@ -550,11 +614,39 @@ void LinkState_HoldingBigRock() {  // 878481
 }
 
 void EtherTablet_StartCutscene() {  // 87855a
+  // PREFLIGHT RETAINED. Removing it (task 3.9, first attempt) was a regression:
+  // this cutscene sets flag_block_link_menu / flag_custom_spell_anim_active,
+  // both terms in the menu gate (Module09_00_PlayerControl, Module07_00_
+  // PlayerControl), and the `i == 0` retry path clears NEITHER. A refused grant
+  // therefore froze Link on the ledge with the menu unreachable -- so the one
+  // cure for a transient refusal (drink a potion to free a bottle) could never
+  // be applied. Bailing BEFORE any flag is set keeps the player in control; the
+  // cost is the known cosmetic one (the caller has already advanced its own
+  // state, so the tablet reads as spent until the screen is reloaded).
+  if (enhanced_features1 & kFeatures1_RandomizerActive) {
+    RandoDeferredGrantToken token;
+    RandoGrantResult result = Rando_PrepareGrant(
+        LOC_Ether_Tablet, ITEM_Ether, 0x10, &token);
+    if (result != kRandoGrantResult_Accepted &&
+        result != kRandoGrantResult_NotActive)
+      return;
+  }
   button_b_frames = 0xc0;
   link_delay_timer_spin_attack = 0;
   link_player_handler_state = kPlayerState_ReceivingEther;
   link_disable_sprite_damage = 1;
   flag_block_link_menu = 1;
+}
+
+static void Link_EndTabletDirectGrantCutscene(void) {
+  flag_custom_spell_anim_active = 0;
+  link_force_hold_sword_up = 0;
+  link_player_handler_state = kPlayerState_Ground;
+  link_disable_sprite_damage = 0;
+  flag_is_link_immobilized = 0;
+  flag_block_link_menu = 0;
+  button_b_frames = 0;
+  link_delay_timer_spin_attack = 0;
 }
 
 void LinkState_ReceivingEther() {  // 878570
@@ -574,13 +666,59 @@ void LinkState_ReceivingEther() {  // 878570
     AncillaAdd_EtherSpell(0x18, 0);
     link_x_coord = x, link_y_coord = y;
   } else if (i == 0) {
-    AncillaAdd_FallingPrize(0x29, 0, 4);
-    flag_is_link_immobilized = 1;
-    flag_block_link_menu = 0;
+    RandoDeferredGrantToken token;
+    RandoGrantResult result = Rando_PrepareGrant(
+        LOC_Ether_Tablet, ITEM_Ether, 0x10, &token);
+    if (result == kRandoGrantResult_AlreadyChecked) {
+      Link_EndTabletDirectGrantCutscene();
+      return;
+    }
+    if (result == kRandoGrantResult_Retryable ||
+        result == kRandoGrantResult_Invalid) {
+      button_b_frames = 1;  // preserve and retry; never substitute vanilla
+      return;
+    }
+    if (result == kRandoGrantResult_NotActive) {
+      AncillaAdd_FallingPrize(0x29, 0, 4);
+      flag_is_link_immobilized = 1;
+      flag_block_link_menu = 0;
+      return;
+    }
+
+    int prize = AncillaAdd_FallingPrizeRando(0x29, &token, 0, 4);
+    if (prize < 0) {
+      result = Rando_CommitPreparedGrant(
+          &token, kRandoGrantPresentation_Quiet, 0, 0);
+      if (result == kRandoGrantResult_Accepted ||
+          result == kRandoGrantResult_AlreadyChecked)
+        Link_EndTabletDirectGrantCutscene();
+      else
+        button_b_frames = 1;
+    } else {
+      flag_is_link_immobilized = 1;
+      flag_block_link_menu = 0;
+    }
   }
 }
 
 void BombosTablet_StartCutscene() {  // 8785e5
+  // PREFLIGHT RETAINED. Removing it (task 3.9, first attempt) was a regression:
+  // this cutscene sets flag_block_link_menu / flag_custom_spell_anim_active,
+  // both terms in the menu gate (Module09_00_PlayerControl, Module07_00_
+  // PlayerControl), and the `i == 0` retry path clears NEITHER. A refused grant
+  // therefore froze Link on the ledge with the menu unreachable -- so the one
+  // cure for a transient refusal (drink a potion to free a bottle) could never
+  // be applied. Bailing BEFORE any flag is set keeps the player in control; the
+  // cost is the known cosmetic one (the caller has already advanced its own
+  // state, so the tablet reads as spent until the screen is reloaded).
+  if (enhanced_features1 & kFeatures1_RandomizerActive) {
+    RandoDeferredGrantToken token;
+    RandoGrantResult result = Rando_PrepareGrant(
+        LOC_Bombos_Tablet, ITEM_Bombos, 0x0f, &token);
+    if (result != kRandoGrantResult_Accepted &&
+        result != kRandoGrantResult_NotActive)
+      return;
+  }
   button_b_frames = 0xe0;
   link_delay_timer_spin_attack = 0;
   link_player_handler_state = kPlayerState_ReceivingBombos;
@@ -605,8 +743,36 @@ void LinkState_ReceivingBombos() {  // 8785fb
     AncillaAdd_BombosSpell(0x19, 0);
     link_x_coord = x, link_y_coord = y;
   } else if (i == 0) {
-    AncillaAdd_FallingPrize(0x29, 5, 4);
-    flag_is_link_immobilized = 1;
+    RandoDeferredGrantToken token;
+    RandoGrantResult result = Rando_PrepareGrant(
+        LOC_Bombos_Tablet, ITEM_Bombos, 0x0f, &token);
+    if (result == kRandoGrantResult_AlreadyChecked) {
+      Link_EndTabletDirectGrantCutscene();
+      return;
+    }
+    if (result == kRandoGrantResult_Retryable ||
+        result == kRandoGrantResult_Invalid) {
+      button_b_frames = 1;
+      return;
+    }
+    if (result == kRandoGrantResult_NotActive) {
+      AncillaAdd_FallingPrize(0x29, 5, 4);
+      flag_is_link_immobilized = 1;
+      return;
+    }
+
+    int prize = AncillaAdd_FallingPrizeRando(0x29, &token, 5, 4);
+    if (prize < 0) {
+      result = Rando_CommitPreparedGrant(
+          &token, kRandoGrantPresentation_Quiet, 0, 0);
+      if (result == kRandoGrantResult_Accepted ||
+          result == kRandoGrantResult_AlreadyChecked)
+        Link_EndTabletDirectGrantCutscene();
+      else
+        button_b_frames = 1;
+    } else {
+      flag_is_link_immobilized = 1;
+    }
   }
 }
 
@@ -1513,7 +1679,12 @@ endif_1:
   link_give_damage = 0;
   link_is_transforming = 0;
   Link_ForceUnequipCape_quietly();
-  link_disable_sprite_damage++;
+  // JP-1.0 Death Hole (FAITHFUL — JP-vs-US ROM diff): US 1.0 ADDED this per-frame
+  // increment during a pit fall; JP 1.0 omits it. The death+pit same-frame race
+  // that yields the Death Hole warp depends on this counter staying at its entry
+  // value (1) through the fall, as on JP.
+  if (!JpGlitchEnabled())
+    link_disable_sprite_damage++;
   if (!sign8(--byte_7E005C))
     return;
   uint8 x = ++link_this_controls_sprite_oam;
@@ -1542,7 +1713,17 @@ endif_1:
       }
     }
     BYTE(dungeon_room_index_prev) = dungeon_room_index;
-    BYTE(dungeon_room_index) = dung_hdr_travel_destinations[0];
+    uint16 source_room = dungeon_room_index;
+    uint16 destination_room = dung_hdr_travel_destinations[0];
+    if (player_is_indoors &&
+        Chains_TryTerminalOutboundSeam(kChainSeamKind_Hole, kChainSeamDir_None,
+                                       source_room, destination_room, 0))
+      return;
+    if (player_is_indoors &&
+        Chains_TryBossSeamHop(kChainSeamKind_Hole, kChainSeamDir_None,
+                              source_room, destination_room, 0))
+      return;
+    BYTE(dungeon_room_index) = destination_room;
     tiledetect_which_y_pos[0] = link_y_coord;
     link_y_coord = link_y_coord - y - 0x10;
     if (player_is_indoors) {
@@ -1658,7 +1839,13 @@ void PlayerHandler_04_Swimming() {  // 87963b
   link_spin_attack_step_counter = 0;
   link_state_bits = 0;
   link_picking_throw_state = 0;
-  if (!link_item_flippers)
+  // JP-1.0 Fake Flippers (FAITHFUL — JP-vs-US ROM diff): this per-frame
+  // flipperless eject is the ONLY swim code US 1.0 added vs JP 1.0; JP omits it.
+  // Gating exactly this site (and NOT the byte-identical entry ejects in
+  // CheckAbilityToSwim / LinkState_CrossingWorlds) reproduces JP 1.0: walk-into-
+  // water still ejects, but a Link who entered via the un-flipper-checked
+  // ledge/jump-in sites keeps swimming. There is no JP "grace counter".
+  if (!link_item_flippers && !JpGlitchEnabled())
     return;
 
   if (!(swimcoll_var7[0] | swimcoll_var7[1])) {
@@ -1883,6 +2070,44 @@ void PlayerHandler_15_HoldItem() {  // 8799ac
 }
 
 void Link_ReceiveItem(uint8 item, int chest_position) {  // 8799ad
+  // The vanilla routine mutates Link into the hold-up state before it knows
+  // whether AncillaAdd_ItemReceipt can allocate. Keep that byte behavior when
+  // rando is inactive, but active-randomizer grants must establish acceptance
+  // first: on saturation, apply the completed receipt effects without touching
+  // Link's auxiliary/input/movement/pose/damage/dash state.
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+      !ItemReceipt_CanAccept(item))
+    return;
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+      !ItemReceipt_CanAllocate()) {
+    uint8 receipt_method = item_receipt_method;
+    uint8 health_capacity_before = link_health_capacity;
+    if (ItemReceipt_GrantWithoutAnimation(item)) {
+      uint8 receipt_sfx = 0x0f;
+      if (item == 0x3e)
+        receipt_sfx = link_health_capacity != health_capacity_before ? 0x0d : 0x2e;
+      else if ((item == 0x26 || item == 0x3f) &&
+               link_health_capacity != health_capacity_before)
+        receipt_sfx = 0x0d;
+      sound_effect_2 = Link_CalculateSfxPan() | receipt_sfx;
+      if (item != 0x20 && item != 0x37 && item != 0x38 && item != 0x39)
+        Hud_RefreshIcon();
+      // Method 3 is a falling-prize handoff whose caller already immobilized
+      // Link while the prize was in flight. A completed quiet fallback owns
+      // the same teardown as Ancilla22_ItemReceipt; preserving that receipt-
+      // owned flag would strand Link after an otherwise successful grant.
+      if (receipt_method == 3)
+        ItemReceipt_CompleteMethod3WithoutAnimation(item);
+      // Methods 0/1 deliberately do NOT clear flag_is_link_immobilized here.
+      // The saturated fallback is contractually LOSSLESS -- it must not disturb
+      // caller action state (ItemReceipt_LosslessSelfCheck pins that) -- and the
+      // flag belongs to whoever set it. A caller that immobilizes Link and
+      // relies on receipt teardown to release him must handle the no-receipt
+      // outcome itself; see the boss-heart drop in sprite_main.c.
+    }
+    return;
+  }
+
   if (link_auxiliary_state) {
     link_auxiliary_state = 0;
     link_incapacitated_timer = 0;
@@ -1978,7 +2203,6 @@ void Link_HandleYItem() {  // 879b0e
     return;
 
   uint8 item = current_item_y;
-
   if (link_is_bunny_mirror && (item != 11 && item != 20))
     return;
 
@@ -2273,7 +2497,10 @@ void Player_Sword_SpinAttackJerks_HoldDown() {  // 879d9f
 }
 
 void LinkItem_Rod() {  // 879eef
-  static const uint8 kRodAnimDelays[] = { 3, 3, 5 };
+  // The last step reads one entry past the ROM table ($07:9EEC, shared by
+  // the rods and the cane of Somaria): the first byte of the rod routine
+  // (BIT, 0x24). The delay is cleared right after.
+  static const uint8 kRodAnimDelays[] = { 3, 3, 5, 0x24 };
   if (!(button_mask_b_y & 0x40)) {
     if (is_standing_in_doorway || !CheckYButtonPress())
       return;
@@ -2308,7 +2535,9 @@ out:
 }
 
 void LinkItem_Hammer() {  // 879f7b
-  static const uint8 kHammerAnimDelays[] = { 3, 3, 16 };
+  // The last step reads one entry past the ROM table, the first byte of this
+  // routine (LDA, 0xAD), and clears the delay right after.
+  static const uint8 kHammerAnimDelays[] = { 3, 3, 16, 0xad };
   if (link_item_in_hand & 0x10)
     return;
   if (!(button_mask_b_y & 0x40)) {
@@ -2346,7 +2575,9 @@ void LinkItem_Hammer() {  // 879f7b
 }
 
 void LinkItem_Bow() {  // 87a006
-  static const uint8 kBowDelays[] = { 3, 3, 8 };
+  // The last step reads one entry past the ROM table, the first byte of this
+  // routine (BIT, 0x24), and clears the delay right after.
+  static const uint8 kBowDelays[] = { 3, 3, 8, 0x24 };
 
   if (!(button_mask_b_y & 0x40)) {
     if (is_standing_in_doorway || !CheckYButtonPress())
@@ -2369,11 +2600,41 @@ void LinkItem_Bow() {  // 87a006
 
   int obj = AncillaAdd_Arrow(9, link_direction_facing, 2, link_x_coord, link_y_coord);
   if (obj >= 0) {
+    // Capture the archery-minigame state BEFORE the refill decrements it: the
+    // LAST minigame shot takes archery_game_arrows_left 1->0, and the Retro
+    // guard below keys off that counter — without this snapshot the final free
+    // minigame arrow would be charged rupees (or blocked if Link is broke).
+    uint8 archery_shot = archery_game_arrows_left;  // nonzero = a minigame shot
     if (archery_game_arrows_left) {
       archery_game_arrows_left--;
       link_num_arrows += 2;
     }
-    if (!archery_game_out_of_arrows && link_num_arrows) {
+    // Retro world-state (rupeeBow): owning the bow lets Link fire as long as he
+    // can afford the rupee cost — wood arrows cost 10 rupees, silver 50 — and
+    // link_num_arrows is never decremented (rupee mode pays in rupees, not
+    // ammo; cost table mirrors ALTTPR tables.asm ArrowMode*Cost). NOTE: this
+    // port is deliberately MORE permissive than ALTTPR retro.asm DecrementArrows
+    // — that .rupees path requires CurrentArrows != 0 to fire (and the bow grant
+    // seeds CurrentArrows=1 / ArrowsFiller=1 in newitems.asm so the gate passes).
+    // This fork's Rando_GrantBow does NOT seed link_num_arrows, so re-adding the
+    // arrow-count gate here would make the bow unfireable; bow ownership alone
+    // is the capability. Gated on Rando_IsRetroActive() so the vanilla
+    // arrow-consume path below stays
+    // byte-identical when rando is inactive or the seed is not Retro. The
+    // archery minigame keeps vanilla behavior (`archery_shot` excludes every
+    // minigame shot, incl. the last; ALTTPR's retro patch likewise special-cases
+    // the arrow-game room 0x111).
+    if (Rando_IsRetroActive() && !archery_shot &&
+        !archery_game_out_of_arrows) {
+      uint16 cost = (link_item_bow >= 3) ? 50 : 10;  // silver vs wood bow tier
+      if (link_rupees_goal >= cost) {
+        // rando-exempt: state-shuffle — Retro rupee-bow ammo cost, not an item grant
+        link_rupees_goal -= cost;
+      } else {
+        ancilla_type[obj] = 0;
+        Ancilla_Sfx2_Near(60);  // can't afford a shot — empty-bow beep
+      }
+    } else if (!archery_game_out_of_arrows && link_num_arrows) {
       if (--link_num_arrows == 0)
         Hud_RefreshIcon();
     } else {
@@ -2459,6 +2720,8 @@ fail:
   } else if (b == 3) {  // red potion
     if (link_health_capacity == link_health_current)
       goto fail;
+    // rando-exempt: state-shuffle — bottle drink consumes the contents (red/
+    // green/blue potion, fairy, bee → empty 2). Not a grant. (audit.md §0.2.2)
     link_bottle_info[btidx] = 2;
     link_item_in_hand = 0;
     submodule_index = 4;
@@ -2469,6 +2732,8 @@ fail:
   } else if (b == 4) { // green potion
     if (link_magic_power == 128)
       goto fail;
+    // rando-exempt: state-shuffle — bottle drink consumes the contents (red/
+    // green/blue potion, fairy, bee → empty 2). Not a grant. (audit.md §0.2.2)
     link_bottle_info[btidx] = 2;
     link_item_in_hand = 0;
     submodule_index = 8;
@@ -2479,6 +2744,8 @@ fail:
   } else if (b == 5) { // blue potion
     if (link_health_capacity == link_health_current && link_magic_power == 128)
       goto fail;
+    // rando-exempt: state-shuffle — bottle drink consumes the contents (red/
+    // green/blue potion, fairy, bee → empty 2). Not a grant. (audit.md §0.2.2)
     link_bottle_info[btidx] = 2;
     link_item_in_hand = 0;
     submodule_index = 9;
@@ -2490,11 +2757,15 @@ fail:
     link_item_in_hand = 0;
     if (ReleaseFairy() < 0)
       goto fail;
+    // rando-exempt: state-shuffle — bottle drink consumes the contents (red/
+    // green/blue potion, fairy, bee → empty 2). Not a grant. (audit.md §0.2.2)
     link_bottle_info[btidx] = 2;
     Hud_Rebuild();
   } else if (b == 7 || b == 8) {  // bad/good bee
     if (!ReleaseBeeFromBottle(btidx))
       goto fail;
+    // rando-exempt: state-shuffle — bottle drink consumes the contents (red/
+    // green/blue potion, fairy, bee → empty 2). Not a grant. (audit.md §0.2.2)
     link_bottle_info[btidx] = 2;
     Hud_Rebuild();
   }
@@ -2620,8 +2891,31 @@ void LinkItem_Flute() {  // 87a3db
     return;
   flute_countdown = 128;
   Ancilla_Sfx2_Near(19);
-  if (player_is_indoors || overworld_screen_index & 0x40 || main_module_index == 11)
-    return;
+  // #82 Inverted: the flute works only in the Dark World, but the Kakariko
+  // weathervane (flute==2 activation) must still be lit at LIGHT-world screen
+  // 0x18. Upstream z3randomizer (flute.asm FreeDuckCheck, hooked at $87A3E2 =
+  // the flute_countdown store) intercepts that activation BEFORE the world gate,
+  // so a plain operand flip of the gate would make Kakariko activation
+  // unreachable in Inverted. Mirror FreeDuckCheck: in active-Inverted rando,
+  // (1) run the screen-0x18 weathervane activation pre-gate while flute is still
+  // inactive, then (2) flip the world gate to block the LIGHT world (instead of
+  // the dark world) for the normal travel-duck call.
+  bool rando_inverted = (enhanced_features1 & kFeatures1_RandomizerActive) &&
+                        Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */;
+  if (rando_inverted) {
+    if (!player_is_indoors && link_item_flute == 2 &&
+        overworld_screen_index == 0x18 && link_y_coord >= 0x760 && link_y_coord < 0x7e0 &&
+        link_x_coord >= 0x1cf && link_x_coord < 0x230) {
+      submodule_index = 45;
+      AncillaAdd_ExplodingWeatherVane(55, 0);
+      return;
+    }
+    if (player_is_indoors || !(overworld_screen_index & 0x40) || main_module_index == 11)
+      return;
+  } else {
+    if (player_is_indoors || overworld_screen_index & 0x40 || main_module_index == 11)
+      return;
+  }
   int i = 4;
   do {
     if (ancilla_type[i] == 0x27)
@@ -2654,7 +2948,12 @@ void LinkItem_Ether() {  // 87a494
     return;
   button_mask_b_y &= ~0x40;
 
-  if (is_standing_in_doorway || flag_block_link_menu || dung_savegame_state_bits & 0x8000 || !((uint8)(link_sword_type + 1) & ~1) ||
+  // Swordless (ALTTPR setSwordlessMode / AllowSwordlessMedallionUse, asm
+  // CheckMedallionSword): the medallion cast (Bombos/Ether/Quake) normally needs a
+  // sword (`(sword+1)&~1`==0 means no-sword → blocked). Under swordless the cast is
+  // permitted without a sword so Ether/Quake can open Misery Mire / Turtle Rock.
+  // Gated so non-swordless behavior is byte-identical.
+  if (is_standing_in_doorway || flag_block_link_menu || dung_savegame_state_bits & 0x8000 || (!Rando_IsSwordlessActive() && !((uint8)(link_sword_type + 1) & ~1)) ||
       follower_dropped && follower_indicator == 13) {
     Ancilla_Sfx2_Near(60);
     return;
@@ -2703,7 +3002,12 @@ void LinkItem_Bombos() {  // 87a569
     return;
   button_mask_b_y &= ~0x40;
 
-  if (is_standing_in_doorway || flag_block_link_menu || dung_savegame_state_bits & 0x8000 || !((uint8)(link_sword_type + 1) & ~1) ||
+  // Swordless (ALTTPR setSwordlessMode / AllowSwordlessMedallionUse, asm
+  // CheckMedallionSword): the medallion cast (Bombos/Ether/Quake) normally needs a
+  // sword (`(sword+1)&~1`==0 means no-sword → blocked). Under swordless the cast is
+  // permitted without a sword so Ether/Quake can open Misery Mire / Turtle Rock.
+  // Gated so non-swordless behavior is byte-identical.
+  if (is_standing_in_doorway || flag_block_link_menu || dung_savegame_state_bits & 0x8000 || (!Rando_IsSwordlessActive() && !((uint8)(link_sword_type + 1) & ~1)) ||
       follower_dropped && follower_indicator == 13) {
     Ancilla_Sfx2_Near(60);
     return;
@@ -2751,7 +3055,12 @@ void LinkItem_Quake() {  // 87a64b
     return;
   button_mask_b_y &= ~0x40;
 
-  if (is_standing_in_doorway || flag_block_link_menu || dung_savegame_state_bits & 0x8000 || !((uint8)(link_sword_type + 1) & ~1) ||
+  // Swordless (ALTTPR setSwordlessMode / AllowSwordlessMedallionUse, asm
+  // CheckMedallionSword): the medallion cast (Bombos/Ether/Quake) normally needs a
+  // sword (`(sword+1)&~1`==0 means no-sword → blocked). Under swordless the cast is
+  // permitted without a sword so Ether/Quake can open Misery Mire / Turtle Rock.
+  // Gated so non-swordless behavior is byte-identical.
+  if (is_standing_in_doorway || flag_block_link_menu || dung_savegame_state_bits & 0x8000 || (!Rando_IsSwordlessActive() && !((uint8)(link_sword_type + 1) & ~1)) ||
       follower_dropped && follower_indicator == 13) {
     Ancilla_Sfx2_Near(60);
     return;
@@ -2920,9 +3229,22 @@ void LinkItem_Mirror() {  // 87a91a
   }
   button_mask_b_y &= ~0x40;
 
-  if (is_standing_in_doorway || 
-      !cheatWalkThroughWalls && !(enhanced_features0 & kFeatures0_MirrorToDarkworld) && 
-      !player_is_indoors && !(overworld_screen_index & 0x40)) {
+  // #82 Inverted: the Magic Mirror reverses direction — it transports LW->DW
+  // (z3randomizer Rom.php $07A943 "Dark to light world mirror"). Vanilla blocks
+  // the mirror when outdoors in the LIGHT world (so it works in the DW); Inverted
+  // flips that so it works in the LIGHT world and is blocked in the DW (home).
+  // The forward DW->LW direction is handled by the fixed overworld portals
+  // (inverted under-rock/bush warps; see the inverted-portal subsystem).
+  // Non-inverted is byte-identical (the ternary collapses to the original term).
+  bool rando_inverted_mirror =
+      (enhanced_features1 & kFeatures1_RandomizerActive) &&
+      Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */;
+  bool mirror_blocked_outdoor_world =
+      rando_inverted_mirror ? (overworld_screen_index & 0x40) != 0   // block in DW
+                            : !(overworld_screen_index & 0x40);      // vanilla: block in LW
+  if (is_standing_in_doorway ||
+      (!cheatWalkThroughWalls && !(enhanced_features0 & kFeatures0_MirrorToDarkworld) &&
+       !player_is_indoors && mirror_blocked_outdoor_world)) {
     Ancilla_Sfx2_Near(60);
     return;
   }
@@ -2934,14 +3256,38 @@ void DoSwordInteractionWithTiles_Mirror() {  // 87a95c
   if (player_is_indoors) {
     if (flag_block_link_menu)
       return;
-    Mirror_SaveRoomData();
-    if (sound_effect_1 != 60) {
+    // JP-1.0 Mirror Block Erase (FAITHFUL — JP-vs-US ROM diff at $87:A95C): JP 1.0
+    // clears the changeable-dungeon-object indices ($5FC/$5FD) UNCONDITIONALLY and
+    // BEFORE saving the room, so a block that is mid-push (a changeable object) is
+    // flagged absent when Mirror_SaveRoomData -> Dungeon_FlagRoomData_Quadrants
+    // records the room — erasing it on the mirror reload. US 1.0 reordered the save
+    // ahead of the (now sound_effect_1!=60-gated) clear, which fixes it. Restore the
+    // JP order exactly under the flag; the else-branch is byte-identical to US 1.0.
+    if (JpGlitchEnabled()) {
       index_of_changable_dungeon_objs[0] = 0;
       index_of_changable_dungeon_objs[1] = 0;
+      Mirror_SaveRoomData();
+    } else {
+      Mirror_SaveRoomData();
+      if (sound_effect_1 != 60) {
+        index_of_changable_dungeon_objs[0] = 0;
+        index_of_changable_dungeon_objs[1] = 0;
+      }
     }
   } else if (main_module_index != 11) {
     last_light_vs_dark_world = overworld_screen_index & 0x40;
-    if (last_light_vs_dark_world) {
+    // #82 Inverted: record the residual-portal return coord when leaving the
+    // *away* world (z3randomizer Rom.php $07A96D "residual portal" side). Vanilla
+    // drops the portal when mirroring DW->LW (records in the DW); Inverted mirrors
+    // LW->DW, so record when in the LIGHT world instead — without this the DW-side
+    // residual portal (already flipped downstream) gets a stale coord and the
+    // player is stranded with no way back to the LW. Pairs with the gate flip above.
+    bool record_return_portal =
+        ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+         Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */)
+          ? !last_light_vs_dark_world   // Inverted: leaving the LW
+          :  last_light_vs_dark_world;  // vanilla: leaving the DW
+    if (record_return_portal) {
       bird_travel_y_lo[15] = link_y_coord;
       bird_travel_y_hi[15] = link_y_coord >> 8;
       bird_travel_x_lo[15] = link_x_coord;
@@ -2956,16 +3302,80 @@ void DoSwordInteractionWithTiles_Mirror() {  // 87a95c
   }
 }
 
+// #82 Inverted: MirrorBonk fake-world rectangle table (z3randomizer
+// inverted.asm MirrorBonk .bonkRectanglesTable). Each row is {X1, X2, Y1, Y2}
+// in 16-bit overworld pixel coords; a mirror cross is force-accepted when Link
+// is inside any rectangle (X1 <= x < X2 && Y1 <= y < Y2). These are the spots
+// where the inverted topology must warp even though the tile under Link would
+// not normally permit it.
+static const uint16 kInvertedMirrorBonkRects[][4] = {
+  {0x0290, 0x02C8, 0x0CA8, 0x0CF8},  // Desert checkerboard cave 2
+  {0x05F8, 0x0A00, 0x0600, 0x0660},  // Castle Top
+  {0x05B0, 0x06A0, 0x0660, 0x0830},  // Castle Top
+  {0x06A0, 0x0770, 0x0660, 0x0680},  // Castle Top
+  {0x0880, 0x0950, 0x0660, 0x0688},  // Castle Top
+  {0x0950, 0x0A00, 0x0660, 0x0830},  // Castle Top
+  {0x07B8, 0x0848, 0x08E0, 0x0970},  // Castle Bridge
+  {0x02EF, 0x0321, 0x0C16, 0x0CA2},  // Desert (Mazeblock cave)
+  {0x0048, 0x008F, 0x0B10, 0x0B48},
+  {0x0358, 0x0440, 0x0E08, 0x0ED0},
+  {0x03B8, 0x0420, 0x0ED0, 0x0FE8},
+  {0x0360, 0x03C8, 0x0EC0, 0x0F20},
+  {0x0C68, 0x0D00, 0x0D78, 0x0DC8},
+  {0x0F40, 0x0F70, 0x0618, 0x0640},  // Pod / eastern entrance
+  {0x0E28, 0x0E78, 0x0298, 0x02E8},
+  {0x0F10, 0x0F80, 0x01F8, 0x0238},
+  {0x0AA8, 0x0B90, 0x02C8, 0x0320},
+  {0x0D18, 0x0D80, 0x0040, 0x0070},
+  {0x0EF0, 0x0F30, 0x0120, 0x0160},
+  {0x0AD0, 0x0B00, 0x0B50, 0x0B70},  // Bridge Left
+  {0x0B30, 0x0B60, 0x0B50, 0x0B70},  // Bridge Right
+  {0x0678, 0x06F0, 0x0010, 0x0040},  // Ether Island
+  {0x02A8, 0x02E8, 0x0C90, 0x0CC0},  // Desert Checkerboard Cave 3
+};
+
+static bool InvertedMirrorBonk_InRect(void) {
+  // Mirror inverted.asm: only force a bonk when Link is in the DARK world
+  // (OverworldIndex & 0x40 set); in the Light world we never force one.
+  if (!(overworld_screen_index & 0x40))
+    return false;
+  uint16 x = link_x_coord, y = link_y_coord;
+  for (size_t i = 0; i < sizeof(kInvertedMirrorBonkRects) / sizeof(kInvertedMirrorBonkRects[0]); i++) {
+    const uint16 *r = kInvertedMirrorBonkRects[i];
+    // Match inverted.asm MirrorBonk: its unsigned BGE/BLT compares make a point
+    // inside when X1 < x <= X2 && Y1 < y <= Y2 (exclusive low, inclusive high) —
+    // not the inclusive-low/exclusive-high we'd write by habit. The wrong
+    // convention mis-fires the forced cross by a pixel at rect edges (worst
+    // where rects abut, e.g. the adjacent Bridge L/R rects).
+    if (x > r[0] && x <= r[1] && y > r[2] && y <= r[3])
+      return true;
+  }
+  return false;
+}
+
 void LinkState_CrossingWorlds() {  // 87a9b1
   uint8 t;
 
   Link_ResetProperties_B();
   TileCheckForMirrorBonk();
 
+  // #82 Inverted: MirrorBonk. In Inverted, certain overworld regions must
+  // force-accept a mirror cross even when the tile under Link would not allow
+  // it (z3randomizer inverted.asm MirrorBonk forces BRANCH_GAMMA == the
+  // do_mirror cross). Gated on the active Inverted rando world-state; vanilla /
+  // Open / Standard / Retro use only the original tile-detect test below.
+  if ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+      Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */ &&
+      (overworld_screen_index & 0x40) != last_light_vs_dark_world &&
+      InvertedMirrorBonk_InRect())
+    goto do_mirror;
+
   if ((overworld_screen_index & 0x40) != last_light_vs_dark_world && ((t = R12 | R14) & 0xc) != 0 && BitSum4(t) >= 2)
     goto do_mirror;
 
   if (BitSum4(tiledetect_deepwater) >= 2) {
+    // Byte-identical JP<->US: walk-into-deep-water requires flippers in BOTH
+    // versions. NOT gated for Fake Flippers (see JpGlitchEnabled).
     if (link_item_flippers) {
       link_is_in_deep_water = 1;
       link_some_direction_bits = link_direction_last;
@@ -3005,7 +3415,16 @@ do_mirror:
   if ((overworld_screen_index & 0x40) != last_light_vs_dark_world)
     num_memorized_tiles = 0;
 
-  link_player_handler_state = (link_item_moon_pearl || !(overworld_screen_index & 0x40)) ? kPlayerState_Ground : kPlayerState_PermaBunny;
+  // #82 Inverted: DecideIfBunnyByScreenIndex (z3randomizer bugfixes.asm).
+  // Vanilla becomes a bunny in the DARK world (overworld_screen_index & 0x40
+  // set) without the Moon Pearl; Inverted flips the home world, so the bunny
+  // state happens in the LIGHT world instead. Non-rando paths are byte-identical.
+  bool ow_away_world =
+      ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+       Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */)
+        ? !(overworld_screen_index & 0x40)
+        :  (overworld_screen_index & 0x40);
+  link_player_handler_state = (link_item_moon_pearl || !ow_away_world) ? kPlayerState_Ground : kPlayerState_PermaBunny;
 }
 
 void Link_PerformDesertPrayer() {  // 87aa6c
@@ -3235,7 +3654,7 @@ void LinkItem_Cape() {  // 87adc1
     }
     player_handler_timer = 0;
     link_cape_mode = 1;
-    cape_decrement_counter = kCapeDepletionTimers[link_magic_consumption];
+    cape_decrement_counter = MODS_U8(kCapeDepletionTimers, 0x87adbe)[link_magic_consumption];
     link_bunny_transform_timer = 20;
     AncillaAdd_CapePoof(35, 4);
     Ancilla_Sfx2_Near(20);
@@ -3244,7 +3663,7 @@ void LinkItem_Cape() {  // 87adc1
     HaltLinkWhenUsingItems();
     link_direction &= ~0xf;
     if (!--cape_decrement_counter) {
-      cape_decrement_counter = kCapeDepletionTimers[link_magic_consumption];
+      cape_decrement_counter = MODS_U8(kCapeDepletionTimers, 0x87adbe)[link_magic_consumption];
       // Avoid magic underflow if an anti-fairy consumes magic.
       if (link_magic_power == 0 && (enhanced_features0 & kFeatures0_MiscBugFixes) ||
           !--link_magic_power) {
@@ -3297,7 +3716,7 @@ void Player_CheckHandleCapeStuff() {  // 87ae8f
     if (current_item_active == current_item_y) {
       if (--cape_decrement_counter)
         return;
-      cape_decrement_counter = kCapeDepletionTimers[link_magic_consumption];
+      cape_decrement_counter = MODS_U8(kCapeDepletionTimers, 0x87adbe)[link_magic_consumption];
       if (!link_magic_power || --link_magic_power)
         return;
     }
@@ -3306,7 +3725,10 @@ void Player_CheckHandleCapeStuff() {  // 87ae8f
 }
 
 void LinkItem_CaneOfSomaria() {  // 87aec0
-  static const uint8 kRodAnimDelays[] = { 3, 3, 5 };
+  // The last step reads one entry past the ROM table ($07:9EEC, shared by
+  // the rods and the cane of Somaria): the first byte of the rod routine
+  // (BIT, 0x24). The delay is cleared right after.
+  static const uint8 kRodAnimDelays[] = { 3, 3, 5, 0x24 };
   if (!(button_mask_b_y & 0x40)) {
     if (player_on_somaria_platform || is_standing_in_doorway || !CheckYButtonPress())
       return;
@@ -3408,7 +3830,9 @@ bool SearchForByrnaSpark() {  // 87afb5
 }
 
 void LinkItem_Net() {  // 87aff8
-  static const uint8 kBugNetTimers[] = { 11, 6, 7, 8, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 9, 4, 5, 6, 7, 8, 1, 2, 3, 4, 10, 8, 1, 2, 3, 4, 5, 6, 7, 8 };
+  // The last step facing right reads one entry past the ROM table (0, at
+  // $07:AFF4) and clears the timer right after.
+  static const uint8 kBugNetTimers[] = { 11, 6, 7, 8, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 9, 4, 5, 6, 7, 8, 1, 2, 3, 4, 10, 8, 1, 2, 3, 4, 5, 6, 7, 8, 0 };
   if (!(button_mask_b_y & 0x40)) {
     if (is_standing_in_doorway || !CheckYButtonPress())
       return;
@@ -3566,11 +3990,38 @@ void Link_APress_LiftCarryThrow() {  // 87b1ca
         some_animation_timer_steps = kLiftTab1[player_handler_timer];
         if (player_handler_timer == 6) {
           BYTE(dung_secrets_unk1) = 0;
-          Point16U pt;
+          // Defense in depth: both handlers now write *pt on every path, but
+          // this is read unconditionally, so a future early return must not be
+          // able to reintroduce a spawn at uninitialized coordinates.
+          Point16U pt = { link_x_coord, link_y_coord };
           uint8 what = (player_is_indoors) ? Dungeon_LiftAndReplaceLiftable(&pt) : Overworld_HandleLiftableTiles(&pt);
-          link_player_handler_state = 24;
-          flag_is_sprite_to_pick_up = 1;
-          Sprite_SpawnThrowableTerrain((what & 0xf) + 1, pt.x, pt.y);
+          // 0 means the handler lifted nothing -- under rando that is a refused
+          // grant, and carrying a phantom object while the tile stays on screen
+          // duplicates it. Rando-gated so the vanilla path stays bit-identical
+          // (vanilla spawns unconditionally and the RAM compare depends on it).
+          if (what != 0 || !(enhanced_features1 & kFeatures1_RandomizerActive)) {
+            link_player_handler_state = 24;
+            flag_is_sprite_to_pick_up = 1;
+            Sprite_SpawnThrowableTerrain((what & 0xf) + 1, pt.x, pt.y);
+          } else {
+            // Refused: no throwable spawns, so nothing will ever reach the
+            // carry/throw teardown above that clears what Link_PerformThrow set
+            // up front for this animation -- link_state_bits 0x80 and the slow
+            // carry speed_setting 12. Left alone the player walks out of the
+            // lift empty-handed but still flagged as carrying and still moving
+            // at carry speed until some other handler happens to reset it.
+            //
+            // Abort the whole lift rather than just clearing the bits: this
+            // function early-returns on `!link_state_bits`, so zeroing that
+            // alone would strand link_picking_throw_state set forever and
+            // freeze Link in the pick-up pose -- a worse bug than the one being
+            // fixed. Still rando-gated; the vanilla path never lifts nothing.
+            link_picking_throw_state = 0;
+            link_cant_change_direction &= ~1;
+            link_state_bits = 0;
+            bitmask_of_dragstate = 0;
+            link_speed_setting = 0;
+          }
           filtered_joypad_L &= ~kJoypadL_A;
         }
         return;
@@ -3599,7 +4050,8 @@ void Link_PerformDash() {  // 87b281
   if (link_state_bits & 0x80)
     return;
   bitfield_for_a_button = 0;
-  link_countdown_for_dash = 29;
+  link_countdown_for_dash =
+      (enhanced_features0 & kFeatures0_AutoDash) && !ZeldaIsEmulatorAttached() ? 0 : 29;
   link_dash_ctr = 64;
   link_player_handler_state = kPlayerState_StartDash;
   link_is_running = 1;
@@ -3798,12 +4250,17 @@ void Link_PerformOpenChest() {  // 87b574
     return;
   bitfield_for_a_button = 0;
   int chest_position = -1;
-  uint8 item = OpenChestForItem(index_of_interacting_tile, &chest_position);
+  RandoGrantResult grant_result = kRandoGrantResult_NotActive;
+  uint8 item = OpenChestForItem(index_of_interacting_tile, &chest_position,
+                                &grant_result);
   if (sign8(item)) {
     item_receipt_method = 0;
     return;
   }
   assert(chest_position != -1);
+  if (grant_result == kRandoGrantResult_Accepted ||
+      grant_result == kRandoGrantResult_AlreadyChecked)
+    return;
   item_receipt_method = 1;
   uint8 alt = kReceiveItemAlternates[item];
   if (alt != 0xff) {
@@ -4143,7 +4600,7 @@ label_3:
   if (tiledetect_key_lock_gravestones & 0x20) {
     uint16 bak = R14;
     int dummy;
-    OpenChestForItem(tiledetect_tile_type, &dummy);
+    OpenChestForItem(tiledetect_tile_type, &dummy, NULL);
     tiledetect_tile_type = 0;
     R14 = bak;
   }
@@ -6200,7 +6657,9 @@ bool InitializePushBlock(uint8 r14, uint8 idx) {  // 87ed3f
   pushedblocks_target[r14] = 0;
   pushedblocks_subpixel[r14] = 0;
 
-  if (dung_hdr_tag[0] != 38 && dung_replacement_tile_state[idx >> 1] == 0) {
+  if (dung_hdr_tag[0] != 38 && (dung_replacement_tile_state[idx >> 1] == 0 ||
+      ((enhanced_features1 & kFeatures1_QolRepeatBlocks) &&
+       dung_replacement_tile_state[idx >> 1] == 0xfffe))) {
     if (!PushBlock_AttemptToPushTheBlock(0, x, y)) {
       Ancilla_Sfx2_Near(0x22);
       dung_replacement_tile_state[idx >> 1] = 1;
@@ -6276,7 +6735,15 @@ void Link_Initialize() {  // 87f13c
     // If you quit in the middle of red armos knight stomp the lumberjack tree will fall on its own
     bg1_y_offset = bg1_x_offset = 0;
       //bugfix: if you die in a dungeon as a permabunny and continue, you revert back to link
-      if (!link_item_moon_pearl && savegame_is_darkworld) {
+      // #82 Inverted: DecideIfBunny (z3randomizer bugfixes.asm). Bunny when in
+      // the away-world without the Moon Pearl; vanilla away-world = DW
+      // (savegame_is_darkworld set), Inverted away-world = LW (clear).
+      bool init_away_world =
+          ((enhanced_features1 & kFeatures1_RandomizerActive) &&
+           Rando_GetActiveWorldState() == 2 /* kWorldState_Inverted */)
+            ? !savegame_is_darkworld
+            :  (savegame_is_darkworld != 0);
+      if (!link_item_moon_pearl && init_away_world) {
         link_player_handler_state = kPlayerState_PermaBunny;
         link_is_bunny = 1;
         link_is_bunny_mirror = 1;
@@ -6520,7 +6987,19 @@ void AncillaAdd_DugUpFlute(uint8 a, uint8 y) {  // 898c73
   ancilla_z[k] = 0;
   ancilla_z_vel[k] = 24;
   ancilla_x_vel[k] = link_direction_facing == 4 ? -8 : 8;
-  DecodeAnimatedSpriteTile_variable(12);
+  // Field item sprites: when a non-flute item is placed at the Flute Spot, the
+  // draw (Ancilla36_Flute) shows that item, loading its gfx on demand. The
+  // type's default OAM reservation (kAncilla_Pflags[0x36] = 4 bytes) is one
+  // entry — enough for the vanilla 16x16 flute, not for an 8x16 item's two
+  // tiles (the OAM budget is in BYTES; an unreserved second tile gets
+  // scene-dependently clobbered, see Rando_TryDrawFieldItemSprite).
+  uint8 gfx, big, oam_flags;
+  if (Rando_GetFieldItemIcon(LOC_Flute_Spot, ITEM_OcarinaInactive, &gfx, &big, &oam_flags)) {
+    if (big == 0)
+      ancilla_numspr[k] = 8;
+  } else {
+    DecodeAnimatedSpriteTile_variable(12);
+  }
   Ancilla_SetXY(k, 0x490, 0xa8a);
 }
 
@@ -6633,14 +7112,44 @@ void DiggingGameGuy_AttemptPrizeSpawn() {  // 9dfd5c
   if (link_y_coord >= 0xb18)
     return;
   int j = GetRandomNumber() & 7;
+  // Easy minigames (kFeatures0_EasyMinigames; rando-on, vanilla opt-in): the
+  // case 4 (1/8) AND >=25 digs AND a 1/4 roll (~1 in 130 digs past 25) -
+  // agonizing. Force the win once a half-competent number of digs is in, and
+  // (in case 4) drop the >=25-digs / 1-in-4 gates. The once-per-paid-session
+  // guard (beamos_x_hi[0]) still applies. Mirrors ALTTPR RigDigRNG.
+  // Easy Minigames: ON automatically under the randomizer; in vanilla it's an
+  // opt-in flag that defaults OFF (so the original-ROM side-by-side RAM compare
+  // is unaffected). The vanilla path never reads rando state.
+  bool rando = (enhanced_features1 & kFeatures1_RandomizerActive) != 0;
+  bool easy_minigames = rando || (enhanced_features0 & kFeatures0_EasyMinigames);
+  // Don't force the win on a post-win rando replay: case 4 suppresses the
+  // re-grant once LOC_Digging_Game is checked, which would rob the player of
+  // the vanilla cases 0-3 consolation prizes they'd still roll without easy
+  // mode. Let the RNG run naturally on replay instead.
+  bool rando_already_won = rando && Rando_IsLocationChecked(LOC_Digging_Game);
+  if (easy_minigames && !beamos_x_hi[0] && beamos_x_hi[1] >= 8 && !rando_already_won)
+    j = 4;
   uint8 item_to_spawn;
   switch (j) {
   case 0: case 1: case 2: case 3:
     item_to_spawn = kDiggingGameGuy_Items[j];
     break;
   case 4:
-    if (beamos_x_hi[1] < 25 || beamos_x_hi[0] || GetRandomNumber() & 3)
+    if (beamos_x_hi[0] ||
+        (!easy_minigames && (beamos_x_hi[1] < 25 || (GetRandomNumber() & 3))))
       return;
+    if (enhanced_features1 & kFeatures1_RandomizerActive) {
+      RandoGrantResult grant = Rando_GrantLocation(
+          LOC_Digging_Game, ITEM_PieceOfHeart, 0x17,
+          kRandoGrantPresentation_Animated, 0, 0);
+      if (grant == kRandoGrantResult_Accepted ||
+          grant == kRandoGrantResult_AlreadyChecked) {
+        beamos_x_hi[0] = 0xeb;
+        return;
+      }
+      if (grant != kRandoGrantResult_NotActive)
+        return;  // preserve the session's win opportunity for a later retry
+    }
     item_to_spawn = beamos_x_hi[0] = 0xeb;
     break;
   default:
@@ -6661,4 +7170,3 @@ void DiggingGameGuy_AttemptPrizeSpawn() {  // 9dfd5c
     SpriteSfx_QueueSfx3WithPan(j, 0x30);
   }
 }
-

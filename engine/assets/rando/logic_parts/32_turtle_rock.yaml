@@ -1,0 +1,227 @@
+# 32_turtle_rock.yaml — Turtle Rock logic graph.
+#
+# Mechanically translated from `app/Region/Standard/TurtleRock.php` (MIT,
+# verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# Translation discipline (audit.md §0.10.2):
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP defines three approach closures `$upper`, `$middle`, `$lower`
+#     (php:87-125). In Phase A:
+#       * `$lower` requires `canMirrorWrap` (Phase B trick) → FALSE.
+#       * `$middle` requires one of canMirrorClip/canBootsClip/canSuperSpeed/
+#         canOneFrameClipOW (all Phase B tricks) → FALSE.
+#       * `$upper` collapses to the canonical non-glitch front-door route:
+#           medallion-tablet match + sword + MoonPearl + Somaria + Hammer
+#           + canLiftDarkRocks + East Death Mountain reachable.
+#     So `(upper OR middle OR lower)` reduces to just `upper`.
+#   - Phase B settings dropped (defaults):
+#       * region.cantTakeDamage / wildCompasses / wildMaps / wildKeys /
+#         bossNormalLocation — all collapse out via default values.
+#       * itemPlacement !== 'basic' branch dropped; keep only the basic-mode
+#         strict requirement (matches the EP Big Key Chest precedent).
+#       * item.overflow.count.Shield — pool setting; dropped (Phase B).
+#       * canBunnyRevive / canOWYBA / mode.weapons === 'swordless' etc. pinned.
+#       * accessibility !== 'locations' — accessibility=items is the default
+#         Phase A target; the `accessibility=locations` branch is dropped.
+#   - PHP item-name remappings:
+#       * KeyD7 → SmallKey_TurtleRock
+#       * BigKeyD7 → BigKey_TurtleRock
+#       * CompassD7 → Compass_TurtleRock
+#       * MapD7 → Map_TurtleRock
+#       * PegasusBoots → Boots
+#       * RescueZelda → RescuedZelda
+
+format_version: 1
+
+regions:
+  # External parent stub — Death Mountain east side (light-world EDM where
+  # the mirror warp to TR front door tile sits). Stubbed for cross-file
+  # region reference; codegen merges with the LightWorld_DeathMountain_East
+  # definition that lives in the overworld region file.
+  - id: LightWorld_DeathMountain_East
+    name: "Light World - Death Mountain East (stub)"
+    source: "stub for cross-file region reference"
+
+  - id: TurtleRock_Entrance
+    name: "Turtle Rock Entrance"
+    source: "app/Region/Standard/TurtleRock.php:257-264 (can_enter approach tile)"
+
+  - id: TurtleRock_Lobby
+    name: "Turtle Rock - Lobby"
+    dungeon: TurtleRock
+    parent: TurtleRock_Entrance
+    source: "app/Region/Standard/TurtleRock.php:15-77"
+
+edges:
+  # First leg — reach the TR front-door tile via the `$upper` route.
+  # `$upper` (php:87-101) external prereqs (pearl-factor AND route-factor;
+  # medallion/sword/somaria are internal-to-$upper and live on the lobby edge):
+  #   pearl-factor = MoonPearl OR (canOWYBA+bottle AND (canBootsClip+Boots OR canOneFrameClipOW))
+  #   route-factor = (Hammer AND canLiftDarkRocks) OR canBootsClip+Boots OR canOneFrameClipOW
+  # Phase B Slice 4 §7 surfaces the canBootsClip and canOneFrameClipOW
+  # bypasses; under defaults (tricks=0, logic=no_glitches) both new
+  # disjuncts evaluate FALSE and the predicate collapses to the Phase A
+  # `MoonPearl AND Hammer AND CanLiftDarkRocks AND MagicMirror` form.
+  # canMirrorClip / canSuperSpeed have no macro (Phase B reservation).
+  - from: LightWorld_DeathMountain_East
+    to: TurtleRock_Entrance
+    predicate: "(HAS_ITEM(MoonPearl) AND HAS_ITEM(Hammer) AND CanLiftDarkRocks() AND HAS_ITEM(MagicMirror)) OR (CanBootsClip() AND (HAS_ITEM(MoonPearl) OR CanPearlBypass())) OR (CanOneFrameClipOW() AND (HAS_ITEM(MoonPearl) OR CanPearlBypass()))"
+    source: "app/Region/Standard/TurtleRock.php:87-101 (upper approach)"
+
+  # `$middle` route (php:103-115) — dark-world DM-East approach via
+  # boots-clip or canOneFrameClipOW (canMirrorClip / canSuperSpeed /
+  # canDungeonRevive are Phase B reservations with no macros and are
+  # dropped). Second factor `Boots OR Somaria OR Hookshot OR
+  # !cantTakeDamage OR Cape OR Byrna` collapses to TRUE under defaults
+  # (`region.cantTakeDamage=false` → `!false=TRUE`). Third factor
+  # `East-Dark-DM canEnter` is implicit via `from:` here. Under defaults
+  # both disjuncts evaluate FALSE → edge contributes no new reachability;
+  # Phase A had no edge here.
+  - from: DarkWorld_DeathMountain_East
+    to: TurtleRock_Entrance
+    predicate: "(CanBootsClip() AND (HAS_ITEM(MoonPearl) OR CanPearlBypass())) OR (CanOneFrameClipOW() AND (HAS_ITEM(MoonPearl) OR CanPearlBypass()))"
+    source: "app/Region/Standard/TurtleRock.php:103-115 (middle approach)"
+
+  # Second leg — read the TR medallion tablet to open the dungeon door.
+  # From `$upper` (php:87-91) AND can_enter (php:257-264):
+  #   medallion match (Bombos/Ether/Quake assigned + held)
+  #   AND (swordless OR hasSword)         [swordless pinned false → hasSword(1)]
+  #   AND CaneOfSomaria                   [needed inside immediately]
+  # Plus the can_enter outer wrapper: RescuedZelda.
+  # Phase B Slice 4 §7: `$middle` / `$lower` approaches bypass the medallion
+  # tablet entirely (they don't enter via the front door). When a trick
+  # path enabled the outer-entrance edge, this lobby edge must admit the
+  # player WITHOUT medallion/sword/somaria. The trick-bit disjuncts below
+  # mark "a $middle-style bypass was taken"; under defaults (tricks=0,
+  # logic=no_glitches) they evaluate FALSE and the predicate collapses
+  # to the Phase A medallion+sword+somaria form.
+  - from: TurtleRock_Entrance
+    to: TurtleRock_Lobby
+    # §4 swordless: the Quake cast that opens TR needs a sword in vanilla
+    # (TurtleRock.php:91 `swordless || hasSword()`). Inert under randomized.
+    predicate: "HAS_ITEM(RescuedZelda) AND ((OP_MEDALLION_OPENS(TurtleRock_Entrance) AND (OP_MODEWEAPONS_EQ(swordless) OR HasSword(1)) AND HAS_ITEM(CaneOfSomaria)) OR CanBootsClip() OR CanOneFrameClipOW())"
+    source: "app/Region/Standard/TurtleRock.php:87-101, 257-264 (entrance)"
+
+locations:
+  # All TR location closures use `(upper || middle || lower)`. In Phase A
+  # middle/lower are FALSE, so we evaluate against `upper` only. The
+  # `upper` predicate is itself satisfied by reaching TurtleRock_Lobby —
+  # i.e., it is implicit in the location being in TurtleRock_Lobby.
+  # We therefore translate each closure with `upper=TRUE` substituted.
+
+  # TR - Chain Chomps (php:127-131):
+  #   (upper AND KeyD7) || middle || (lower AND Lamp AND Somaria)
+  # Phase A: → KeyD7.
+  - id: "Turtle Rock - Chain Chomps"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_ITEM(SmallKey_TurtleRock)"
+    source: "app/Region/Standard/TurtleRock.php:127-131"
+
+  # TR - Compass Chest (php:155-164):
+  #   Somaria AND (upper || (middle AND (BigKeyD7 in {RollerL,RollerR} && KeyD7>=2 || KeyD7>=4)) || (lower AND Lamp AND KeyD7>=4))
+  # Phase A: upper → TRUE; → Somaria.
+  - id: "Turtle Rock - Compass Chest"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_ITEM(CaneOfSomaria)"
+    source: "app/Region/Standard/TurtleRock.php:155-164"
+
+  # TR - Roller Room - Left (php:133-142):
+  #   FireRod AND Somaria AND (upper || middle_branch || lower_branch)
+  # Phase A: upper → TRUE; → FireRod AND Somaria.
+  - id: "Turtle Rock - Roller Room - Left"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria)"
+    source: "app/Region/Standard/TurtleRock.php:133-142"
+
+  # TR - Roller Room - Right (php:144-153): symmetric to Left.
+  - id: "Turtle Rock - Roller Room - Right"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria)"
+    source: "app/Region/Standard/TurtleRock.php:144-153"
+
+  # TR - Big Chest (php:166-173):
+  #   BigKeyD7 AND ((upper AND KeyD7>=2) || (middle AND ...) || (lower AND Lamp AND Somaria))
+  # Phase A: upper → TRUE; → BigKeyD7 AND KeyD7>=2.
+  - id: "Turtle Rock - Big Chest"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_ITEM(BigKey_TurtleRock) AND HAS_AMOUNT(SmallKey_TurtleRock, 2)"
+    source: "app/Region/Standard/TurtleRock.php:166-173"
+
+  # TR - Big Key Chest (php:175-184). Has a wildKeys (false default)
+  # outer guard; in the wildKeys=false branch the requirement is simply
+  # has(KeyD7, 2). The setAlwaysAllow/setFillRules accessibility branches
+  # are Phase B (accessibility=items is the Phase A default).
+  - id: "Turtle Rock - Big Key Chest"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_AMOUNT(SmallKey_TurtleRock, 2)"
+    source: "app/Region/Standard/TurtleRock.php:175-184"
+
+  # TR - Crystaroller Room (php:186-190):
+  #   (BigKeyD7 AND ((upper AND KeyD7>=2) || middle)) || (lower AND Lamp AND Somaria)
+  # Phase A: upper → TRUE → BigKeyD7 AND KeyD7>=2.
+  - id: "Turtle Rock - Crystaroller Room"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_ITEM(BigKey_TurtleRock) AND HAS_AMOUNT(SmallKey_TurtleRock, 2)"
+    source: "app/Region/Standard/TurtleRock.php:186-190"
+
+  # TR - Eye Bridge - Bottom Left (php:192-198):
+  #   (lower || ((upper || middle) AND Lamp AND Somaria AND BigKeyD7 AND KeyD7>=3))
+  #   AND (itemPlacement !== 'basic' || Cape || CaneOfByrna
+  #        || (item.overflow.count.Shield >= 3 AND canBlockLasers))
+  # Phase A: lower → FALSE, upper → TRUE; first half →
+  #     Lamp AND Somaria AND BigKeyD7 AND KeyD7>=3.
+  # Second half: drop !== 'basic' advanced branch (FALSE), drop
+  # item.overflow.count.Shield (Phase B); keep `Cape OR CaneOfByrna OR canBlockLasers`.
+  - id: "Turtle Rock - Eye Bridge - Bottom Left"
+    region: TurtleRock_Lobby
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(CaneOfSomaria) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_AMOUNT(SmallKey_TurtleRock, 3) AND (HAS_ITEM(Cape) OR HAS_ITEM(CaneOfByrna) OR CanBlockLasers())"
+    source: "app/Region/Standard/TurtleRock.php:192-198"
+
+  - id: "Turtle Rock - Eye Bridge - Bottom Right"
+    region: TurtleRock_Lobby
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(CaneOfSomaria) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_AMOUNT(SmallKey_TurtleRock, 3) AND (HAS_ITEM(Cape) OR HAS_ITEM(CaneOfByrna) OR CanBlockLasers())"
+    source: "app/Region/Standard/TurtleRock.php:200-206"
+
+  - id: "Turtle Rock - Eye Bridge - Top Left"
+    region: TurtleRock_Lobby
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(CaneOfSomaria) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_AMOUNT(SmallKey_TurtleRock, 3) AND (HAS_ITEM(Cape) OR HAS_ITEM(CaneOfByrna) OR CanBlockLasers())"
+    source: "app/Region/Standard/TurtleRock.php:208-214"
+
+  - id: "Turtle Rock - Eye Bridge - Top Right"
+    region: TurtleRock_Lobby
+    can_reach: "(HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(CaneOfSomaria) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_AMOUNT(SmallKey_TurtleRock, 3) AND (HAS_ITEM(Cape) OR HAS_ITEM(CaneOfByrna) OR CanBlockLasers())"
+    source: "app/Region/Standard/TurtleRock.php:216-222"
+
+  # TR - Boss (php:228-242):
+  #   canEnter AND KeyD7>=4
+  #   AND ((canMirrorWrap branches) OR Lamp)            [glitch branches FALSE → Lamp]
+  #   AND BigKeyD7 AND CaneOfSomaria
+  #   AND boss->canBeat(Trinexx)
+  #   AND wildCompasses/wildMaps disjuncts (collapse TRUE).
+  - id: "Turtle Rock - Boss"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_AMOUNT(SmallKey_TurtleRock, 4) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_ITEM(CaneOfSomaria) AND CanKillBoss(TurtleRock)"
+    source: "app/Region/Standard/TurtleRock.php:228-242"
+
+  # TR - Prize (php:266 → can_complete = Boss canAccess).
+  - id: "Turtle Rock - Prize"
+    region: TurtleRock_Lobby
+    can_reach: "HAS_AMOUNT(SmallKey_TurtleRock, 4) AND (HAS_ITEM(Lamp) OR CanDarkRoomNav()) AND HAS_ITEM(BigKey_TurtleRock) AND HAS_ITEM(CaneOfSomaria) AND CanKillBoss(TurtleRock)"
+    source: "app/Region/Standard/TurtleRock.php:224-226, 266 (can_complete = Boss access)"
+
+macros:
+  # CanKillTrinexx — TR boss (Boss.php:119-125).
+  # PHP body:
+  #   FireRod AND IceRod
+  #   AND (itemPlacement !== 'basic' || swordless || hasSword(3) || (canExtendMagic(2) AND hasSword(2)))
+  #   AND (hasSword(3) || Hammer || (canExtendMagic(2) AND hasSword(2)) || (canExtendMagic(4) AND hasSword))
+  # §4 swordless: the first conjunct rendered ALTTPR's
+  # `(itemPlacement!='basic' || swordless || hasSword(3) || ...)`. With the fork's
+  # non-basic placement that whole clause is TRUE in ALTTPR; the fork kept it as a
+  # sword gate, which strands Trinexx swordless. Add the swordless disjunct — the
+  # second conjunct already accepts Hammer, so swordless = FireRod+IceRod+Hammer
+  # (Boss.php:121-122). Inert under randomized.
+  - name: CanKillTrinexx
+    parameters: [world]
+    body: "(HAS_ITEM(FireRod) AND HAS_ITEM(IceRod) AND (OP_MODEWEAPONS_EQ(swordless) OR HasSword3() OR (CanExtendMagic(world, 2) AND HasSword2())) AND (HasSword3() OR HAS_ITEM(Hammer) OR (CanExtendMagic(world, 2) AND HasSword2()) OR (CanExtendMagic(world, 4) AND HasSword(1)))) AND NeedsBossSoul(Soul_Trinexx)"
+    source: "app/Boss.php:119-125 (Trinexx can_beat)"

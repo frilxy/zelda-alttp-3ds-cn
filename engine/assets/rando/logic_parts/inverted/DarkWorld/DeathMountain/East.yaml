@@ -1,0 +1,98 @@
+# DarkWorld/DeathMountain/East.yaml — Inverted DarkWorld Death Mountain East (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/DarkWorld/DeathMountain/East.php`
+# (MIT, verified per CLAUDE.md claim-grounding discipline).
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP `PegasusBoots` → registry-canonical `Boots`.
+#   - PHP `Bottle` → `HasABottle()` via macro.
+#   - Inverted/DeathMountain/East.php extends Standard/.../East.php. The
+#     Inverted `initialize()` overrides the four Hookshot Cave predicates +
+#     `can_enter`; it does NOT call parent::initialize() so Superbunny
+#     Cave - Top/Bottom (set by Standard) default to TRUE() in Inverted.
+#   - Dropped branches: canBootsClip, canOneFrameClipOW, region.cantTakeDamage
+#     — Phase B logic axes.
+#
+# Status: translated 2026-05-27. Awaiting review.
+
+format_version: 1
+
+regions:
+  - id: DarkWorld_DeathMountain_East
+    name: "Dark World - Death Mountain East (Inverted)"
+    source: "app/Region/Inverted/DarkWorld/DeathMountain/East.php:10-75 (extends Standard/DarkWorld/DeathMountain/East.php:14-115)"
+
+edges:
+  # Inverted `can_enter` (East.php:60-71):
+  #   (West_Dark_World_Death_Mountain reachable AND
+  #     (!region.cantTakeDamage OR CaneOfByrna OR Cape OR <glitch branches drop>))
+  #   OR
+  #   (MagicMirror AND MoonPearl AND Hookshot AND West_Death_Mountain reachable)
+  # Phase A pins region.cantTakeDamage=false → !cantTakeDamage = TRUE() →
+  # the inner damage-gate collapses to TRUE; first disjunct reduces to
+  # West_Dark_DM reachable. Surviving Phase A:
+  #   OP_REGION_REACHABLE(DarkWorld_DeathMountain_West)
+  #   OR
+  #   (HAS_ITEM(MagicMirror) AND HAS_ITEM(MoonPearl) AND HAS_ITEM(Hookshot)
+  #    AND OP_REGION_REACHABLE(LightWorld_DeathMountain_West))
+  - from: DarkWorld_DeathMountain_West
+    to: DarkWorld_DeathMountain_East
+    predicate: "OP_REGION_REACHABLE(DarkWorld_DeathMountain_West) OR (HAS_ITEM(MagicMirror) AND HAS_ITEM(MoonPearl) AND HAS_ITEM(Hookshot) AND OP_REGION_REACHABLE(LightWorld_DeathMountain_West))"
+    source: "app/Region/Inverted/DarkWorld/DeathMountain/East.php:60-71 (can_enter)"
+
+locations:
+  # `Hookshot Cave - Top Right` (Inverted/East.php:20-28):
+  #   Hookshot AND (
+  #     canLiftRocks OR
+  #     (MagicMirror AND canBombThings AND East_Death_Mountain reachable) OR
+  #     <glitch branches drop>
+  #   )
+  # Surviving Phase A:
+  #   HAS_ITEM(Hookshot) AND (CanLiftRocks() OR
+  #     (HAS_ITEM(MagicMirror) AND CanBombThings() AND
+  #      OP_REGION_REACHABLE(LightWorld_DeathMountain_East)))
+  - id: "Hookshot Cave - Top Right"
+    region: DarkWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(Hookshot) AND (CanLiftRocks() OR (HAS_ITEM(MagicMirror) AND CanBombThings() AND OP_REGION_REACHABLE(LightWorld_DeathMountain_East)) OR CanBootsClip() OR CanOneFrameClipOW())"
+    source: "app/Region/Inverted/DarkWorld/DeathMountain/East.php:20-28"
+
+  # `Hookshot Cave - Top Left` (Inverted/East.php:30-38): same predicate
+  # as Top Right.
+  - id: "Hookshot Cave - Top Left"
+    region: DarkWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(Hookshot) AND (CanLiftRocks() OR (HAS_ITEM(MagicMirror) AND CanBombThings() AND OP_REGION_REACHABLE(LightWorld_DeathMountain_East)) OR CanBootsClip() OR CanOneFrameClipOW())"
+    source: "app/Region/Inverted/DarkWorld/DeathMountain/East.php:30-38"
+
+  # `Hookshot Cave - Bottom Left` (Inverted/East.php:40-48): same predicate.
+  - id: "Hookshot Cave - Bottom Left"
+    region: DarkWorld_DeathMountain_East
+    can_reach: "HAS_ITEM(Hookshot) AND (CanLiftRocks() OR (HAS_ITEM(MagicMirror) AND CanBombThings() AND OP_REGION_REACHABLE(LightWorld_DeathMountain_East)) OR CanBootsClip() OR CanOneFrameClipOW())"
+    source: "app/Region/Inverted/DarkWorld/DeathMountain/East.php:40-48"
+
+  # `Hookshot Cave - Bottom Right` (Inverted/East.php:50-58):
+  #   (Hookshot OR Boots) AND
+  #   (canLiftRocks OR
+  #    (MagicMirror AND canBombThings AND East_Death_Mountain reachable) OR
+  #    <glitch branches drop>)
+  # Surviving Phase A:
+  #   (HAS_ITEM(Hookshot) OR HAS_ITEM(Boots)) AND
+  #   (CanLiftRocks() OR
+  #    (HAS_ITEM(MagicMirror) AND CanBombThings() AND
+  #     OP_REGION_REACHABLE(LightWorld_DeathMountain_East)))
+  - id: "Hookshot Cave - Bottom Right"
+    region: DarkWorld_DeathMountain_East
+    can_reach: "(HAS_ITEM(Hookshot) OR HAS_ITEM(Boots)) AND (CanLiftRocks() OR (HAS_ITEM(MagicMirror) AND CanBombThings() AND OP_REGION_REACHABLE(LightWorld_DeathMountain_East)) OR CanBootsClip() OR CanOneFrameClipOW())"
+    source: "app/Region/Inverted/DarkWorld/DeathMountain/East.php:50-58"
+
+  # `Superbunny Cave - Top` — not overridden in Inverted; default TRUE.
+  - id: "Superbunny Cave - Top"
+    region: DarkWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Inverted/DarkWorld/DeathMountain/East.php (not overridden, default TRUE)"
+
+  # `Superbunny Cave - Bottom` — not overridden in Inverted; default TRUE.
+  - id: "Superbunny Cave - Bottom"
+    region: DarkWorld_DeathMountain_East
+    can_reach: "TRUE()"
+    source: "app/Region/Inverted/DarkWorld/DeathMountain/East.php (not overridden, default TRUE)"

@@ -1,0 +1,85 @@
+# 05_hearts_and_swordless.yaml — heart-count predicates + swordless can_place
+#
+# Exercises: HAS_ANY_COUNT with multi-id list, the StartingHeart virtual
+# item, codegen-expanded macro (IS_ANY_OF_SWORDS), OP_ITEM_IS in can_place,
+# inline-complexity threshold (this would exceed 6 ops if not macro'd).
+#
+# The swordless mode is Phase B; this example exists to validate that the
+# schema supports the can_place idiom Phase B will need. Phase A logic.yaml
+# will NOT use IS_ANY_OF_SWORDS (it has no swordless mode) but the codegen
+# accepts the macro form so Phase B can drop it in.
+
+format_version: 1
+
+regions:
+  - id: SpikeCave
+    name: "Spike Cave (Death Mountain Dark World West)"
+    source: "app/Region/Standard/DarkWorld/DeathMountain/West.php:21-50"
+  # External region for the Brewery placeholder below; stub for worked-example
+  # self-containment.
+  - id: DarkWorld_NorthWest
+    name: "Dark World - North West (stub)"
+    source: "stub for self-contained worked example"
+
+edges: []
+
+locations:
+  - id: "Spike Cave"
+    name: "Spike Cave"
+    region: SpikeCave
+    type: Chest
+    vanilla_item: CaneOfByrna
+    # Spike Cave requires: cane of byrna OR cape (damage mitigation), plus
+    # at least 4 hearts to survive the bumps if neither is used. The
+    # hearts-total predicate uses HAS_ANY_COUNT over the three heart IDs.
+    can_reach: |
+      (HAS_ITEM(CaneOfByrna) OR HAS_ITEM(Cape) OR HAS_ANY_COUNT([PieceOfHeart, BossHeartContainer, StartingHeart], 16))
+      AND CanLiftDarkRocks()
+      AND HAS_ITEM(Hammer)
+    source: "app/Region/Standard/DarkWorld/DeathMountain/West.php:32 (Spike Cave chest)"
+    notes: |
+      The 16 in HAS_ANY_COUNT is heart QUARTERS — each PoH is 1 quarter
+      (4 = 1 heart), each BossHeartContainer is 4 quarters, each
+      StartingHeart is 4 quarters. So 16 quarters = 4 hearts total. This
+      matches ALTTPR's `canExtendMagic` / heart-arithmetic conventions in
+      `ItemCollection.php`. v0.3 audit: confirm the actual scaling matches.
+
+  # Brewery is a real registry location (id 215). We piggyback the swordless-
+  # mode can_place idiom onto it here purely to demonstrate the surface; in
+  # Phase A's actual logic.yaml Brewery does NOT carry this restriction (no
+  # swordless mode in Phase A). When Phase B's mode.weapons=swordless lands,
+  # every non-sword location gains this pattern.
+  - id: "Brewery"
+    name: "Brewery"
+    region: DarkWorld_NorthWest
+    type: Chest
+    vanilla_item: Rupee100
+    # When swordless mode is enabled (Phase B), non-sword locations SHALL NOT
+    # receive any sword item. IS_ANY_OF_SWORDS is a codegen-expanded macro:
+    # at YAML→bytecode time the codegen rewrites it to an explicit OR-chain
+    # over OP_ITEM_IS(L1Sword), OP_ITEM_IS(L2Sword), ..., OP_ITEM_IS(ProgressiveSword).
+    # The VM has no wildcard feature.
+    can_place: "NOT IS_ANY_OF_SWORDS(candidate)"
+    source: "synthetic example for schema validation (Brewery: app/Region/Standard/DarkWorld/NorthWest.php:32)"
+
+macros:
+  - name: CanLiftDarkRocks
+    parameters: []
+    body: "HAS_ITEM(TitanMitt) OR HAS_AMOUNT(ProgressiveGlove, 2)"
+    source: "app/Support/ItemCollection.php (canLiftDarkRocks method)"
+
+  - name: IS_ANY_OF_SWORDS
+    parameters: [candidate]
+    # NOTE: codegen-expanded macro. At YAML→bytecode time the parser
+    # rewrites IS_ANY_OF_SWORDS(candidate) into:
+    #   OP_ITEM_IS(L1Sword) OR OP_ITEM_IS(L2Sword) OR OP_ITEM_IS(L3Sword)
+    #   OR OP_ITEM_IS(L4Sword) OR OP_ITEM_IS(ProgressiveSword)
+    # The "candidate" parameter is conventionally named but unused in the
+    # body — the OP_ITEM_IS op reads the placer's candidate_item register
+    # implicitly. The named parameter is documentation only.
+    body: "OP_ITEM_IS(L1Sword) OR OP_ITEM_IS(L2Sword) OR OP_ITEM_IS(L3Sword) OR OP_ITEM_IS(L4Sword) OR OP_ITEM_IS(ProgressiveSword)"
+    notes: |
+      Phase B's `mode.weapons=swordless` setting causes every non-sword
+      location's can_place to reference this macro. Phase A pools never
+      contain a sword at a non-sword location, but the schema must support
+      the construct so Phase B is a pure data-side change.

@@ -1,0 +1,45 @@
+# 45_lightworld_northeast.yaml — Light World North East region
+#
+# Mechanically translated from
+# `../alttp_vt_randomizer/app/Region/Standard/LightWorld/NorthEast.php`.
+#
+# Region entry edge (LinksHouse -> LightWorld_NorthEast) is declared in the
+# main logic.yaml with the RescueZelda gate for Standard mode. This file
+# declares the region and binds locations that are NOT already in
+# logic.yaml — the Sahasrahla's Hut chests.
+#
+# IMPORTANT: King Zora, Sahasrahla, Potion Shop, Zora's Ledge, and the
+# two Waterfall Fairy chests are CANONICALLY DECLARED IN logic.yaml
+# (lines ~250-283 there). They MUST NOT be duplicated here — the codegen
+# "last wins" merge would let a less-restrictive predicate in this file
+# silently override logic.yaml's full predicate. Confirmed by Slice 4 §7
+# cluster audit: a prior copy of this file had `King Zora can_reach: TRUE()`
+# which clobbered logic.yaml's `(CanLiftRocks OR Flippers OR CanFakeFlippers
+# OR CanBootsClip OR major_glitches)` gate.
+#
+# Trick-disjunct surfacing for the locations declared in logic.yaml lives
+# in logic.yaml directly (e.g., King Zora's CanBootsClip + major_glitches
+# disjuncts).
+
+format_version: 1
+
+regions:
+  - id: LightWorld_NorthEast
+    name: "Light World - North East"
+    source: "app/Region/Standard/LightWorld/NorthEast.php:14-99"
+
+locations:
+  - id: "Sahasrahla's Hut - Left"
+    region: LightWorld_NorthEast
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthEast.php:32"
+
+  - id: "Sahasrahla's Hut - Middle"
+    region: LightWorld_NorthEast
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthEast.php:33"
+
+  - id: "Sahasrahla's Hut - Right"
+    region: LightWorld_NorthEast
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/NorthEast.php:34"

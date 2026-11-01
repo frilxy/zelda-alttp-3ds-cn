@@ -5,15 +5,17 @@
 #include <string.h>
 #include "present_image.h"
 #include "hardware_profile.h"
-static C3D_TexEnv tev[3];
+static C3D_TexEnv tev[6];
 static TestTexture *pending;
 static uint8_t displayed[3];
 static bool image_mode, reject_image;
-void C3D_FrameSplit(unsigned flags) { assert(flags==0 && !pending); }
+static unsigned segment_splits;
+void C3D_FrameSplit(unsigned flags) { assert(flags==GX_CMDLIST_FLUSH && !pending);segment_splits++; }
+void C3D_SyncDisplayTransfer(u32 *src,u32 sd,u32 *dst,u32 dd,u32 flags) { (void)src;(void)sd;(void)dst;(void)dd;(void)flags; }
 void C3D_RenderTargetClear(C3D_RenderTarget *t,unsigned bits,uint32_t color,uint32_t depth) {
   assert(bits==C3D_CLEAR_COLOR && depth==0); t->clear=color;
 }
-C3D_TexEnv *C3D_GetTexEnv(unsigned i) { assert(i<3); return &tev[i]; }
+C3D_TexEnv *C3D_GetTexEnv(unsigned i) { assert(i<6); return &tev[i]; }
 void C3D_TexEnvInit(C3D_TexEnv *e) { *e=(C3D_TexEnv){{GPU_PREVIOUS,0,0},{0,0,0},GPU_REPLACE,0}; }
 void C3D_TexEnvSrc(C3D_TexEnv *e,int channel,int a,int b,int c) { if(channel&C3D_RGB){e->source[0]=a;e->source[1]=b;e->source[2]=c;} }
 void C3D_TexEnvOpRgb(C3D_TexEnv *e,int a,int b,int c) {e->operand[0]=a;e->operand[1]=b;e->operand[2]=c;}
@@ -50,10 +52,16 @@ bool C2D_DrawImage(C2D_Image image,const C2D_DrawParams *params,const void *tint
   if(!image_mode){ResetImageMode();image_mode=true;}
   pending=image.tex;return true;
 }
+bool C2D_DrawRectSolid(float x,float y,float z,float w,float h,uint32_t c){image_mode=false;return true;}
 int main(void) {
+  ConfigureArgbTextureEnv();Platform3DS_DrawFadeRect(C2D_Color32(0,0,0,127));
+  assert(tev[0].source[0]==GPU_PRIMARY_COLOR&&tev[0].function==GPU_REPLACE);
+  for(int i=1;i<6;i++)assert(tev[i].source[0]==GPU_PREVIOUS);
   C3D_RenderTarget target={0xffffffff};
   Platform3DS_ClearBlackTarget(&target);
   assert(target.clear==0); // Both halves of a 16-bit fill must be black.
+  Platform3DS_QueueDisplayTransfer(NULL, 0, NULL, 0, 0);
+  assert(segment_splits==2); // clear and transfer each clean preceding commands.
   C2D_DrawParams params={0};
   TestTexture t={{0,220,91,37}}; C2D_Image image={&t};
   uint8_t expected[3]={220,91,37};

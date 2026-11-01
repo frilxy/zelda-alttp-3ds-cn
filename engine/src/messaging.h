@@ -1,6 +1,25 @@
 #pragma once
 #include "types.h"
 
+// Vanilla overworld pause-map prize-marker data. Declared here (rather than as
+// local externs at the consumer) so the compiler type-checks these against
+// their definitions in messaging.c. rando/ow_map_prizes.c re-keys the markers
+// by DUNGEON under prize_shuffle and shares this one source of truth with its
+// oracle; see fix-ow-map-prize-markers.
+//   kOwMapCrystal_tab[slot][k] — icon word `ch << 8 | flags` for marker slot
+//     0..6 in map-icon state k (savegame_map_icons_indicator, 0..8); a 0 word
+//     means vanilla's blinking "unknown" marker.
+//   kOverworldMapData[spr - 8] — crystal-NUMBER glyph baked into each OAM slot
+//     (marker slot i draws as sprite 14 - i).
+//   kPendantBitMask / kCrystalBitMask — the prize bit each marker slot tests in
+//     link_which_pendants / link_has_crystals. Cross-referencing these against
+//     kDungeonCrystalPendantBit (zelda_rtl.c) is what identifies the DUNGEON a
+//     slot points at, independently of the icon tables.
+extern const uint16 *const kOwMapCrystal_tab[7];
+extern const uint8 kOverworldMapData[7];
+extern const uint8 kPendantBitMask[3];
+extern const uint8 kCrystalBitMask[7];
+
 const uint8 *GetDungmapFloorLayout();
 uint8 GetOtherDungmapInfo(int count);
 const uint16 *GetDungmapRoomShape(int idx);
@@ -9,6 +28,7 @@ void Module_Messaging_6();
 void OverworldMap_SetupHdma();
 const uint8 *GetLightOverworldTilemap();
 void SaveGameFile();
+void SaveGameFile_StagingSelfCheck(void);
 void TransferMode7Characters();
 void Module0E_Interface();
 void Module_Messaging_0();
@@ -99,6 +119,9 @@ void RenderText_PostDeathSaveOptions();
 void Text_Initialize();
 void Text_Initialize_initModuleStateLoop();
 void Text_InitVwfState();
+// True when this runtime message is an eligible story fast-forward surface.
+// Active generated/dynamic randomizer hints are always excluded.
+bool Text_ShouldFastForwardStoryMessage(uint16 msg_id);
 void Text_LoadCharacterBuffer();
 uint8 *Text_WritePlayerName(uint8 *p);
 uint8 Text_FilterPlayerNameCharacters(uint8 a);
@@ -108,7 +131,7 @@ void RenderText_Draw_BorderIncremental();
 void RenderText_Draw_CharacterTilemap();
 void RenderText_Draw_MessageCharacters();
 void RenderText_Draw_Finish();
-void VWF_RenderSingle();
+void VWF_RenderSingle(int c);
 void RenderText_Draw_Choose2LowOr3();
 void RenderText_Draw_ChooseItem();
 void RenderText_FindYItem_Previous();

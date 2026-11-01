@@ -2,6 +2,7 @@
 #include "types.h"
 #include "zelda_rtl.h"
 #include "sprite.h"
+#include "rando/rando.h"
 
 typedef struct CheckPlayerCollOut {
   uint16 r4, r6;
@@ -215,6 +216,10 @@ uint8 AncillaAdd_Boomerang(uint8 a, uint8 y);
 void AncillaAdd_TossedPondItem(uint8 a, uint8 xin, uint8 yin);
 void AddHappinessPondRupees(uint8 arg);
 int AncillaAdd_FallingPrize(uint8 a, uint8 item_idx, uint8 yv);
+int AncillaAdd_FallingPrizeRando(uint8 a,
+                                 const RandoDeferredGrantToken *token,
+                                 uint8 fallback_idx, uint8 yv);
+int Ancilla_RandoFallingPrizeSelfCheck(void);
 void AncillaAdd_ChargedSpinAttackSparkle();
 void AncillaAdd_ExplodingWeatherVane(uint8 a, uint8 y);
 void AncillaAdd_CutsceneDuck(uint8 a, uint8 y);
@@ -271,3 +276,20 @@ int DashTremor_TwiddleOffset(int k);
 void Ancilla_TerminateIfOffscreen(int j);
 bool Bomb_CheckUndersideSpriteStatus(int k, Point16U *out_pt, uint8 *out_r10);
 void Sprite_CreateDeflectedArrow(int k);
+
+// Phase B Slice 9 — add-rando-confirmation-icons. Spawns a short-lived
+// icon-pop ancilla above Link's head used by Rando_ShowDirectGrantConfirmation
+// to surface direct-grant items (HalfMagic / QuarterMagic / TriforcePiece /
+// prize bits / dungeon-item bits) that bypass Link_ReceiveItem. Renders the
+// item's animated-sprite GFX bundle exactly like the vanilla receive-item
+// ancilla: `gfx` (DecodeAnimatedSpriteTile_variable index), `big` (OAM size
+// byte), and `oam_flags` (precomputed palette/priority byte) come from
+// kDirectGrantIcons[item_id] (src/rando/direct_grant_icons.h, codegen'd from
+// assets/rando/direct_grant_icons.yaml).
+//
+// Does NOT grant the item — the direct write happened upstream inside
+// Rando_DispatchVanillaGrant. This ancilla is visual confirmation only.
+// No-op when called with gfx==0 (the audio-only fallback sentinel).
+bool AncillaAdd_RandoIconReceipt(uint8 gfx, uint8 big, uint8 oam_flags);
+#define kAncillaType_ItemReceipt 0x22
+#define kAncillaType_RandoIconReceipt 0x44

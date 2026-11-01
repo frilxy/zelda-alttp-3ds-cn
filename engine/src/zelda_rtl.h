@@ -24,7 +24,7 @@ typedef struct ZeldaEnv {
   struct Ppu *ppu;
   struct SpcPlayer *player;
   struct Dma *dma;
-  
+
   MemBlk dialogue_blk;
   MemBlk dialogue_font_blk;
   uint8 dialogue_flags;
@@ -48,17 +48,40 @@ void zelda_ppu_write_word(uint32_t adr, uint16_t val);
 void HdmaSetup(uint32 addr6, uint32 addr7, uint8 transfer_unit, uint8 reg6, uint8 reg7, uint8 indirect_bank);
 
 void ZeldaInitialize();
+void ZeldaShutdownSession(void);
 void ZeldaReset(bool preserve_sram);
+void ZeldaClearInputLog(void);
+void ZeldaDrawStartupLogo(uint32 *pixels);
+void ZeldaAnimateStartupLogo(uint32 *pixels,bool (*present)(const uint32 *,unsigned,void *),void *context);
+void ZeldaAnimateStartupLogoWithAudio(uint32 *pixels,bool (*present)(const uint32 *,unsigned,void *),
+                                     void (*audio)(const int16 *,unsigned,void *),void *context);
 void ZeldaDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags);
 void ZeldaShutdownPpuWorker(void);
 uint32 ZeldaGetPpuJoinTimeUs(void);
 void ZeldaWriteGameDiagnostics(FILE *file);
+// Audio memory, the PPU and the context (language, mods, seed, scenario) for a dump.
+bool ZeldaWriteDumpExtras(const char *dir);
 bool ZeldaGetPpuWorkerStats(int *split_line,
                             uint32 *main_time_us,
                             uint32 *worker_time_us);
 void ZeldaSetWidescreenEdgeMode(int mode);
 int ZeldaGetWidescreenEdgeMode(void);
 int ZeldaGetWidescreenFixedCameraMargin(void);
+// How far the fixed camera drew the last WIDE picture beside the game's
+// camera (the picture x of a game x is x + this); 0 without ExtendScreen64,
+// whose sprite and ancilla ranges follow the picture through it.
+int ZeldaWidePictureShift(void);
+// Once the camera of a frame is set, before its sprites are drawn: the rows
+// its WIDE picture will show above the game's screen, which the sprites
+// keep their tiles for (g_wide_picture_rows, sprite.h).
+void ZeldaWideBeforeSprites(void);
+// Module09_LoadAuxGFX, before the next area's graphics reach VRAM: the WIDE
+// picture keeps those of the area left for the scroll.
+void ZeldaWideBeforeAuxGfx(void);
+// Around the game rebuilding a room or an overworld area in WRAM: the WIDE
+// picture keeps drawing the place being left from its maps.
+void ZeldaWideBeforeMapLoad(int context);
+void ZeldaWideAfterMapLoad(int context);
 void ZeldaRunFrameInternal(uint16 input, int run_what);
 bool ZeldaRunFrame(int input_state);
 void LoadSongBank(const uint8 *p);
@@ -114,3 +137,7 @@ enum {
 uint32 ZeldaGetWideColumnRepairCount(void);
 
 #endif  // ZELDA3_ZELDA_RTL_H_
+
+bool ZeldaIsEmulatorAttached(void);
+
+void ZeldaFormatSavePath(const char *name, char *path, size_t size);

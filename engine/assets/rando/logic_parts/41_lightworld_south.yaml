@@ -1,0 +1,167 @@
+# 41_lightworld_south.yaml — Light World South region
+#
+# Mechanically translated from ALTTPR PHP closures at
+# `../alttp_vt_randomizer/app/Region/Standard/LightWorld/South.php`
+# (MIT, verified per CLAUDE.md "Claim-grounding discipline").
+#
+# Phase A translation discipline (audit.md §0.10.2):
+#   - All glitch/trick branches (canBootsClip, canOneFrameClipOW,
+#     canWaterWalk, canFakeFlipper, canBunnySurf, canBunnyRevive, canOWYBA)
+#     are pinned false → branches drop.
+#   - swordless-mode branch (mode.weapons=='swordless') is dropped:
+#     Phase A pins mode.weapons!='swordless'.
+#   - `itemPlacement === 'basic'` is pinned in Phase A → `!== 'basic'`
+#     branches drop.
+#   - PHP `PegasusBoots` → our `Boots`.
+#   - The `can_enter` closure (php:181-183) requires RescueZelda → modeled
+#     as the edge from LightWorld_NorthEast (which already gates on
+#     RescuedZelda) to this region.
+
+format_version: 1
+
+regions:
+  - id: LightWorld_South
+    name: "Light World - South"
+    source: "app/Region/Standard/LightWorld/South.php:14-187"
+
+edges:
+  # South entry — `can_enter` (php:181-183) only requires RescueZelda;
+  # NorthEast→South is freely traversable on the overworld.
+  - from: LightWorld_NorthEast
+    to: LightWorld_South
+    predicate: "TRUE()"
+    source: "app/Region/Standard/LightWorld/South.php:181-183 (can_enter = RescueZelda)"
+
+locations:
+  # `Floodgate Chest` (php:32) — no setRequirements; default TRUE.
+  - id: "Floodgate Chest"
+    region: LightWorld_South
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/South.php:32"
+
+  # `Link's House` (php:33) — no setRequirements; default TRUE.
+  # The chest is INSIDE the house building, so accessible from game start
+  # without needing to traverse the overworld. Bind to LinksHouse region
+  # (which is sphere 0) rather than LightWorld_South (which is post-
+  # RescuedZelda). In Inverted this re-locates to DarkWorld/South.php;
+  # Phase A pins world_state Standard/Open.
+  - id: "Link's House"
+    region: LinksHouse
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/South.php:33"
+
+  # `Aginah's Cave` (php:107-109): canBombThings.
+  - id: "Aginah's Cave"
+    region: LightWorld_South
+    can_reach: "CanBombThings()"
+    source: "app/Region/Standard/LightWorld/South.php:107-109"
+
+  # `Mini Moldorm Cave` chests + NPC (php:111-129): canBombThings AND
+  # canKillMostThings(world). The `enemies` param defaults to 5 in ALTTPR;
+  # we call CanKillMostThings(world, 5).
+  - id: "Mini Moldorm Cave - Far Left"
+    region: LightWorld_South
+    can_reach: "CanBombThings() AND CanKillMostThings(world, 5)"
+    source: "app/Region/Standard/LightWorld/South.php:111-113"
+
+  - id: "Mini Moldorm Cave - Left"
+    region: LightWorld_South
+    can_reach: "CanBombThings() AND CanKillMostThings(world, 5)"
+    source: "app/Region/Standard/LightWorld/South.php:115-117"
+
+  - id: "Mini Moldorm Cave - Right"
+    region: LightWorld_South
+    can_reach: "CanBombThings() AND CanKillMostThings(world, 5)"
+    source: "app/Region/Standard/LightWorld/South.php:119-121"
+
+  - id: "Mini Moldorm Cave - Far Right"
+    region: LightWorld_South
+    can_reach: "CanBombThings() AND CanKillMostThings(world, 5)"
+    source: "app/Region/Standard/LightWorld/South.php:123-125"
+
+  - id: "Mini Moldorm Cave - NPC"
+    region: LightWorld_South
+    can_reach: "CanBombThings() AND CanKillMostThings(world, 5)"
+    source: "app/Region/Standard/LightWorld/South.php:127-129"
+
+  # `Ice Rod Cave` (php:39) — no setRequirements; default TRUE.
+  - id: "Ice Rod Cave"
+    region: LightWorld_South
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/South.php:39"
+
+  # `Hobo` (php:131-134): Flippers (canWaterWalk+Boots and canFakeFlipper
+  # branches drop in Phase A).
+  - id: "Hobo"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(Flippers)"
+    source: "app/Region/Standard/LightWorld/South.php:131-134"
+
+  # `Bombos Tablet` (php:136-142): BookOfMudora AND hasSword(2) AND
+  # (canBootsClip+Boots OR canOneFrameClipOW OR mirror+south-DW).
+  # Phase A retained mirror+south-DW only. Phase B Slice 4 §7 surfaces
+  # boots-clip + OWG. §4 swordless: the tablet reads with Book+Hammer under
+  # swordless (South.php:137-138 `hasSword(2) || (swordless && Hammer)`).
+  # Inert under randomized. Runtime: BombosTablet cutscene accepts hammer.
+  - id: "Bombos Tablet"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(BookOfMudora) AND (HasSword2() OR (OP_MODEWEAPONS_EQ(swordless) AND HAS_ITEM(Hammer))) AND ((HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(DarkWorld_South)) OR CanBootsClip() OR CanOneFrameClipOW())"
+    source: "app/Region/Standard/LightWorld/South.php:136-142"
+
+  # `Cave 45` (php:144-148):
+  #   canOneFrameClipOW OR (canBootsClip AND PegasusBoots) OR
+  #   (MagicMirror AND south-DW reachable)
+  # Phase A retained mirror+south-DW only. Phase B Slice 4 §7 surfaces
+  # the boots-clip + OWG alternatives at the top level.
+  - id: "Cave 45"
+    region: LightWorld_South
+    can_reach: "(HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(DarkWorld_South)) OR CanBootsClip() OR CanOneFrameClipOW()"
+    source: "app/Region/Standard/LightWorld/South.php:144-148"
+
+  # `Checkerboard Cave` (php:150-155): canLiftRocks AND mirror+Mire
+  # (glitch branches drop).
+  - id: "Checkerboard Cave"
+    region: LightWorld_South
+    can_reach: "CanLiftRocks() AND HAS_ITEM(MagicMirror) AND OP_REGION_REACHABLE(DarkWorld_Mire)"
+    source: "app/Region/Standard/LightWorld/South.php:150-155"
+
+  # `Library` (php:157-159): Boots.
+  - id: "Library"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(Boots)"
+    source: "app/Region/Standard/LightWorld/South.php:157-159"
+
+  # `Maze Race` (php:46) — no setRequirements; default TRUE.
+  - id: "Maze Race"
+    region: LightWorld_South
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/South.php:46"
+
+  # `Desert Ledge` (php:161-163): Desert Palace canEnter (reach the region).
+  - id: "Desert Ledge"
+    region: LightWorld_South
+    can_reach: "OP_REGION_REACHABLE(DesertPalace_Lobby)"
+    source: "app/Region/Standard/LightWorld/South.php:161-163"
+
+  # `Lake Hylia Island` (php:165-175): Phase A — all glitch branches
+  # (canBootsClip, canOneFrameClipOW, canWaterWalk, canBunnySurf, canOWYBA)
+  # drop. The surviving path is Flippers + MagicMirror + MoonPearl +
+  # reachable DarkWorld_NorthEast (the mirror-from-DW-NE Lake-Hylia warp).
+  - id: "Lake Hylia Island"
+    region: LightWorld_South
+    can_reach: "CanReachLakeHyliaIsland()"
+    source: "app/Region/Standard/LightWorld/South.php:165-175"
+
+  # `Sunken Treasure` (php:49) — no setRequirements; default TRUE.
+  - id: "Sunken Treasure"
+    region: LightWorld_South
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/LightWorld/South.php:49"
+
+  # `Flute Spot` (php:177-179): Shovel.
+  - id: "Flute Spot"
+    region: LightWorld_South
+    can_reach: "HAS_ITEM(Shovel)"
+    source: "app/Region/Standard/LightWorld/South.php:177-179"
+
+macros: []

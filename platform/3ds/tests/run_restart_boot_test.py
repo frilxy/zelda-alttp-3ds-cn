@@ -33,6 +33,8 @@ static void *dma_init(void*p){return &dma;}
 static FakePpu *ppu_init(void*p){return &ppu;}
 static void *SpcPlayer_Create(void){return &player;}
 static void SpcPlayer_Initialize(void*p){music=0;}
+static void ZeldaResetAudio_Locked(void){music=0;}
+static void ResetWideTracking(void){}
 static void dma_reset(void*p){}
 static void ppu_reset(FakePpu*p){memset(p,0,sizeof(*p));}
 static void ZeldaInitializationCode(void){

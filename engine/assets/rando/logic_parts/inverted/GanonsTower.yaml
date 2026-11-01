@@ -1,0 +1,328 @@
+# GanonsTower.yaml — Ganon's Tower Inverted world-state (Phase B Slice 2)
+#
+# Mechanically translated from `../alttp_vt_randomizer/app/Region/Inverted/GanonsTower.php`
+# (MIT, verified per CLAUDE.md "Claim-grounding discipline" §Upstream references).
+#
+# The Inverted variant `extends Region\Standard\GanonsTower` and calls
+# `parent::initalize()` (php:21) before overriding every location predicate
+# AND `can_enter`. The Standard parent constructor wires the LocationCollection
+# (Bob's Torch, 4 DMs Room, 4 Randomizer Room, Firesnake, Map, Big, 2 Hope,
+# Bob's, Tile, 4 Compass Room, Big Key Chest, 2 Big Key Room, 2 Mini Helmasaur,
+# Pre-Moldorm, Moldorm Chest + the "Agahnim 2" Prize\Event location), boss
+# assignment (Agahnim2 top + Moldorm top + Lanmolas middle + ArmosKnights
+# bottom), and the prize_location reference + DefeatAgahnim2 prize item.
+# Bob's Torch is NOT overridden in Inverted (the Standard parent predicate
+# `HAS_ITEM(Boots)` survives via parent::initalize() — we still emit it here
+# for self-containment).
+#
+# Translation discipline:
+#   - Every predicate cites the PHP file:line range it came from.
+#   - PHP item-name remappings:
+#       * KeyA2 → SmallKey_GanonsTower
+#       * BigKeyA2 → BigKey_GanonsTower
+#       * CompassA2 → Compass_GanonsTower (unused in this file)
+#       * MapA2 → Map_GanonsTower (unused in this file)
+#       * PegasusBoots → Boots
+#       * RescueZelda → RescuedZelda (NOT used here — Inverted can_enter
+#         (php:466-491) drops the RescueZelda gate from the Standard parent).
+#   - Phase A collapses (dropped branches):
+#       * `itemPlacement === 'basic'` damage-budget gate (php:467-473): drops
+#         to TRUE (Phase A target itemPlacement=advanced).
+#       * `canDungeonRevive` (php:26,39,52,65, etc.): Phase B → FALSE.
+#       * `canOneFrameClipOW` (every location): Phase B trick → FALSE.
+#       * `canBootsClip AND Boots` (every location): Phase B trick → FALSE.
+#       * `canBunnyRevive AND canBunnyRevive(world)`: Phase B trick → FALSE.
+#       * `canOWYBA AND hasABottle`: Phase B trick → FALSE.
+#       * `canSuperBunny AND MagicMirror` (php:474-475 in can_enter): Phase B
+#         trick → FALSE.
+#       * `mode.weapons === 'swordless'` pinned FALSE.
+#       * `accessibility !== 'locations'` branches dropped (default=items).
+#       * `crystals.tower` defaults to 7 in can_enter.
+#       * `itemInLocations(BigKeyA2, [other three slots]) AND KeyA2>=3` →
+#         placement-pinned hint; Phase A drops this branch and keeps the
+#         conservative `KeyA2>=4` lower bound (same convention as
+#         `33_ganons_tower.yaml`).
+#       * Map Chest itemPlacement basic-mode boots-substitution branch
+#         (php:185-186): drop !=basic; keep Hookshot.
+#       * Bob's Chest itemPlacement basic gate: not present in Inverted
+#         (Standard's php:286 advanced branch was dropped from the override —
+#         Inverted Bob's Chest at php:230-242 does NOT add the
+#         `(FireRod || (Ether AND hasSword))` gate. Per the trust-the-code
+#         rule we emit the simpler Inverted-only requirement.).
+#   - The bunny-state disjunct
+#       `(MoonPearl OR canDungeonRevive OR (clip-tricks AND (bunny-revive OR
+#         OWYBA)))`
+#     appears on EVERY Inverted location predicate. After Phase A collapse,
+#     this entire sub-expression reduces to `HAS_ITEM(MoonPearl)`. Since the
+#     can_enter edge already enforces MoonPearl, the per-location MoonPearl
+#     clauses are redundant in our reachability model BUT they're retained
+#     for provenance and to keep the per-location predicates exactly
+#     matching the PHP. (Codegen well-formedness will treat them as TRUE
+#     after fixed-point.)
+#   - Boss kills (reused from `33_ganons_tower.yaml`):
+#       * `boss_bottom` = Armos Knights → CanKillArmosKnights()
+#       * `boss_middle` = Lanmolas → CanKillLanmolas(world)
+#       * `boss_top` = Moldorm → CanKillMoldorm()
+#       * `boss` = Agahnim2 → CanKillAgahnim2()
+#
+# Status: translated 2026-05-27. Awaiting review + codegen integration.
+
+format_version: 1
+
+regions:
+  # External parent stubs for cross-file region reference. In Inverted, the
+  # GT entrance is on the LIGHT-world side (since the Pyramid of Power
+  # location sits in light-world Inverted). Inverted overworld YAMLs define
+  # the canonical LightWorld_NorthEast region.
+  - id: LightWorld_NorthEast
+    name: "Light World - North East (stub, Inverted)"
+    source: "stub for cross-file region reference"
+
+  # Re-declared from `33_ganons_tower.yaml` — codegen merges (last-wins).
+  - id: GanonsTower_Lobby
+    name: "Ganon's Tower - Lobby (Inverted)"
+    dungeon: GanonsTower
+    source: "app/Region/Inverted/GanonsTower.php:11 (extends Standard\\GanonsTower); base region in app/Region/Standard/GanonsTower.php:15-85"
+
+edges:
+  # Inverted can_enter (php:466-491):
+  #   (itemPlacement !== 'basic' OR <basic damage budget>)   [drops to TRUE]
+  #   AND (canDungeonRevive
+  #        OR (canSuperBunny AND MagicMirror)                [Phase B → FALSE]
+  #        OR MoonPearl
+  #        OR (clip-tricks AND <bunny-revive OR OWYBA>))     [Phase B → FALSE]
+  #   AND (Crystal1+Crystal2+...+Crystal7) >= crystals.tower=7
+  #   AND NorthEastLightWorld->canEnter
+  #
+  # Phase A surviving:
+  #   HAS_ITEM(MoonPearl) AND <all 7 crystals> AND LightWorld_NorthEast reachable.
+  # No RescuedZelda gate (the Inverted override drops it from the Standard).
+  - from: LightWorld_NorthEast
+    to: GanonsTower_Lobby
+    predicate: "(HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass()) AND HAS_ANY_COUNT([Prize_Crystal1, Prize_Crystal2, Prize_Crystal3, Prize_Crystal4, Prize_Crystal5, Prize_Crystal6, Prize_Crystal7], 7)"
+    source: "app/Region/Inverted/GanonsTower.php:466-491 (can_enter closure)"
+
+locations:
+  # GT - Bob's Torch (Inverted: NOT overridden; inherits Standard php:194-196):
+  #   HAS_ITEM(Boots).
+  # Emitted here for self-containment of this Inverted file.
+  - id: "Ganon's Tower - Bob's Torch"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Boots)"
+    source: "app/Region/Standard/GanonsTower.php:194-196 (inherited via parent::initalize)"
+
+  # GT - DMs Room x4 (Inverted php:23-73): Hammer AND Hookshot AND MoonPearl.
+  # The bunny-bypass disjunct collapses to MoonPearl after Phase A drops.
+  - id: "Ganon's Tower - DMs Room - Top Left"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:23-34"
+
+  - id: "Ganon's Tower - DMs Room - Top Right"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:36-47"
+
+  - id: "Ganon's Tower - DMs Room - Bottom Left"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:49-60"
+
+  - id: "Ganon's Tower - DMs Room - Bottom Right"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:62-73"
+
+  # GT - Randomizer Room x4 (Inverted php:75-157):
+  #   Hammer AND Hookshot
+  #   AND ((BigKey-in-other-three-slots AND KeyA2>=3) OR KeyA2>=4)
+  #   AND MoonPearl
+  # Phase A: drop placement-pinned branch → KeyA2>=4.
+  - id: "Ganon's Tower - Randomizer Room - Top Left"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:75-94"
+
+  - id: "Ganon's Tower - Randomizer Room - Top Right"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:96-115"
+
+  - id: "Ganon's Tower - Randomizer Room - Bottom Left"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:117-136"
+
+  - id: "Ganon's Tower - Randomizer Room - Bottom Right"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:138-157"
+
+  # GT - Firesnake Room (Inverted php:159-180):
+  #   Hammer AND Hookshot
+  #   AND (((BigKey-in-Randomizer4 OR Firesnake-holds-KeyA2) AND KeyA2>=2)
+  #        OR KeyA2>=3)
+  #   AND MoonPearl
+  # Phase A: drop the location-pinned branch → KeyA2>=3.
+  - id: "Ganon's Tower - Firesnake Room"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:159-180"
+
+  # GT - Map Chest (Inverted php:182-209):
+  #   Hammer
+  #   AND (Hookshot OR (itemPlacement !== 'basic' AND Boots))
+  #   AND (Map-Chest-holds-{BigKey,Key} ? KeyA2>=3 : KeyA2>=4)
+  #   AND MoonPearl
+  # Phase A: drop != 'basic' advanced branch → require Hookshot only.
+  # Drop placement-pinned branch → KeyA2>=4.
+  # setAlwaysAllow (php:202-205): allow own KeyA2 when accessibility!=locations
+  # AND KeyA2>=3 — Phase A pins accessibility=items so the always_allow fires
+  # when the placer is considering KeyA2 with 3+ already on hand.
+  # setFillRules (php:206-209): block own KeyA2 only if accessibility=locations
+  # → Phase A drops to TRUE (no fill restriction).
+  - id: "Ganon's Tower - Map Chest"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    always_allow: "OP_ITEM_IS(SmallKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 3)"
+    source: "app/Region/Inverted/GanonsTower.php:182-209"
+
+  # GT - Big Chest (Inverted php:211-228):
+  #   BigKeyA2 AND KeyA2>=3
+  #   AND ((Hammer AND Hookshot) OR (FireRod AND CaneOfSomaria))
+  #   AND MoonPearl
+  # setFillRules (php:226-228): item != BigKeyA2 — can't place own BigKey here.
+  - id: "Ganon's Tower - Big Chest"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(BigKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND ((HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)) OR (HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria))) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    can_place: "NOT OP_ITEM_IS(BigKey_GanonsTower)"
+    source: "app/Region/Inverted/GanonsTower.php:211-228"
+
+  # GT - Hope Room - Left/Right (Inverted: NOT overridden; inherits Standard
+  # php:65-66 which has no setRequirements → default TRUE).
+  # Emitted here for self-containment.
+  - id: "Ganon's Tower - Hope Room - Left"
+    region: GanonsTower_Lobby
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/GanonsTower.php:65 (inherited via parent::initalize, no setRequirements)"
+
+  - id: "Ganon's Tower - Hope Room - Right"
+    region: GanonsTower_Lobby
+    can_reach: "TRUE()"
+    source: "app/Region/Standard/GanonsTower.php:66 (inherited via parent::initalize, no setRequirements)"
+
+  # GT - Bob's Chest (Inverted php:230-242):
+  #   ((Hammer AND Hookshot) OR (FireRod AND Somaria))
+  #   AND KeyA2>=3
+  #   AND MoonPearl
+  # NOTE: Inverted DROPS the Standard parent's `itemPlacement != 'basic' OR
+  # (FireRod || (Ether AND hasSword))` gate. Per the trust-the-code rule we
+  # emit only the Inverted-explicit predicate.
+  - id: "Ganon's Tower - Bob's Chest"
+    region: GanonsTower_Lobby
+    can_reach: "((HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)) OR (HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria))) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:230-242"
+
+  # GT - Tile Room (Inverted php:244-254):
+  #   CaneOfSomaria AND MoonPearl.
+  - id: "Ganon's Tower - Tile Room"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(CaneOfSomaria) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:244-254"
+
+  # GT - Compass Room x4 (Inverted php:256-335):
+  #   FireRod AND CaneOfSomaria
+  #   AND ((BigKey-in-other-three AND KeyA2>=3) OR KeyA2>=4)
+  #   AND MoonPearl
+  # Phase A: drop placement-pinned branch → KeyA2>=4.
+  - id: "Ganon's Tower - Compass Room - Top Left"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:256-275"
+
+  - id: "Ganon's Tower - Compass Room - Top Right"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:277-296"
+
+  - id: "Ganon's Tower - Compass Room - Bottom Left"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:298-315"
+
+  - id: "Ganon's Tower - Compass Room - Bottom Right"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:317-335"
+
+  # GT - Big Key Chest + Big Key Room - Left/Right (Inverted php:337-381):
+  #   ((Hammer AND Hookshot) OR (FireRod AND Somaria))
+  #   AND KeyA2>=3
+  #   AND boss_bottom->canBeat (Armos Knights)
+  #   AND MoonPearl
+  - id: "Ganon's Tower - Big Key Chest"
+    region: GanonsTower_Lobby
+    can_reach: "((HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)) OR (HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria))) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND CanKillArmosKnights() AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:337-351"
+
+  - id: "Ganon's Tower - Big Key Room - Left"
+    region: GanonsTower_Lobby
+    can_reach: "((HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)) OR (HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria))) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND CanKillArmosKnights() AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:353-366"
+
+  - id: "Ganon's Tower - Big Key Room - Right"
+    region: GanonsTower_Lobby
+    can_reach: "((HAS_ITEM(Hammer) AND HAS_ITEM(Hookshot)) OR (HAS_ITEM(FireRod) AND HAS_ITEM(CaneOfSomaria))) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND CanKillArmosKnights() AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:368-381"
+
+  # GT - Mini Helmasaur Room - Left/Right (Inverted php:383-417):
+  #   canShootArrows AND canLightTorches AND BigKeyA2 AND KeyA2>=3
+  #   AND boss_middle->canBeat (Lanmolas)
+  #   AND MoonPearl
+  # setFillRules (php:397-399 / 415-417): item != BigKeyA2 — can't place own BigKey here.
+  - id: "Ganon's Tower - Mini Helmasaur Room - Left"
+    region: GanonsTower_Lobby
+    can_reach: "CanShootArrowsL1() AND CanLightTorches() AND HAS_ITEM(BigKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND CanKillLanmolas(world) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    can_place: "NOT OP_ITEM_IS(BigKey_GanonsTower)"
+    source: "app/Region/Inverted/GanonsTower.php:383-399"
+
+  - id: "Ganon's Tower - Mini Helmasaur Room - Right"
+    region: GanonsTower_Lobby
+    can_reach: "CanShootArrowsL1() AND CanLightTorches() AND HAS_ITEM(BigKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND CanKillLanmolas(world) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    can_place: "NOT OP_ITEM_IS(BigKey_GanonsTower)"
+    source: "app/Region/Inverted/GanonsTower.php:401-417"
+
+  # GT - Pre-Moldorm Chest (Inverted php:419-435):
+  #   canShootArrows AND canLightTorches AND BigKeyA2 AND KeyA2>=3
+  #   AND boss_middle->canBeat AND MoonPearl
+  # setFillRules (php:433-435): item != BigKeyA2.
+  - id: "Ganon's Tower - Pre-Moldorm Chest"
+    region: GanonsTower_Lobby
+    can_reach: "CanShootArrowsL1() AND CanLightTorches() AND HAS_ITEM(BigKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 3) AND CanKillLanmolas(world) AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    can_place: "NOT OP_ITEM_IS(BigKey_GanonsTower)"
+    source: "app/Region/Inverted/GanonsTower.php:419-435"
+
+  # GT - Moldorm Chest (Inverted php:437-456):
+  #   Hookshot AND canShootArrows AND canLightTorches
+  #   AND BigKeyA2 AND KeyA2>=4
+  #   AND boss_middle->canBeat AND boss_top->canBeat (Moldorm)
+  #   AND MoonPearl
+  # setFillRules (php:453-456): item != KeyA2 AND item != BigKeyA2.
+  - id: "Ganon's Tower - Moldorm Chest"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hookshot) AND CanShootArrowsL1() AND CanLightTorches() AND HAS_ITEM(BigKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND CanKillLanmolas(world) AND CanKillMoldorm() AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    can_place: "NOT OP_ITEM_IS(SmallKey_GanonsTower) AND NOT OP_ITEM_IS(BigKey_GanonsTower)"
+    source: "app/Region/Inverted/GanonsTower.php:437-456"
+
+  # Agahnim 2 (Inverted php:458-464):
+  #   can_complete = canEnter AND Moldorm-Chest-canAccess AND boss->canBeat(Aga2)
+  - id: "Agahnim 2"
+    region: GanonsTower_Lobby
+    can_reach: "HAS_ITEM(Hookshot) AND CanShootArrowsL1() AND CanLightTorches() AND HAS_ITEM(BigKey_GanonsTower) AND HAS_AMOUNT(SmallKey_GanonsTower, 4) AND CanKillLanmolas(world) AND CanKillMoldorm() AND CanKillAgahnim2() AND (HAS_ITEM(MoonPearl) OR CanBunnyRevival(world) OR CanPearlBypass())"
+    source: "app/Region/Inverted/GanonsTower.php:458-464 (can_complete = Moldorm Chest + Aga2 beat)"
+
+macros_notes: |
+  CanKillLanmolas is defined in `10_desert_palace.yaml`, CanKillMoldorm in
+  `11_tower_of_hera.yaml`, CanKillAgahnim2 in `33_ganons_tower.yaml`, and
+  CanKillArmosKnights in the related dungeon files. Codegen merges macros
+  globally, so this file does not re-emit them.

@@ -4,6 +4,7 @@
 
 const uint8 *GetMap8toTileAttr();
 const uint16 *GetMap16toMap8Table();
+const uint16 *Map16ToMap8Entry(uint16 map16);
 bool LookupInOwEntranceTab(uint16 r0, uint16 r2);
 int LookupInOwEntranceTab2(uint16 pos);
 bool CanEnterWithTagalong(int e);
@@ -124,6 +125,7 @@ uint16 *BufferAndBuildMap16Stripes_Y(uint16 *dst);
 void Overworld_DecompressAndDrawAllQuadrants();
 void Overworld_DecompressAndDrawOneQuadrant(uint16 *dst, int screen);
 void Overworld_ParseMap32Definition(uint16 *dst, uint16 input);
+bool Overworld_DecodeScreenMap16(int screen, uint16 *dst);
 void OverworldLoad_LoadSubOverlayMap32();
 void LoadOverworldOverlay();
 void Map16ToMap8(const uint8 *src, int r20);

@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess,tempfile,argparse
 r=Path(__file__).resolve().parents[3]
 p=argparse.ArgumentParser();p.add_argument('--profile',type=Path);p.add_argument('--dump',type=Path,required=True);args=p.parse_args()
-s=(r/'engine/src/nmi.c').read_text();a=s.index('  if (flag_update_cgram_in_nmi)');b=s.index('  flag_update_hud_in_nmi = 0;',a)
+s=(r/'engine/src/nmi.c').read_text();a=s.index('  bool cgram_rebuilt_this_nmi =');b=s.index('  flag_update_hud_in_nmi = 0;',a)
 code='''#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +16,10 @@ static bool model;
 static const Platform3DSHardwareProfile *Platform3DS_GetHardwareProfile(void){return Platform3DS_ProfileForModel(model);}
 static struct { Ppu *ppu; } g_zenv;
 static unsigned flag_update_cgram_in_nmi=1;
+typedef uint16_t uint16;
 static uint16_t main_palette_buffer[256];
+static void Cosmetic_ApplyPaletteCgram(uint16_t *p, unsigned n) { (void)p; (void)n; }
+static void Rando_OverlayPaletteApplyCgram(uint16_t *p, bool rebuilt) { (void)p; (void)rebuilt; }
 static void upload(void){\n'''+s[a:b]+'''\n}
 int main(int argc,char**argv){
  FILE*f=fopen(argv[1],"rb");assert(f);uint16_t captured[256];assert(fread(captured,2,256,f)==256);fclose(f);

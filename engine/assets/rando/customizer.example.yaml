@@ -1,0 +1,26 @@
+# Customizer manifest example (add-rando-customizer-mode).
+#
+# Use with:  zelda3 --generate-seed --settings=mode.state=open,goal=fast_ganon \
+#                    --seed=1 --out-spoiler=out.json --customizer=customizer.example.yaml
+#
+# `placements:` pins a SUBSET of locations to chosen items; the assumed-fill
+# placer fills every other location exactly as in a normal seed. Location keys
+# accept either the symbol form (Eastern_Palace_Boss) or the human form printed
+# in the spoiler (Eastern Palace - Boss). Item values use the item-registry
+# names (see the spoiler / assets/rando/item_registry.yaml).
+#
+# The generator still validates that the resulting seed is completable; an
+# un-completable hand-placement is refused (pass --allow-broken-seed to override).
+
+placements:
+  Eastern Palace - Big Chest: Hookshot
+  Link's Uncle: ProgressiveSword
+  Desert Palace - Big Chest: ProgressiveBow
+
+# Optional: adjust the item pool before the placer fills the rest.
+# `remove` is best-effort; `add` cannot add prize/event items, and per-item
+# grant caps apply (e.g. adding a 5th ProgressiveSword on top of the pinned
+# one would exceed the 4-tier sword ladder and the manifest is refused).
+pool_overrides:
+  add: [Rupee300]
+  remove: [Rupoor]

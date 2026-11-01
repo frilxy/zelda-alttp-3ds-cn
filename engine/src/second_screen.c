@@ -14,8 +14,11 @@
 #include "messaging.h"
 #include "config.h"
 #include "zelda_rtl.h"
+#include "test_scenarios.h"
+#include "rando/rando.h"
 #include "snes/ppu.h"
 #include "second_screen_tables.h"
+#include "second_screen_letters.h"
 #ifdef __3DS__
 #include "platform_3ds.h"
 #endif
@@ -49,10 +52,11 @@ void SS_ReadSram(uint8 *out, int n) {
 
 // Maps a hud item id to an inventory grid slot (1..20, 0 = none).
 static int SS_ItemToSlot(uint8 item) {
-  if (item >= 21) return 16;  // Bottle1..4 -> the bottle cell
-  if (item == 0 || item > 20) return 0;
+  int count=(enhanced_features1&kFeatures1_QolInventory)?24:20;
+  if (count==20 && item >= 21) return 16;  // Bottle1..4 -> the bottle cell
+  if (item == 0 || item > count) return 0;
   if (hud_inventory_order[0] != 0) {
-    for (int i = 0; i < 20; i++)
+    for (int i = 0; i < count; i++)
       if (hud_inventory_order[i] == item) return i + 1;
   }
   return item;
@@ -60,6 +64,23 @@ static int SS_ItemToSlot(uint8 item) {
 
 // The equipped Y-item as an inventory grid slot (1..20, 0 = none).
 int SS_GetEquippedSlot(void) { return SS_ItemToSlot(hud_cur_item); }
+int SS_GetInventorySize(void) { return (enhanced_features1&kFeatures1_QolInventory)?24:20; }
+// Packed icon kind/level for a displayed grid slot; -1 means not owned.
+int SS_GetInventorySlot(int slot) {
+  int count=SS_GetInventorySize();
+  if(slot<1||slot>count)return -1;
+  int item=hud_inventory_order[0]?hud_inventory_order[slot-1]:slot,kind=item-1,level=0;
+  if(item<1||item>count)return -1;
+  if(count==24 && item==16){kind=12;level=Hud_QolHasShovel()?1:0;}
+  else if(item>=21){kind=15;level=link_bottle_info[item-21];}
+  else if(item==16){kind=15;int b=link_item_bottle_index;level=b>=1&&b<=4?link_bottle_info[b-1]:0;}
+  else if(count==24 && item==13) {
+    level=g_rando_slot_active ? ((g_rando_flute_shovel_owned&kRandoFluteShovel_Flute)?Rando_FluteShovelEffectiveLevel():0) : (link_item_flute>=2?link_item_flute:0);
+    if(level==1)level=2;
+  } else {level=(&link_item_bow)[item-1];}
+  if(count==20 && item==13 && current_item_y==21 && Hud_QolHasShovel())level=1;
+  return level>0?(kind<<8)|(level>7?7:level):-1;
+}
 
 // The item assigned to the X button (hud_cur_item_x, set on the item screen
 // when the ItemSwitchLR feature is on) as a grid slot; 0 when nothing is
@@ -171,6 +192,23 @@ static uint32 SS_Snes555(uint16 w) {
   return 0xff000000u | (r << 16) | (g << 8) | b;
 }
 
+// The game thread's compositor reads the same palette/brightness as the top PPU.
+uint32 SS_GetDeathOverlay(void) {
+  if(main_module_index!=0x12)return 0;
+  if(submodule_index==3) {
+    unsigned progress=palette_filter_countdown;if(progress>32)progress=32;
+    return (progress*255/32)<<24;
+  }
+  Ppu *p=g_zenv.ppu;
+  if(submodule_index==4||submodule_index==5) {
+    uint32 rgb=SS_Snes555(p->cgram[0]);unsigned light=p->forcedBlank?0:p->brightness;
+    return 0xff000000u|((((rgb>>16)&255)*light/15)<<16)|
+      ((((rgb>>8)&255)*light/15)<<8)|((rgb&255)*light/15);
+  }
+  if(submodule_index>=10)return (uint32)(255-(p->forcedBlank?0:p->brightness)*255/15)<<24;
+  return 0;
+}
+
 static uint32 SS_HudColor(int group, int pix) {
   return SS_Snes555(kHudPalData[group * 4 + pix]);
 }
@@ -247,16 +285,99 @@ bool SS_RenderGlyphSheet(uint32 *px) {
   return true;
 }
 
-// Letter sheet A-Z: 16 cols x 2 rows of 8x8; HUD tiles 0x150-0x15F (A-P) and
-// 0x160-0x169 (Q-Z), fixed white-on-outline palette.
+// Build one accented capital from a HUD-font tile. The font comes from the
+// ROM, so the accent is placed against the letter's own bounding box rather
+// than a fixed row: two clear rows get the full mark and one clear row gets
+// the half nearest the letter. A glyph that already fills the cell is nudged
+// one pixel away from the mark, which costs its outermost row but keeps the
+// accent readable. Fill pixels are stamped first, then every still-empty
+// neighbour becomes outline so the mark reads the way the letters do.
+static void SS_ComposeAccentedTile(uint8 *out, const uint8 *base, int accent) {
+  // {row within the mark, column}; row 0 is the one further from the letter,
+  // and is also the half kept when only one row is free.
+  static const uint8 kAcute[4][2] = {{0, 4}, {0, 5}, {1, 3}, {1, 4}};
+  static const uint8 kGrave[4][2] = {{0, 2}, {0, 3}, {1, 3}, {1, 4}};
+  static const uint8 kCedilla[3][2] = {{0, 3}, {1, 2}, {1, 3}};
+  bool below = accent == kSSAccent_Cedilla;
+  memcpy(out, base, 64);
+  int top = 8, bottom = -1;
+  for (int y = 0; y < 8; y++)
+    for (int x = 0; x < 8; x++)
+      if (base[y * 8 + x]) {
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+      }
+  if (top == 8) return;  // blank tile, nothing to accent
+
+  int clear = below ? 7 - bottom : top;
+  if (clear == 0) {
+    if (below) {
+      for (int y = 0; y < 7; y++) memcpy(out + y * 8, out + (y + 1) * 8, 8);
+      memset(out + 56, 0, 8);
+      top--;
+      bottom--;
+    } else {
+      for (int y = 7; y > 0; y--) memcpy(out + y * 8, out + (y - 1) * 8, 8);
+      memset(out, 0, 8);
+      top++;
+      bottom++;
+    }
+    clear = 1;
+  }
+  uint8 glyph[64];
+  memcpy(glyph, out, 64);
+
+  const uint8 (*shape)[2] = below ? kCedilla :
+                            accent == kSSAccent_Grave ? kGrave : kAcute;
+  int points = below ? 3 : 4;
+  bool two_rows = clear >= 2;
+  int first_row = below ? bottom + 1 : (two_rows ? top - 2 : top - 1);
+  // With a single free row the halves that tell acute from grave are the ones
+  // kept; the cedilla keeps its hook rather than the bare connector.
+  int kept_row = below ? 1 : 0;
+  for (int i = 0; i < points; i++) {
+    if (!two_rows && shape[i][0] != kept_row) continue;
+    int y = first_row + (two_rows ? shape[i][0] : 0), x = shape[i][1];
+    if (y < 0 || y > 7) continue;
+    out[y * 8 + x] = 2;
+  }
+  for (int y = 0; y < 8; y++)
+    for (int x = 0; x < 8; x++) {
+      static const int kdx[4] = {-1, 1, 0, 0}, kdy[4] = {0, 0, -1, 1};
+      if (out[y * 8 + x] != 2 || glyph[y * 8 + x] == 2) continue;
+      for (int n = 0; n < 4; n++) {
+        int nx = x + kdx[n], ny = y + kdy[n];
+        if (nx < 0 || nx > 7 || ny < 0 || ny > 7) continue;
+        if (out[ny * 8 + nx] == 0) out[ny * 8 + nx] = 1;
+      }
+    }
+}
+
+// Letter sheet: 16 cols x 2 rows of 8x8. A-Z in cells 0-25 from HUD tiles
+// 0x150-0x15F (A-P) and 0x160-0x169 (Q-Z), then the four accented capitals
+// French needs in the spare cells, all on a fixed white-on-outline palette.
 bool SS_RenderLetterSheet(uint32 *px) {
   int w = 16 * 8, h = 2 * 8;
   if (!SS_AssetsReady()) return false;
   SS_EnsureTiles();
   memset(px, 0, (size_t)w * h * 4);
-  for (int i = 0; i < 26; i++) {
-    int id = i < 16 ? 0x150 + i : 0x160 + (i - 16);
-    const uint8 *t = g_ss_tiles + id * 64;
+  for (int i = 0; i < kSSLetterCellCount; i++) {
+    uint8 accented[64];
+    const uint8 *t;
+    if (i < 26) {
+      t = g_ss_tiles + (i < 16 ? 0x150 + i : 0x160 + (i - 16)) * 64;
+    } else {
+      char plain = 'E';
+      int accent = kSSAccent_Acute;
+      if (i == kSSLetterCell_EGrave) accent = kSSAccent_Grave;
+      else if (i == kSSLetterCell_AGrave) { plain = 'A'; accent = kSSAccent_Grave; }
+      else if (i == kSSLetterCell_CCedilla) { plain = 'C'; accent = kSSAccent_Cedilla; }
+      int base = plain - 'A';
+      SS_ComposeAccentedTile(accented,
+                             g_ss_tiles + (base < 16 ? 0x150 + base : 0x160 + (base - 16)) * 64,
+                             accent);
+      t = accented;
+    }
     int x0 = (i % 16) * 8, y0 = (i / 16) * 8;
     for (int y = 0; y < 8; y++)
       for (int x = 0; x < 8; x++) {
@@ -291,10 +412,7 @@ bool SS_RenderWorldMap(uint32 *px, bool dark) {
 }
 
 // Link's 16x16 head (map marker) from his sprite sheet, green-mail palette.
-bool SS_RenderLinkFace(uint32 *px, int chunk) {
-  if (!SS_AssetsReady()) return false;
-  const uint8 *gfx = kLinkGraphics;
-  const uint16 *pal = kPalette_ArmorAndGloves;         // first 15 colors = green mail
+static bool SS_RenderFace(uint32 *px,int chunk,const uint8 *gfx,const uint16 *pal) {
   memset(px, 0, 16 * 16 * 4);
   static const int kOffs[4][2] = {{0, 0}, {8, 0}, {0, 8}, {8, 8}};
   for (int part = 0; part < 4; part++) {
@@ -311,6 +429,23 @@ bool SS_RenderLinkFace(uint32 *px, int chunk) {
     }
   }
   return true;
+}
+
+// Capture the cartridge's stock portrait before any asset or palette overlays.
+// The cache is runtime-only; no cartridge graphics are stored in the source.
+static uint32 g_ss_original_face[16*16];
+static bool g_ss_original_face_ready;
+void SS_CaptureOriginalLinkFace(void) {
+  g_ss_original_face_ready=false;
+  if(SS_AssetsReady()&&kLinkGraphics_SIZE>=20*32&&kPalette_ArmorAndGloves_SIZE>=30)
+    g_ss_original_face_ready=SS_RenderFace(g_ss_original_face,2,kLinkGraphics,kPalette_ArmorAndGloves);
+}
+bool SS_RenderOriginalLinkFace(uint32 *pixels) {
+  if(!g_ss_original_face_ready)return false;
+  memcpy(pixels,g_ss_original_face,sizeof(g_ss_original_face));return true;
+}
+bool SS_RenderLinkFace(uint32 *px,int chunk) {
+  return SS_AssetsReady()&&SS_RenderFace(px,chunk,kLinkGraphics,Palette_GetLinkArmorColors(0));
 }
 
 // Dungeon floor layouts (5x5 room ids per floor) into out (cap bytes).
@@ -470,12 +605,12 @@ bool g_ss_hide_hud;
 volatile int g_ss_capture_button = -1;
 
 void SS_EquipSlot(int slot) {
-  if (slot >= 1 && slot <= 20)
+  if (slot >= 1 && slot <= SS_GetInventorySize())
     g_pending_equip_slot = slot;
 }
 
 void SS_AssignSlotX(int slot) {
-  if (slot >= 1 && slot <= 20)
+  if (slot >= 1 && slot <= SS_GetInventorySize())
     g_pending_assign_x_slot = slot;
 }
 
@@ -483,6 +618,13 @@ void SS_SetWidescreen(bool on) { g_pending_widescreen = on ? 1 : 0; }
 
 void SS_Set3DSDisplayMode(int mode) { g_pending_display_mode = mode; }
 void SS_Set3DSWideEdgeMode(int mode) { g_pending_wide_edge_mode = mode; }
+
+// The edge mode as the settings screen shows it: a change still waiting for
+// the game thread wins, as for the other settings.
+int SS_GetWideEdgeMode(void) {
+  int pending = g_pending_wide_edge_mode;
+  return pending >= 0 ? pending : ZeldaGetWidescreenEdgeMode();
+}
 
 void SS_RequestMemoryDump(const char *dump_dir) {
   if (dump_dir && dump_dir[0]) {
@@ -506,6 +648,33 @@ int SS_TakeLoadDumpStateResult(void) {
   if (result >= 0)
     g_dump_load_result = -1;
   return result;
+}
+
+// Developer menu test scenarios (test_scenarios.h): -1 idle.
+static volatile int g_pending_test_scenario = -1;
+
+void SS_RequestTestScenario(int index) {
+  if (ZELDA3_ENABLE_DEVELOPER_TESTS) g_pending_test_scenario = index;
+}
+void SS_RequestNextTestScenario(void) {
+  if (!ZELDA3_ENABLE_DEVELOPER_TESTS) return;
+  int current = g_pending_test_scenario >= 0 ? g_pending_test_scenario : ZeldaGetTestScenarioIndex();
+  g_pending_test_scenario = current < 0 ? 0 : (current + 1) % kTestScenarioCount;
+}
+
+bool SS_TestScenarioAvailable(int index) {
+  if (!ZELDA3_ENABLE_DEVELOPER_TESTS) return false;
+  if (index < 0 || index >= kTestScenarioCount) return false;
+  return true;
+}
+
+// The settings screen's own save state (slot 1) exists for this game.
+bool SS_HasSaveState(void) {
+  char path[256];
+  ZeldaFormatSavePath("saves/save1.sav", path, sizeof(path));
+  FILE *f = fopen(path, "rb");
+  if (f) fclose(f);
+  return f != NULL;
 }
 
 void SS_RequestRestart(void) { g_pending_restart = 1; }
@@ -741,11 +910,16 @@ void SecondScreen_RunFrameHook(void) {
       screens_ok = Platform3DS_SaveDisplayedScreensDetailed(
         top_path, bottom_path, top_raw_path, bottom_raw_path,
         &capture_stats);
+      Platform3DS_ShowOperationProgress(true,20);
       state_ok = ZeldaWriteDumpState(dump_dir);
+      Platform3DS_ShowOperationProgress(true,45);
       dump_ok = Platform3DS_DumpMemory(
         dump_dir, g_ram, 131072, g_zenv.sram, 8192,
         g_zenv.vram, 32768, &capture_stats, screens_ok);
+      Platform3DS_ShowOperationProgress(true,75);
+      dump_ok = ZeldaWriteDumpExtras(dump_dir) && dump_ok;
       dump_ok = DumpState_WriteManifest(dump_dir, screens_ok && state_ok && dump_ok) && dump_ok;
+      if(screens_ok&&state_ok&&dump_ok)Platform3DS_ShowOperationProgress(true,100);
     }
 
     if (directory_ok && screens_ok && state_ok && dump_ok)
@@ -764,12 +938,32 @@ void SecondScreen_RunFrameHook(void) {
       g_ss_has_outdoor = false;
     g_dump_load_result = (int)result;
   }
+  int scenario = g_pending_test_scenario;
+  if (scenario >= 0) {
+    g_pending_test_scenario = -1;
+    ZeldaApuLock();
+    bool loaded = ZeldaLoadTestScenario(scenario);
+    ZeldaApuUnlock();
+#ifdef __3DS__
+    Platform3DS_LogRuntime("Test scenario %02d: %s (module %u, room 0x%03x)", scenario + 1,
+                           loaded ? "constructed" : "initialization failed", main_module_index,
+                           dungeon_room_index);
+#endif
+    if (loaded)
+      g_ss_has_outdoor = false;
+  }
   if (g_pending_restart) {
     g_pending_restart = 0;
     g_ss_has_outdoor = false;
+#ifdef __3DS__
+    // Share the recovery route with the hardware chord: stop workers cleanly
+    // and discard the automatic snapshot while retaining the regular SRAM.
+    Platform3DS_RequestReset();
+#else
     ZeldaApuLock();
     ZeldaReset(true);
     ZeldaApuUnlock();
+#endif
   }
   int state_cmd = g_pending_state_cmd;
   if (state_cmd >= 0) {
@@ -819,7 +1013,11 @@ void SecondScreen_RunFrameHook(void) {
   if (slot) {
     g_pending_equip_slot = 0;
     if (in_gameplay) {
+      int previous=hud_cur_item;
       hud_cur_item = hud_inventory_order[0] ? hud_inventory_order[slot - 1] : (uint8)slot;
+      if(SS_GetInventorySize()==20 && hud_cur_item==13 && previous==13 &&
+         (enhanced_features1&kFeatures1_QolShovel) && link_item_flute>=2 && !g_rando_slot_active)
+        current_item_y=current_item_y==21?8:21;
       Hud_RefreshIcon();
     }
   }

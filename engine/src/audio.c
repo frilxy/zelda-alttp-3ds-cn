@@ -10,6 +10,7 @@
 #ifdef __ANDROID__
 #include <SDL.h>
 #endif
+#include "rando/shuffle_cosmetic.h"
 
 // This needs to hold a lot more things than with just PCM
 typedef struct MsuPlayerResumeInfo {
@@ -102,10 +103,17 @@ static uint8 RemapMsuDeluxeTrack(MsuPlayer *mp, uint8 track) {
   }
 }
 
+// MSU-Deluxe arm: resume_info.actual_track derives from the id AFTER the
+// cosmetic music-shuffle remap (ZeldaPlayMsuAudioTrack remaps before
+// MsuPlayer_Open), so the query must remap its vanilla id the SAME way or a
+// shuffled song never compares equal and consumers (overworld.c/messaging.c
+// "already playing?" checks) re-issue — restarting — the track on every area
+// transition. The non-MSU arms compare music_unk1/last_music_control, which
+// the caller set from the ORIGINAL id — vanilla ids on both sides, no remap.
 bool ZeldaIsPlayingMusicTrack(uint8 track) {
   MsuPlayer *mp = &g_msu_player;
   if (mp->state != kMsuState_Idle && mp->enabled & kMsuEnabled_MsuDeluxe)
-    return RemapMsuDeluxeTrack(mp, track) == mp->resume_info.actual_track;
+    return RemapMsuDeluxeTrack(mp, Cosmetic_RemapSong(track)) == mp->resume_info.actual_track;
   else
     return track == music_unk1;
 }
@@ -113,7 +121,7 @@ bool ZeldaIsPlayingMusicTrack(uint8 track) {
 bool ZeldaIsPlayingMusicTrackWithBug(uint8 track) {
   MsuPlayer *mp = &g_msu_player;
   if (mp->state != kMsuState_Idle && mp->enabled & kMsuEnabled_MsuDeluxe)
-    return RemapMsuDeluxeTrack(mp, track) == mp->resume_info.actual_track;
+    return RemapMsuDeluxeTrack(mp, Cosmetic_RemapSong(track)) == mp->resume_info.actual_track;
   else
     return track == (enhanced_features0 & kFeatures0_MiscBugFixes ? music_unk1 : last_music_control);
 }
@@ -138,6 +146,10 @@ static float kVolumeTransitionStepFloat[4];
 static float kVolumeTransitionTargetFloat[4];
 
 void ZeldaPlayMsuAudioTrack(uint8 music_ctrl) {
+  // Cosmetic music shuffle: remap the song here so MSU and the SPC engine stay
+  // consistent. Game-facing music state (last_music_control, music_unk1) was set
+  // by the caller from the original id, so only the audible output changes.
+  music_ctrl = Cosmetic_RemapSong(music_ctrl);
   MsuPlayer *mp = &g_msu_player;
   if (!mp->enabled) {
     mp->resume_info.tag = 0;
@@ -467,6 +479,17 @@ void ZeldaRenderAudio(int16 *audio_buffer, int samples, int channels) {
   ZeldaApuUnlock();
 }
 
+// The setup menu owns its music. Advance the native title DSP with only
+// the three effect ports, retaining original sword/sparkle timing.
+void ZeldaRenderStartupSfx(int16 *audio_buffer, int samples) {
+  ZeldaApuLock();
+  ZeldaPopApuState();
+  g_zenv.player->input_ports[0] = 0;
+  SpcPlayer_GenerateSamples(g_zenv.player);
+  dsp_getSamples(g_zenv.player->dsp, audio_buffer, samples, 2);
+  ZeldaApuUnlock();
+}
+
 bool ZeldaIsMusicPlaying() {
   if (g_msu_player.state != kMsuState_Idle) {
     return g_msu_player.state != kMsuState_FinishedPlaying;
@@ -475,7 +498,22 @@ bool ZeldaIsMusicPlaying() {
   }
 }
 
+void ZeldaResetAudio_Locked(void) {
+  uint8 enabled = g_msu_player.enabled;
+  MsuPlayer_CloseFile(&g_msu_player);
+  memset(&g_msu_player, 0, sizeof(g_msu_player));
+  g_msu_player.enabled = enabled;
+  memset(&g_apu_write, 0, sizeof(g_apu_write));
+  memset(g_apu_write_ents, 0, sizeof(g_apu_write_ents));
+  ZeldaResetApuQueue();
+  SpcPlayer_Initialize(g_zenv.player);
+}
+
 void ZeldaRestoreMusicAfterLoad_Locked(bool is_reset) {
+  if (is_reset) {
+    ZeldaResetAudio_Locked();
+    return;
+  }
   // Restore spc variables from the ram dump.
   SpcPlayer_CopyVariablesFromRam(g_zenv.player);
   // This is not stored in the snapshot
@@ -485,10 +523,6 @@ void ZeldaRestoreMusicAfterLoad_Locked(bool is_reset) {
   SpcPlayer *spc_player = g_zenv.player;
   memcpy(spc_player->input_ports, &spc_player->ram[0x410], 4);
   memcpy(g_apu_write.ports, spc_player->input_ports, 4);
-
-  if (is_reset) {
-    SpcPlayer_Initialize(g_zenv.player);
-  }
 
   MsuPlayer *mp = &g_msu_player;
   if (mp->enabled) {

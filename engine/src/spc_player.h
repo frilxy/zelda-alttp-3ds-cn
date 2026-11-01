@@ -139,6 +139,9 @@ typedef struct SpcPlayer {
 
 SpcPlayer *SpcPlayer_Create();
 void SpcPlayer_GenerateSamples(SpcPlayer *p);
+// The cartridge plays a sound effect on the left or the right of where its
+// source is on the screen; false plays every one in the center.
+extern bool g_spc_panned_sfx;
 void SpcPlayer_Initialize(SpcPlayer *p);
 void SpcPlayer_Upload(SpcPlayer *p, const uint8_t *data);
 void SpcPlayer_CopyVariablesFromRam(SpcPlayer *p);

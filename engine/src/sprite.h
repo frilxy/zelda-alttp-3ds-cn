@@ -47,9 +47,29 @@ enum {
   kCheckDamageFromPlayer_Ne = 2,
 };
 
+// The rows the WIDE picture of the frame shows above the game's screen: at
+// the bottom of an area or a room, the 240-line picture moves up by up to 16
+// lines. Set by zelda_rtl.c (ZeldaWideBeforeSprites), 0 without
+// WidescreenVisualFixes.
+extern int g_wide_picture_rows;
+
+// Whether the game keeps a sprite tile y lines below the top of its screen,
+// or hides it (OAM y 0xf0). It keeps the tiles of its screen and of the 16
+// lines above it, the bottom of which the SNES draws on its first lines;
+// with the picture moved up, it keeps the tiles of the rows it shows above.
+static inline bool Sprite_KeepsOamY(uint16 y) {
+  return (uint16)(y + 0x10 + g_wide_picture_rows) < 0x100;
+}
+
+// The OAM y of a kept tile. 0xf0 hides a tile: one 16 lines above the
+// game's screen, which the moved-up picture shows, is drawn a line lower.
+static inline uint8 Sprite_OamY(uint16 y) {
+  return (uint8)y == 0xf0 && g_wide_picture_rows ? 0xf1 : (uint8)y;
+}
+
 static inline void SetOamHelper0(OamEnt *oam, uint16 x, uint16 y, uint8 charnum, uint8 flags, uint8 big) {
   oam->x = x;
-  oam->y = (uint16)(y + 0x10) < 0x100 ? y : 0xf0;
+  oam->y = Sprite_KeepsOamY(y) ? Sprite_OamY(y) : 0xf0;
   oam->charnum = charnum;
   oam->flags = flags;
   bytewise_extended_oam[oam - oam_buf] = big | (x >> 8 & 1);
@@ -103,11 +123,28 @@ uint8 Sprite_CheckTileCollision(int k);
 bool Sprite_TrackBodyToHead(int k);
 void Sprite_DrawMultiple(int k, const DrawMultipleData *src, int n, PrepOamCoordsRet *info);
 void Sprite_DrawMultiplePlayerDeferred(int k, const DrawMultipleData *src, int n, PrepOamCoordsRet *info);
+bool Rando_TryDrawEnemyDropCarrierField(int k);
+void Rando_DrawOverworldEnemyMarkerGlints(void);
+uint8 Rando_ObjScratchVisibleSlotMask(void);
+void Rando_ObjScratchMarkSlotsDirty(uint8 slots);
+void Rando_ObjScratchRestoreVisible(void);
+void Rando_ObjScratchInvalidateAll(void);
+void Rando_EnemyMarkerBeginOverlay(uint8 fallback_count);
+bool Rando_EnemyMarkerClaimFallbackOam(void);
+bool Rando_EnemyDropMarkerNeedsOverlay(int k);
+bool Rando_TryDrawEnemyDropMarkerOverlay(int k);
+bool Rando_EnemyDropMarkerWantsGlint(int k, int *out_dy);
+int Rando_EnemyMarkerAllocatorSelfCheck(void);
+// Assetless production-seam coverage for grant-result cleanup/retry handling.
+// Returns 0 on success.
+int Sprite_GrantRetrySelfCheck(void);
 int Sprite_ShowSolicitedMessage(int k, uint16 msg);
 int Sprite_ShowMessageOnContact(int k, uint16 msg);
 void Sprite_ShowMessageUnconditional(uint16 msg);
 bool Sprite_TutorialGuard_ShowMessageOnContact(int k, uint16 msg);
 void Sprite_ShowMessageMinimal();
+// add-rando-bonk-sanity — rumble entry; both origins (Boots dash and the
+// Quake medallion) wake placed bonk sprites and grant their checks.
 void Prepare_ApplyRumbleToSprites();
 void Sprite_SpawnImmediatelySmashedTerrain(uint8 what, uint16 x, uint16 y);
 void Sprite_SpawnThrowableTerrain(uint8 what, uint16 x, uint16 y);
@@ -216,15 +253,21 @@ void Sprite_SetupHitBox(int k, SpriteHitBox *hb);
 bool CheckIfHitBoxesOverlap(SpriteHitBox *hb);
 void Oam_AllocateDeferToPlayer(int k);
 void SpriteModule_Die(int k);
-void Sprite_DoTheDeath(int k);
+// Returns false when a randomized reward blocks terminal death processing and
+// the caller must re-arm its handler boundary.
+bool Sprite_DoTheDeath(int k);
 void ForcePrizeDrop(int k, uint8 prize, uint8 slot);
 void PrepareEnemyDrop(int k, uint8 item);
+// Vanilla prize-drop table accessor (0..55). Used by the drop-pool shuffle to
+// avoid embedding a copy of the ROM-derived kPrizeItems table in src/rando/.
+uint8 Sprite_VanillaPrizeItem(uint8 source_index);
 void SpriteDeath_Func4(int k);
 void SpriteDeath_DrawPoof(int k);
 void SpriteModule_Fall2(int k);
 void SpriteDraw_FallingHelmaBeetle(int k);
 void SpriteDraw_FallingHumanoid(int k);
 void Sprite_CorrectOamEntries(int k, int n, uint8 islarge);
+void Sprite_CorrectOamEntriesOnScreen(int k, int n, uint8 islarge);
 bool Sprite_ReturnIfRecoiling(int k);
 bool Sprite_CheckIfLinkIsBusy();
 void Sprite_SetSpawnedCoordinates(int k, SpriteSpawnInfo *info);
@@ -262,9 +305,16 @@ void Dungeon_ResetSprites();
 void Dungeon_CacheTransSprites();
 void Sprite_DisableAll();
 void Dungeon_LoadSprites();
-void Sprite_ManuallySetDeathFlagUW(int k);
-int Dungeon_LoadSingleSprite(int k, const uint8 *src);
-void Dungeon_LoadSingleOverlord(const uint8 *src);
+const uint8 *Dungeon_GetRoomSpritePtr(uint16 room);
+// Returns false only when a randomized reward blocks death persistence.
+bool Sprite_ManuallySetDeathFlagUW(int k);
+int Dungeon_LoadSingleSprite(int k, const uint8 *src, uint8 source_slot);
+void Dungeon_LoadSingleOverlord(const uint8 *src, uint8 source_slot);
+bool Rando_AssignScriptedEnemyCheck(int child_slot, int parent_slot,
+                                    uint8 child_index, uint8 child_type);
+// Returns false only when a randomized boss reward is retryable/invalid and
+// the caller must preserve or re-arm its event source without advancing.
+bool Rando_TryGrantBossEnemyCheckForCurrentEvent(void);
 void Sprite_ResetAll();
 void Sprite_ResetAll_noDisable();
 void Sprite_ReloadAll_Overworld();
