@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#define UPDATE_REPOSITORY "EstebanPdN/zelda-alttp-3ds"
+#define UPDATE_REPOSITORY "frilxy/zelda-alttp-3ds-cn"
 #define UPDATE_MAX_FILE (32u * 1024u * 1024u)
 typedef struct UpdateRelease {
   char version[48];
