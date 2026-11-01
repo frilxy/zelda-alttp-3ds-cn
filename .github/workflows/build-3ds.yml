@@ -72,6 +72,9 @@ jobs:
           # The pack carries translated game text, so this branch does not
           # commit it; the release branch carries the same file. Without it the
           # build still compiles, but the artifact would have no Chinese in it.
+          # The container runs as root and the checkout belongs to the runner,
+          # so git needs the workspace whitelisted before it will read it.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --depth 1 origin main
           git show FETCH_HEAD:cn_language.bin > platform/3ds/romfs/languages/zh.bin
           ls -l platform/3ds/romfs/languages/zh.bin
