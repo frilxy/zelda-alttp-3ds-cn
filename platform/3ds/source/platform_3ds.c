@@ -4912,6 +4912,24 @@ static void SetupTitle(gfxScreen_t target,int y,int w,int h,const char *title) {
   SetupMenuText(target,title,(screen_w-UiFontWidth(title,2))/2,
     UiFontCenteredY(title,2,y+8,24),2,SetupRgb565(255,255,255));
 }
+// Width the setup renderer actually advances: Chinese is a 16px square there,
+// while UiFontWidth answers for the bottom screen (10/12/16 by scale).
+static int SetupLineWidth(const char *text,int scale) {
+  int w=0;
+  while(text&&*text) {
+    const char *before=text;
+    uint32_t codepoint=UiFont_DecodeUtf8(&text);
+    if(UiCjk_RowsFor(codepoint)) { w+=16; continue; }
+    text=before;
+    const char *next=before;
+    UiFontNextCode(&next);
+    char c=*before;
+    w+=scale==3?(c==' '?5:8):(c==' '?4:6)*scale;
+    text=next;
+  }
+  return w;
+}
+
 static int SetupWrap(gfxScreen_t target,const char *text,int x,int y,int width,int max_lines,int face,uint16_t color) {
   int lines=0;
   while(*text && lines<max_lines) {
@@ -4920,7 +4938,7 @@ static int SetupWrap(gfxScreen_t target,const char *text,int x,int y,int width,i
       const char *next=end;uint32_t codepoint=SetupNextChar(&next);int n=next-text;
       if(n>=(int)sizeof(line))break;
       memcpy(line,text,n);line[n]=0;
-      if(UiFontWidth(line,face)>width)break;
+      if(SetupLineWidth(line,face)>width)break;
       // A space breaks before itself, one Chinese character after itself.
       if(*end==' ')space=end;
       else if(UiCjk_RowsFor(codepoint))space=next;

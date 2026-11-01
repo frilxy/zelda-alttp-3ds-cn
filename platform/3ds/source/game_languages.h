@@ -28,7 +28,7 @@ static const GameLanguage kGameLanguages[] = {
   // a 16x16 glyph font, so it ships as a prebuilt pack instead of a patch.
   // The port's own screens are not translated yet (menu = -1) and the selector
   // falls back to English for them.
-  { "zh", kUiLanguage_Chinese,    "Simplified Chinese", NULL, "romfs:/languages/zh.bin" },
+  { "zh", kUiLanguage_Chinese,    "简体中文", NULL, "romfs:/languages/zh.bin" },
 };
 
 enum {
