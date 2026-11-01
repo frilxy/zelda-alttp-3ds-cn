@@ -1,0 +1,89 @@
+name: Build 3DS
+
+# Builds the branch's 3DSX and CIA so a change can be checked on hardware
+# without a local devkitPro install. Publishing stays with the release
+# workflow; this one only uploads an Actions artifact.
+on:
+  push:
+    branches: [feat/zh-language]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: docker.io/devkitpro/devkitarm:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build makerom + bannertool
+        run: |
+          set -e
+          echo "== host compilers ==" ; which gcc g++ cc make cmake git || true
+          mkdir -p /opt/tools
+          # --- makerom (3DSGuy/Project_CTR) ---
+          git clone --depth 1 https://github.com/3DSGuy/Project_CTR.git /tmp/pctr
+          make -C /tmp/pctr/makerom deps >/dev/null 2>&1
+          make -C /tmp/pctr/makerom -j"$(nproc)"
+          cp /tmp/pctr/makerom/bin/makerom /opt/tools/makerom
+          # --- bannertool (Epicpkmn11 fork) ---
+          git clone --depth 1 https://github.com/Epicpkmn11/bannertool.git /tmp/bt
+          # its "buildtools" submodule uses the blocked git:// protocol, so
+          # fetch it over https into the expected location instead.
+          git clone --depth 1 https://github.com/Steveice10/buildtools.git /tmp/bt/buildtools
+          git -C /tmp/bt tag 1.2.3 2>/dev/null || true   # no 'v' prefix so VERSION_MAJOR parses to a number
+          make -C /tmp/bt -j"$(nproc)"
+          cp /tmp/bt/output/linux-x86_64/bannertool /opt/tools/bannertool
+          chmod +x /opt/tools/makerom /opt/tools/bannertool
+          ls -la /opt/tools/
+
+      - name: Updater dependencies (curl, mbedTLS, Jansson)
+        run: |
+          set -e
+          DEPS="${DEVKITPRO}/portlibs/3ds"
+          have_deps() {
+            for l in curl jansson mbedtls mbedx509 mbedcrypto; do
+              [ -f "$1/lib/lib$l.a" ] || return 1
+            done
+          }
+          echo "== what this image already ships =="
+          ls "$DEPS/lib" 2>/dev/null || true
+          dkp-pacman -Q 2>/dev/null | grep -iE '3ds-(curl|mbedtls|jansson)' || echo "  (no updater deps installed)"
+          if ! have_deps "$DEPS"; then
+            echo "== installing the devkitPro packages =="
+            dkp-pacman -S --noconfirm --needed 3ds-curl 3ds-mbedtls 3ds-jansson || \
+              dkp-pacman -Sy --noconfirm --needed 3ds-curl 3ds-mbedtls 3ds-jansson || \
+              echo "::warning::devkitPro repository unreachable, building from source"
+          fi
+          # Verify the prefix instead of trusting pacman's exit status: fall back
+          # to the in-tree build script when the libraries really aren't there.
+          if have_deps "$DEPS"; then
+            echo "UPDATE_DEPS_ROOT=$DEPS" >> "$GITHUB_ENV"
+          else
+            echo "== building updater dependencies from source =="
+            bash platform/3ds/update-dependencies/build-deps.sh "$PWD/.deps/prefix"
+            echo "UPDATE_DEPS_ROOT=$PWD/.deps/prefix" >> "$GITHUB_ENV"
+          fi
+          cat "$GITHUB_ENV"
+
+      - name: Build 3DSX and CIA
+        env:
+          ZELDA3_TOOLS_ROOT: /opt/tools
+        run: |
+          chmod +x platform/3ds/build.sh
+          platform/3ds/build.sh
+
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zelda3-3ds-zh
+          path: |
+            build-3ds/game/*.cia
+            build-3ds/game/*.3dsx
+          if-no-files-found: error
+
+      - name: Build log tail
+        if: always()
+        run: |
+          ls -la build-3ds/game 2>/dev/null || true
