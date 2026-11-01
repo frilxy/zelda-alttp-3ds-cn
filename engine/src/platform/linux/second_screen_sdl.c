@@ -1210,6 +1210,33 @@ static int draw_wrapped_center(const char *text, RectFS area, int scale, uint32_
   float y = area.y;
   const int line_h = scale==3?16:scale==2?20:11;
   int lines=0;
+  if (vertical_center) {
+    // Count the lines first (same walk, no drawing), then start low enough for
+    // the block's middle to land on the area's middle.
+    const char *scan = text;
+    int count = 0;
+    while (*scan) {
+      const char *last_break = NULL, *next = scan;
+      size_t length = 0;
+      while (*next && length + 4 < sizeof(line)) {
+        const char *step = next;
+        uint32_t codepoint = wrap_next(&step);
+        size_t bytes = (size_t)(step - scan);
+        memcpy(line, scan, bytes); line[bytes] = 0;
+        if (text_width(line, scale) > area.w) break;
+        if (*next == ' ') last_break = next;
+        else if (codepoint >= 0x2E80) last_break = step;
+        next = step; length = bytes;
+      }
+      if (*next && last_break) next = last_break;
+      if (next == scan) break;
+      count++;
+      scan = next;
+      while (*scan == ' ') scan++;
+    }
+    float block = (float)count * line_h;
+    if (block < area.h) y = area.y + floorf((area.h - block) / 2);
+  }
   while (*start) {
     const char *last_space = NULL;
     size_t length = 0;
@@ -1237,7 +1264,12 @@ static int draw_wrapped_center(const char *text, RectFS area, int scale, uint32_
   return lines;
 }
 
-static int draw_wrapped_left(const char *text, RectFS area, int scale, uint32_t color) {
+// The same wrapping, drawn from the top of `area` (vertical_center = false) or
+// with the block centred in it. The QoL page shows a one-line description in a
+// tall panel, where the top edge reads as "stuck to the corner".
+static int draw_wrapped_left(const char *text, RectFS area, int scale, uint32_t color);
+static int draw_wrapped_left_ex(const char *text, RectFS area, int scale,
+                                uint32_t color, bool vertical_center) {
   char line[256] = {0};
   const char *start = text, *end = text;
   float y = area.y;
@@ -1268,6 +1300,10 @@ static int draw_wrapped_left(const char *text, RectFS area, int scale, uint32_t 
     while (*start == ' ') start++;
   }
   return lines;
+}
+
+static int draw_wrapped_left(const char *text, RectFS area, int scale, uint32_t color) {
+  return draw_wrapped_left_ex(text, area, scale, color, false);
 }
 
 static void draw_remap_panel(RectFS r) {
@@ -1936,7 +1972,7 @@ static void draw_qol_panel(RectFS r) {
     draw_settings_row(&qol_no,false);draw_button_label(qol_no,UI_Text(kUi_Cancel),3);
     draw_settings_row(&qol_yes,true);draw_button_label(qol_yes,UI_Text(kUi_Continue),3);
   } else {
-    draw_wrapped_left(Qol_Description(qol_selected),(RectFS){22,32,276,112},3,COL(255,255,255));
+    draw_wrapped_left_ex(Qol_Description(qol_selected),(RectFS){22,32,276,112},3,COL(255,255,255),true);
     if(Qol_NeedsRestart(qol_selected)) {
       const char *notice=UI_Text(kUi_QolRestart);
       draw_tiny_text(notice,(320-text_width(notice,3))/2,158,3,COL(240,216,112));
