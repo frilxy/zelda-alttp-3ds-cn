@@ -54,3 +54,7 @@ Original restores that category. Only one entry per category is active. SD
 packages with the same folder name replace bundled packages. Missing payloads
 and malformed loose files are omitted. Choices retain the existing per-profile
 `mods.txt` format and are now written with recovery/rollback on SD failures.
+
+## Credits
+
+See [community-pack and original mod credits](../CREDITS.md#community-pack-and-original-mod-authors) and [bundled skin credits](../CREDITS.md#character-skins-included-in-version-40).

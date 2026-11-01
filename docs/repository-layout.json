@@ -10,7 +10,8 @@
     "platform",
     "scripts",
     "third_party",
-    "tools"
+    "tools",
+    "CREDITS.md"
   ],
   "current_documents": [
     "README.md",

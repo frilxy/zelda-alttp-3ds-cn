@@ -195,15 +195,18 @@ Users are responsible for providing their own legally obtained compatible ROM.
 
 ## Credits
 
-Thanks to [@999sian](https://github.com/999sian) for her Old 3DS optimization
-work, [arth78](https://github.com/arth78) for the WIDE display contribution,
-and [Archaistic](https://github.com/Archaistic) for the WIDE height and
-Triforce improvements.
+This port builds on **snesrev**, **Waterdish**, **samyost1** and **JeodC**.
+Thanks to [999sian](https://github.com/999sian), [arth78](https://github.com/arth78), [Archaistic](https://github.com/Archaistic) and everyone who submitted
+patches, tested builds, opened issues or suggested improvements.
 
-3D Banner work by [Phibonacci](https://github.com/Phibonacci), based on the 3D
-model by [TiraArt](https://sketchfab.com/TiraArt).
+Special thanks to [Snipy44300](https://github.com/Snipy44300) for the community
+pack and French Canadian work, and to the original mod, skin and translation
+authors. 3D banner work is by [Phibonacci](https://github.com/Phibonacci), based
+on the model by [TiraArt](https://sketchfab.com/TiraArt).
 
-See [3DS controls and diagnostics](platform/3ds/README.md).
+See **[full credits and contribution links](CREDITS.md)** for the PR authors,
+reporters, the community pack's original creators, the six bundled skin artists,
+translation teams, randomizer sources and other reused work.
 
 ## Updates
 

@@ -50,3 +50,5 @@ fresh processes: nine armor/glove combinations, four walking directions,
 sword pose and map marker. Every capture must be a stable gameplay frame;
 every logic frame is drawn, including raster IRQ handling. Palette, glove,
 file-selection colors and unload behavior are asserted under ASan.
+
+Original artists and community-pack contributors are listed in [the project credits](../../CREDITS.md#community-pack-and-original-mod-authors).
