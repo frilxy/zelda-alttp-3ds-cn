@@ -36,6 +36,11 @@ const uint16_t *UiCjk_RowsFor(uint32_t codepoint);
 // glyph, centring the square in the Latin line box of that scale.
 int UiCjk_TopOffset(int scale, int size);
 
+// Same question for a caller that knows where its Latin ink starts and how
+// tall it is: the setup views start it at -3 (scale 3) rather than the bottom
+// screen's -2*scale, so one shared formula cannot serve both.
+int UiCjk_TopOffsetFor(int latin_top, int latin_rows, int size);
+
 // Pixels a character takes at `scale`, or 0 when it has no glyph.
 int UiCjk_WidthFor(uint32_t codepoint, int scale);
 

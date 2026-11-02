@@ -72,6 +72,10 @@ int UiCjk_TopOffset(int scale, int size) {
   return -2 * scale + (latin - size) / 2;
 }
 
+int UiCjk_TopOffsetFor(int latin_top, int latin_rows, int size) {
+  return latin_top + (latin_rows - size) / 2;
+}
+
 int UiCjk_WidthFor(uint32_t codepoint, int scale) {
   if (!UiCjk_HasGlyph(codepoint))
     return 0;

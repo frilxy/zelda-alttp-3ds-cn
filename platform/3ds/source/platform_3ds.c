@@ -4856,8 +4856,12 @@ static void SetupMenuText(gfxScreen_t target,const char *text,int x,int y,int sc
     const uint16_t *cjk=UiCjk_RowsFor(codepoint);
     if(cjk) {
       // Chinese is baked at one size, 16x16, and centred against the line the
-      // Latin patterns occupy.
-      int top=y+UiCjk_TopOffset(scale,16);
+      // Latin patterns occupy. The setup views start that ink at -3 for scale 3
+      // (the bottom screen uses -2*scale), so they get their own offset; the
+      // shared one pushed the list rows' text onto their top border.
+      int latin_rows=scale==3?15:scale==2?21:11;
+      int latin_top=-(scale==3?3:2*scale);
+      int top=y+UiCjk_TopOffsetFor(latin_top,latin_rows,16);
       for(int yy=0;yy<16;yy++)for(int xx=0;xx<16;xx++)
         if(cjk[yy]&(1u<<(15-xx)))SetupPutPixel(target,x+xx,top+yy,color);
       x+=16;
