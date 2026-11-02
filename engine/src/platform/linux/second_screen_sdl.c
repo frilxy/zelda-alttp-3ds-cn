@@ -3729,6 +3729,13 @@ static void destroy_textures(void) {
     if (*texes[i]) SDL_DestroyTexture(*texes[i]);
     *texes[i] = NULL;
   }
+  // The Chinese atlases belong to the same renderer. Left behind they would
+  // still look built, so a restart or a return to the main menu - which
+  // rebuilds the renderer - drew nothing at all.
+  for (int i = 0; i < 3; i++) {
+    if (g_cjk_textures[i]) SDL_DestroyTexture(g_cjk_textures[i]);
+    g_cjk_textures[i] = NULL;
+  }
   art_ready = false;
 }
 
