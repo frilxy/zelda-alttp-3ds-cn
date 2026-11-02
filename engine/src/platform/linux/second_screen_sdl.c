@@ -1972,7 +1972,7 @@ static void draw_qol_panel(RectFS r) {
     draw_settings_row(&qol_no,false);draw_button_label(qol_no,UI_Text(kUi_Cancel),3);
     draw_settings_row(&qol_yes,true);draw_button_label(qol_yes,UI_Text(kUi_Continue),3);
   } else {
-    draw_wrapped_left_ex(Qol_Description(qol_selected),(RectFS){22,32,276,112},3,COL(255,255,255),true);
+    draw_wrapped_left_ex(Qol_Description(qol_selected),(RectFS){22,17,276,176},3,COL(255,255,255),true);
     if(Qol_NeedsRestart(qol_selected)) {
       const char *notice=UI_Text(kUi_QolRestart);
       draw_tiny_text(notice,(320-text_width(notice,3))/2,158,3,COL(240,216,112));
