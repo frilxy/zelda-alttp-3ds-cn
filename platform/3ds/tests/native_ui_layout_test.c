@@ -181,6 +181,69 @@ static void verify_dungeon_backgrounds(void) {
  free(expected);free(actual);
 }
 
+// Returning to the home page or restarting replaces the bottom renderer, and
+// SDL_RenderCopy refuses a texture built by another one. Every text atlas is a
+// cache for one renderer, so Chinese (and Latin) has to be rebuilt for the new
+// one instead of drawn from a handle it rejects - that silently dropped the
+// whole Chinese interface. An atlas that cannot be built at all must fall back
+// to drawing the glyphs, never to no text.
+static int ink_pixels(SDL_Surface *surface) {
+  int ink = 0;
+  for (int y = 0; y < surface->h; y++) {
+    const uint32_t *row =
+      (const uint32_t *)((const uint8_t *)surface->pixels + y * surface->pitch);
+    for (int x = 0; x < surface->w; x++)
+      ink += (row[x] & 0x00ffffffu) != 0;
+  }
+  return ink;
+}
+
+static int draw_text_line(SDL_Renderer *renderer, SDL_Surface *surface,
+                          const char *text, int scale) {
+  text_count = 0;  // one line at a time: no layout claim, no collision record
+  ss_r = renderer;
+  set_color(COL(0, 0, 0));
+  SDL_RenderClear(ss_r);
+  draw_text(text, 8, 60, scale);
+  SDL_RenderFlush(ss_r);
+  return ink_pixels(surface);
+}
+
+static void verify_text_atlas_follows_renderer(SDL_Renderer *model_renderer) {
+  int previous_language = UI_GetLanguage();
+  // These lines are not a layout scene: keep them out of the collision record
+  // the settings scenes above left behind.
+  scene = "text-atlas"; scene_lang = kUiLanguage_Chinese; text_count = 0;
+  SDL_Surface *first_surface =
+    SDL_CreateRGBSurfaceWithFormat(0, 320, 240, 32, SDL_PIXELFORMAT_ARGB8888);
+  SDL_Surface *second_surface =
+    SDL_CreateRGBSurfaceWithFormat(0, 320, 240, 32, SDL_PIXELFORMAT_ARGB8888);
+  assert(first_surface && second_surface);
+  SDL_Renderer *first = SDL_CreateSoftwareRenderer(first_surface);
+  SDL_Renderer *second = SDL_CreateSoftwareRenderer(second_surface);
+  assert(first && second);
+  UI_SetLanguage(kUiLanguage_Chinese);
+  int chinese = draw_text_line(first, first_surface, "语言设置", 2);
+  assert(chinese > 0);
+  // The renderer is replaced while the old atlases are still cached.
+  assert(draw_text_line(second, second_surface, "语言设置", 2) == chinese);
+  // No atlas at all: the glyphs are drawn straight into the frame.
+  destroy_textures();
+  SS_TestBreakTextAtlas = true;
+  int chinese_fallback = draw_text_line(second, second_surface, "语言设置", 2);
+  int latin_fallback = draw_text_line(second, second_surface, "LATIN", 2);
+  SS_TestBreakTextAtlas = false;
+  assert(chinese_fallback == chinese);
+  assert(latin_fallback > 0);
+  assert(draw_text_line(second, second_surface, "LATIN", 2) == latin_fallback);
+  destroy_textures();
+  // SDL frees with the renderer any texture it still owns.
+  SDL_DestroyRenderer(first); SDL_FreeSurface(first_surface);
+  SDL_DestroyRenderer(second); SDL_FreeSurface(second_surface);
+  ss_r = model_renderer;
+  UI_SetLanguage(previous_language);
+}
+
 int main(int argc,char **argv){
  assert(argc==2||argc==3);Qol_LoadPreferences("qol.ini");if(argc==3)art_directory=argv[2];assert(SDL_Init(0)==0);
  W=320;H=240;u=.5f;RectFS panel={5,5,310,191};
@@ -352,6 +415,7 @@ int main(int argc,char **argv){
    begin("back");screen_mode=true;draw_settings(panel);apply_tap(screen_back_r.x+5,screen_back_r.y+5);assert(!screen_mode);
    begin("back");developer_mode=true;draw_settings(panel);apply_tap(developer_back_r.x+5,developer_back_r.y+5);assert(!developer_mode);
   }
+  verify_text_atlas_follows_renderer(ss_r);
   destroy_textures();SDL_DestroyRenderer(ss_r);ss_r=NULL;SDL_FreeSurface(surface);
  }
  SDL_Quit();printf("PASS %u production UI captures, %u text checks, 7 languages, Old RGB565/New ARGB8888, no text collisions, bounded controls, language confirmation/cancel/selector and Back navigation%s\n",captures,text_checks,art_directory?", private USA art":"");return 0;

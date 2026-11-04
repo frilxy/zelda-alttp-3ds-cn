@@ -461,15 +461,116 @@ static float tiny_text_width(const char *s, float sc) {
 // Chinese, so a build without the language never allocates them.
 static SDL_Texture *g_cjk_textures[3];
 
+// Every text atlas - the three Latin patterns and the three Chinese sizes -
+// belongs to the renderer that built it. SDL_RenderCopy refuses a texture from
+// another renderer, and both returning to the home page and restarting replace
+// that renderer, so a handle left over from the old one made the glyphs it
+// draws silently disappear. Each cache entry remembers its owner, a stale one
+// is dropped instead of reused, and when an atlas cannot be built at all the
+// glyphs are drawn straight into the frame: the atlas is a cache, so text must
+// never go missing because of it.
+static SDL_Renderer *g_cjk_owners[3];
+static SDL_Renderer *g_font_owners[3];  // tex_native_font, _large, _medium
+static bool g_text_atlas_failure_logged;
+static bool g_stale_atlas_logged;
+static bool g_art_failure_logged;
+static unsigned g_art_failure_frames;
+
+// The atlases are released together with the renderer they belong to, so a
+// mismatched owner means some path replaced the renderer first. Forget the
+// handle (never call into a renderer that may already be gone) and let the next
+// draw rebuild it.
+static void forget_stale_atlas(SDL_Texture **texture, SDL_Renderer **owner) {
+  if (*owner == ss_r)
+    return;
+  if (*texture) {
+    // Field diagnostics: this is the path that used to lose the Chinese text.
+    if (!g_stale_atlas_logged) {
+      g_stale_atlas_logged = true;
+#ifdef __3DS__
+      Platform3DS_LogRuntime("Bottom text: dropping an atlas built for a replaced renderer");
+#endif
+      fprintf(stderr, "second screen: dropping an atlas built for a replaced renderer\n");
+    }
+  }
+  // Never destroy it: the port releases these with their renderer, which may
+  // already be gone, and SDL frees a texture together with the renderer that
+  // owns it. Only the handle is forgotten; the next draw rebuilds it.
+  *texture = NULL;
+  *owner = NULL;
+}
+
+static void report_text_atlas_failure(const char *what, int w, int h) {
+  if (g_text_atlas_failure_logged)
+    return;
+  g_text_atlas_failure_logged = true;
+  char detail[256];
+  snprintf(detail, sizeof(detail), "%s %dx%d: %s", what, w, h, SDL_GetError());
+  fprintf(stderr, "second screen: %s unavailable, drawing glyphs directly (%s)\n",
+          what, detail);
+#ifdef __3DS__
+  Platform3DS_LogRuntime("Bottom text: %s unavailable, drawing glyphs directly (%s)",
+                         what, detail);
+#endif
+}
+
+#ifdef ZELDA3_TEST_UI_TEXT
+// The host test forces an atlas failure to reach the direct-draw fallback.
+bool SS_TestBreakTextAtlas;
+#endif
+
+// One glyph's horizontal runs, drawn without a texture. Same patterns and pen
+// as the atlases, so a failure only costs speed, not legibility.
+static void draw_glyph_runs(const uint16_t *plane, int columns, int rows,
+                            int x, int y, uint32_t color) {
+  for (int row = 0; row < rows; row++) {
+    uint32_t bits = plane[row];
+    for (int col = 0; col < columns; ) {
+      if (!(bits & (1u << (columns - 1 - col)))) { col++; continue; }
+      int start = col;
+      while (col < columns && (bits & (1u << (columns - 1 - col)))) col++;
+      fill_rect(x + start, y + row, col - start, 1, color);
+    }
+  }
+}
+
+static void draw_latin_runs(unsigned code, int scale, int x, int y,
+                            uint32_t color) {
+  int width = scale == 3 ? 7 : 5 * scale;
+  int rows = scale == 3 ? 15 : scale == 2 ? 21 : 11;
+  int top = scale == 3 ? y - 3 : y - 2 * scale;
+  for (int row = 0; row < rows; row++) {
+    unsigned bits = scale == 3 ? kNativeUiMediumGlyphs[code][row]
+                  : scale == 2 ? kNativeUiLargeGlyphs[code][row]
+                               : kNativeUiGlyphs[code][row];
+    for (int col = 0; col < width; ) {
+      if (!(bits & (1u << (width - 1 - col)))) { col++; continue; }
+      int start = col;
+      while (col < width && (bits & (1u << (width - 1 - col)))) col++;
+      fill_rect(x + start, top + row, col - start, 1, color);
+    }
+  }
+}
+
 static SDL_Texture *cjk_texture(int size) {
   int slot = size == 16 ? 2 : size == 12 ? 1 : 0;
+  forget_stale_atlas(&g_cjk_textures[slot], &g_cjk_owners[slot]);
   if (g_cjk_textures[slot])
     return g_cjk_textures[slot];
   int rows = (UiCjk_GlyphCount() + 15) / 16;
   int w = 16 * size, h = rows * size;
-  uint32_t *pixels = calloc((size_t)w * (size_t)h, sizeof(*pixels));
-  if (!pixels)
+#ifdef ZELDA3_TEST_UI_TEXT
+  if (SS_TestBreakTextAtlas) {
+    SDL_SetError("atlas disabled by the host test");
+    report_text_atlas_failure("Chinese atlas", w, h);
     return NULL;
+  }
+#endif
+  uint32_t *pixels = calloc((size_t)w * (size_t)h, sizeof(*pixels));
+  if (!pixels) {
+    report_text_atlas_failure("Chinese atlas", w, h);
+    return NULL;
+  }
   for (int i = 0; i < UiCjk_GlyphCount(); i++) {
     const uint16_t *glyph = UiCjk_Rows(i, size);
     if (!glyph)
@@ -480,47 +581,76 @@ static SDL_Texture *cjk_texture(int size) {
         if (glyph[y] & (1u << (size - 1 - x)))
           pixels[(by + y) * w + bx + x] = 0xffffffffu;
   }
-  g_cjk_textures[slot] = make_tex(w, h, pixels, true);
+  SDL_Texture *atlas = make_tex(w, h, pixels, true);
   free(pixels);
-  return g_cjk_textures[slot];
+  if (!atlas) {
+    report_text_atlas_failure("Chinese atlas", w, h);
+    return NULL;
+  }
+  g_cjk_textures[slot] = atlas;
+  g_cjk_owners[slot] = ss_r;
+  return atlas;
 }
 
 static void draw_tiny_text(const char *s, float x, float y, float sc, uint32_t c) {
   int scale = (int)fmaxf(1, floorf(sc + 0.5f));
 #ifdef ZELDA3_TEST_UI_TEXT
   ZELDA3_TEST_UI_TEXT(s, x, y, scale);
+  // The host test can switch every text atlas off to reach the fallbacks.
+  bool atlas_broken = SS_TestBreakTextAtlas;
+#else
+  bool atlas_broken = false;
 #endif
-  if (!tex_native_font) {
+  forget_stale_atlas(&tex_native_font, &g_font_owners[0]);
+  if (!tex_native_font && !atlas_broken) {
     uint32_t *pixels = calloc(128 * 176, sizeof(*pixels));
-    if (!pixels) return;
-    for (int code=0;code<256;code++) for (int yy=0;yy<11;yy++)
-      for (int xx=0;xx<5;xx++) if (kNativeUiGlyphs[code][yy] & (1 << (4-xx)))
-        pixels[(code/16*11+yy)*128+code%16*8+xx]=0xffffffff;
-    tex_native_font=make_tex(128,176,pixels,true);
-    free(pixels);
-    if (!tex_native_font) return;
+    if (!pixels) {
+      report_text_atlas_failure("Latin atlas", 128, 176);
+    } else {
+      for (int code=0;code<256;code++) for (int yy=0;yy<11;yy++)
+        for (int xx=0;xx<5;xx++) if (kNativeUiGlyphs[code][yy] & (1 << (4-xx)))
+          pixels[(code/16*11+yy)*128+code%16*8+xx]=0xffffffff;
+      tex_native_font=make_tex(128,176,pixels,true);
+      free(pixels);
+      if (tex_native_font) g_font_owners[0]=ss_r;
+      else report_text_atlas_failure("Latin atlas", 128, 176);
+    }
   }
-  SDL_Texture *font=tex_native_font;
   bool large=scale==2,medium=scale==3;
-  if (large && !tex_native_font_large) {
+  forget_stale_atlas(&tex_native_font_large, &g_font_owners[1]);
+  if (large && !tex_native_font_large && !atlas_broken) {
     uint32_t *pixels=calloc(256*336,sizeof(*pixels));
-    if (!pixels) return;
-    for (int code=0;code<256;code++) for (int yy=0;yy<21;yy++)
-      for (int xx=0;xx<10;xx++) if (kNativeUiLargeGlyphs[code][yy] & (1 << (9-xx)))
-        pixels[(code/16*21+yy)*256+code%16*16+xx]=0xffffffff;
-    tex_native_font_large=make_tex(256,336,pixels,true); free(pixels);
-    if (!tex_native_font_large) return;
+    if (!pixels) {
+      report_text_atlas_failure("Latin large atlas", 256, 336);
+    } else {
+      for (int code=0;code<256;code++) for (int yy=0;yy<21;yy++)
+        for (int xx=0;xx<10;xx++) if (kNativeUiLargeGlyphs[code][yy] & (1 << (9-xx)))
+          pixels[(code/16*21+yy)*256+code%16*16+xx]=0xffffffff;
+      tex_native_font_large=make_tex(256,336,pixels,true); free(pixels);
+      if (tex_native_font_large) g_font_owners[1]=ss_r;
+      else report_text_atlas_failure("Latin large atlas", 256, 336);
+    }
   }
-  if(medium&&!tex_native_font_medium) {
-    uint32_t *pixels=calloc(128*240,sizeof(*pixels));if(!pixels)return;
-    for(int code=0;code<256;code++)for(int yy=0;yy<15;yy++)for(int xx=0;xx<7;xx++)
-      if(kNativeUiMediumGlyphs[code][yy]&(1<<(6-xx)))pixels[(code/16*15+yy)*128+code%16*8+xx]=0xffffffff;
-    tex_native_font_medium=make_tex(128,240,pixels,true);free(pixels);if(!tex_native_font_medium)return;
+  forget_stale_atlas(&tex_native_font_medium, &g_font_owners[2]);
+  if(medium&&!tex_native_font_medium&&!atlas_broken) {
+    uint32_t *pixels=calloc(128*240,sizeof(*pixels));
+    if (!pixels) {
+      report_text_atlas_failure("Latin medium atlas", 128, 240);
+    } else {
+      for(int code=0;code<256;code++)for(int yy=0;yy<15;yy++)for(int xx=0;xx<7;xx++)
+        if(kNativeUiMediumGlyphs[code][yy]&(1<<(6-xx)))pixels[(code/16*15+yy)*128+code%16*8+xx]=0xffffffff;
+      tex_native_font_medium=make_tex(128,240,pixels,true);free(pixels);
+      if (tex_native_font_medium) g_font_owners[2]=ss_r;
+      else report_text_atlas_failure("Latin medium atlas", 128, 240);
+    }
   }
-  if (large) font=tex_native_font_large;
-  if (medium) font=tex_native_font_medium;
-  SDL_SetTextureColorMod(font, (c>>16)&255, (c>>8)&255, c&255);
-  SDL_SetTextureAlphaMod(font, c>>24);
+  SDL_Texture *font = large ? tex_native_font_large
+                    : medium ? tex_native_font_medium
+                             : tex_native_font;
+  if (font) {
+    SDL_SetTextureColorMod(font, (c>>16)&255, (c>>8)&255, c&255);
+    SDL_SetTextureAlphaMod(font, c>>24);
+  }
   int cx=(int)lroundf(x), cy=(int)lroundf(y);
   int accent;
   char ch;
@@ -531,15 +661,18 @@ static void draw_tiny_text(const char *s, float x, float y, float sc, uint32_t c
     int cjk = UiCjk_Index(codepoint);
     if (cjk >= 0 && size) {
       SDL_Texture *atlas = cjk_texture(size);
+      int top = cy + UiCjk_TopOffset(scale, size);
       if (atlas) {
         SDL_SetTextureColorMod(atlas, (c>>16)&255, (c>>8)&255, c&255);
         SDL_SetTextureAlphaMod(atlas, c>>24);
         SDL_Rect src = {(cjk % 16) * size, (cjk / 16) * size, size, size};
         // Centred in the same line box the Latin patterns use.
-        SDL_Rect dst = {cx, cy + UiCjk_TopOffset(scale, size), size, size};
+        SDL_Rect dst = {cx, top, size, size};
         SDL_RenderCopy(ss_r, atlas, &src, &dst);
         SDL_SetTextureColorMod(atlas, 255, 255, 255);
         SDL_SetTextureAlphaMod(atlas, 255);
+      } else {
+        draw_glyph_runs(UiCjk_Rows(cjk, size), size, size, cx, top, c);
       }
       cx += size;
       continue;
@@ -550,10 +683,14 @@ static void draw_tiny_text(const char *s, float x, float y, float sc, uint32_t c
     unsigned code=(unsigned char)ch;
     if (accent>=0) for (unsigned i=0;i<sizeof(kNativeUiAccents)/sizeof(kNativeUiAccents[0]);i++)
       if (kNativeUiAccents[i].base==ch && kNativeUiAccents[i].accent==accent) { code=kNativeUiAccents[i].code; break; }
-    SDL_Rect src=medium ? (SDL_Rect){(code%16)*8,(code/16)*15,7,15} : large ? (SDL_Rect){(code%16)*16,(code/16)*21,10,21} :
-                           (SDL_Rect){(code%16)*8,(code/16)*11,5,11};
-    SDL_Rect dst=medium?(SDL_Rect){cx,cy-3,7,15}:(SDL_Rect){cx,cy-2*scale,5*scale,large ? 21 : 11*scale};
-    SDL_RenderCopy(ss_r,font,&src,&dst);
+    if (font) {
+      SDL_Rect src=medium ? (SDL_Rect){(code%16)*8,(code/16)*15,7,15} : large ? (SDL_Rect){(code%16)*16,(code/16)*21,10,21} :
+                             (SDL_Rect){(code%16)*8,(code/16)*11,5,11};
+      SDL_Rect dst=medium?(SDL_Rect){cx,cy-3,7,15}:(SDL_Rect){cx,cy-2*scale,5*scale,large ? 21 : 11*scale};
+      SDL_RenderCopy(ss_r,font,&src,&dst);
+    } else {
+      draw_latin_runs(code, scale, cx, cy, c);
+    }
     cx+=medium?(ch==' '?5:8):(ch==' ' ? 4 : 6)*scale;
   }
 }
@@ -2416,6 +2553,8 @@ static bool ensure_window(void) {
 #ifdef __3DS__
   Platform3DS_LogRuntime("Bottom screen initialized: display %d of %d, %dx%d",
                          target, n, W, H);
+  Platform3DS_LogRuntime("Bottom renderer: %p window %p", (void *)ss_r,
+                         (void *)ss_win);
 #endif
   return true;
 }
@@ -3249,6 +3388,16 @@ static void draw_second_screen(int logic_frames) {
     }
     if (!art_ready) {
       // engine still booting: quiet dark frame
+#ifdef __3DS__
+      // The first frames legitimately precede the game's art. A bottom screen
+      // that is still here seconds later has no text or icons at all, and this
+      // line says why.
+      if (++g_art_failure_frames > 300 && !g_art_failure_logged) {
+        g_art_failure_logged = true;
+        Platform3DS_LogRuntime("Bottom art: still not ready after %u frames (%s)",
+                               g_art_failure_frames, SDL_GetError());
+      }
+#endif
       set_color(COL_BOX);
       SDL_RenderClear(ss_r);
       present_second_screen();
@@ -3729,13 +3878,18 @@ static void destroy_textures(void) {
     if (*texes[i]) SDL_DestroyTexture(*texes[i]);
     *texes[i] = NULL;
   }
-  // The Chinese atlases belong to the same renderer. Left behind they would
-  // still look built, so a restart or a return to the main menu - which
-  // rebuilds the renderer - drew nothing at all.
+  // The text atlases belong to the same renderer. Left behind they would keep
+  // looking built while SDL refuses them from the new renderer, so a restart or
+  // a return to the main menu - which rebuilds it - drew no Chinese at all.
   for (int i = 0; i < 3; i++) {
     if (g_cjk_textures[i]) SDL_DestroyTexture(g_cjk_textures[i]);
     g_cjk_textures[i] = NULL;
+    g_cjk_owners[i] = NULL;
+    // Same indices as tex_native_font, _large and _medium above.
+    g_font_owners[i] = NULL;
   }
+  g_text_atlas_failure_logged = g_stale_atlas_logged = g_art_failure_logged = false;
+  g_art_failure_frames = 0;
   art_ready = false;
 }
 
