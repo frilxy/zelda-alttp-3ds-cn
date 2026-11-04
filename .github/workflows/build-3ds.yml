@@ -81,6 +81,14 @@ jobs:
           ls -l platform/3ds/romfs/languages/zh.bin
           if command -v python3 >/dev/null; then
             python3 tools/languages/check_language_pack.py platform/3ds/romfs/languages/zh.bin
+            # The patch is the cartridge form of the same pack: the selector
+            # applies it like any other language patch, and the pack stays as
+            # the fallback for a build without it. Generated here so every
+            # release exercises that path on hardware.
+            python3 tools/languages/make_zh_bps.py \
+              platform/3ds/romfs/languages/zh.bin \
+              platform/3ds/romfs/languages/zh.bps
+            ls -l platform/3ds/romfs/languages/
           fi
 
       - name: Build 3DSX and CIA

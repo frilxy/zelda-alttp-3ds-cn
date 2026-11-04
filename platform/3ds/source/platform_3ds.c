@@ -3588,6 +3588,42 @@ static bool AddBuildLanguagePack(uint8 **assets, size_t *assets_size) {
   return true;
 }
 
+// A build can carry a language either as a patch or as a pack: Chinese ships a
+// pack, and the patch built from it (tools/languages/make_zh_bps.py) carries the
+// same bytes in a cartridge. Both the cache stamp and the extraction have to
+// agree on which one is present, or a build without the patch rebuilds the
+// assets on every boot.
+static bool LanguageUsesPatch(const GameLanguage *language) {
+  if (!language || !language->patch)
+    return false;
+  FILE *file = fopen(language->patch, "rb");
+  if (!file)
+    return false;
+  fclose(file);
+  return true;
+}
+
+// A Chinese cartridge is the USA cartridge with the finished language pack
+// appended ('ZCNB' ..., then 'ZCNP' and the pack size): the translation is text
+// and a 16x16 font, which the cartridge's own text engine cannot draw, so there
+// is nothing to parse. The port never runs the cartridge, it reads the same
+// pack a pack-only build ships - see tools/languages/make_zh_bps.py.
+static const uint8 *CartridgePack(const uint8 *cart, size_t cart_size,
+                                  size_t *pack_size) {
+  enum { kFooter = 8 };
+  if (!cart || cart_size < kFooter ||
+      memcmp(cart + cart_size - kFooter, "ZCNP", 4) != 0)
+    return NULL;
+  uint32 size = ReadU32LE(cart + cart_size - 4);
+  if (size == 0 || (size_t)size + kFooter > cart_size)
+    return NULL;
+  const uint8 *pack = cart + cart_size - kFooter - size;
+  if (memcmp(pack, "ZCNB", 4) != 0)
+    return NULL;
+  *pack_size = size;
+  return pack;
+}
+
 // Adds g_build_language to assets built from the USA cartridge: its bundled
 // patch turns the cartridge into the translated one, whose text and font are
 // then read as from any translated cartridge. The cartridge is not changed.
@@ -3596,23 +3632,32 @@ static bool AddBuildLanguage(uint8 **assets, size_t *assets_size,
   const GameLanguage *language = g_build_language;
   if (!language)
     return true;
-  if (language->block)
-    return AddBuildLanguagePack(assets, assets_size);
-  if (!language->patch)
-    return true;
+  if (!LanguageUsesPatch(language)) {
+    // English has neither; a build that ships only the pack (no patch for this
+    // language) takes it here.
+    return language->block ? AddBuildLanguagePack(assets, assets_size) : true;
+  }
   size_t patch_size = 0, translated_size = 0;
   uint8 *patch = ReadWholeFile(language->patch, &patch_size);
   uint8 *translated = patch ? ApplyBps(rom, rom_size, patch, patch_size,
                                        &translated_size) : NULL;
   free(patch);
-  LogSetup("Language %s: patch %s, translated cartridge %s", language->code,
-           patch_size ? "read" : "missing", translated ? "OK" : "FAIL");
+  size_t pack_size = 0;
+  const uint8 *pack = translated ? CartridgePack(translated, translated_size,
+                                                 &pack_size) : NULL;
+  LogSetup("Language %s: patch %s, translated cartridge %s%s", language->code,
+           patch_size ? "read" : "missing", translated ? "OK" : "FAIL",
+           pack ? " carrying the language pack" : "");
   uint8 *combined = NULL;
   size_t combined_size = 0;
   bool ok = translated &&
-            AddTranslatedLanguageToAssets(*assets, *assets_size, translated,
-                                          translated_size, language->code, false,
-                                          &combined, &combined_size) &&
+            (pack ? AddLanguagePackToAssets(*assets, *assets_size, pack,
+                                            pack_size, language->code, false,
+                                            &combined, &combined_size)
+                  : AddTranslatedLanguageToAssets(*assets, *assets_size,
+                                                  translated, translated_size,
+                                                  language->code, false,
+                                                  &combined, &combined_size)) &&
             AssetsBlobLooksValid(combined, combined_size);
   // Its lettering (sheets, names) is drawn from the cartridge it built.
   if (ok && !FileStore_Write(LANGUAGE_CART_FILE, translated, translated_size))
@@ -3620,6 +3665,13 @@ static bool AddBuildLanguage(uint8 **assets, size_t *assets_size,
   free(translated);
   if (!ok) {
     free(combined);
+    // A patch that cannot be read must not cost the player a language the
+    // package already carries.
+    if (language->block) {
+      LogSetup("Language %s: patch unusable, using the bundled pack",
+               language->code);
+      return AddBuildLanguagePack(assets, assets_size);
+    }
     g_profile_prepare_status = patch_size ? "Translation failed" : "Translation unavailable";
     return false;
   }
@@ -4602,7 +4654,7 @@ static const char kProfileLanguageFile[] = "assets-language.txt";
 
 static bool LanguageCacheStamp(const GameLanguage *language, char stamp[64]) {
   uint32_t crc = 0;
-  if (language->patch) {
+  if (LanguageUsesPatch(language)) {
     FILE *file = fopen(language->patch, "rb");
     if (!file)
       return false;
@@ -4636,7 +4688,7 @@ static bool ProfileLanguageMatches(const char *profile, const GameLanguage *lang
   char path[640], line[64] = "", stamp[64];
   if (!LanguageCacheStamp(language, stamp))
     return false;
-  if (language->patch) {
+  if (LanguageUsesPatch(language)) {
     snprintf(path, sizeof(path), "%s/%s", profile, LANGUAGE_CART_FILE);
     if (!IsRegularFile(path))
       return false;
@@ -4661,7 +4713,7 @@ static bool ApplyProfileLanguage(void) {
   if (!LanguageCacheStamp(language, stamp))
     return false;
   bool ok = true;
-  if (!language->patch)
+  if (!LanguageUsesPatch(language))
     remove(LANGUAGE_CART_FILE);
   // A pack is a dialogue language too: only English has neither a patch nor a
   // pack, and only English clears the setting.
@@ -5542,7 +5594,8 @@ void Platform3DS_ApplyConfig(struct Config *config) {
   // pin the pack's language: the file may be stale, carry a second [General]
   // block, or sit somewhere the engine does not read, and the text still has
   // to come out in the language the player chose.
-  if (g_build_language && g_build_language->block && !g_build_language->patch) {
+  if (g_build_language &&
+      (g_build_language->patch || g_build_language->block)) {
     config->language = g_build_language->code;
     // The port's own screens follow the same choice: their language comes from
     // the ini too, and a stale file used to leave them English while the game

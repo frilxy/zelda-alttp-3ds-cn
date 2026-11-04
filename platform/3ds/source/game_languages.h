@@ -25,10 +25,12 @@ static const GameLanguage kGameLanguages[] = {
   { "de", kUiLanguage_German,     "DEUTSCH",   "romfs:/languages/de.bps", NULL },
   { "ru", kUiLanguage_Russian,    "РУССКИЙ",   "romfs:/languages/ru.bps", NULL },
   // Simplified Chinese is not a ROM hack: the translation is its own text and
-  // a 16x16 glyph font, so it ships as a prebuilt pack instead of a patch.
-  // The port's own screens are not translated yet (menu = -1) and the selector
-  // falls back to English for them.
-  { "zh", kUiLanguage_Chinese,    "简体中文", NULL, "romfs:/languages/zh.bin" },
+  // a 16x16 glyph font, so its cartridge is the USA ROM with the finished pack
+  // appended (tools/languages/make_zh_bps.py). The patch carries that pack and
+  // is read back the same way a pack-only build reads romfs:/languages/zh.bin,
+  // which stays as the fallback for a build without the patch.
+  { "zh", kUiLanguage_Chinese,    "简体中文",
+    "romfs:/languages/zh.bps", "romfs:/languages/zh.bin" },
 };
 
 enum {
