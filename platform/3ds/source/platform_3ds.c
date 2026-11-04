@@ -3648,6 +3648,15 @@ static bool AddBuildLanguage(uint8 **assets, size_t *assets_size,
   LogSetup("Language %s: patch %s, translated cartridge %s%s", language->code,
            patch_size ? "read" : "missing", translated ? "OK" : "FAIL",
            pack ? " carrying the language pack" : "");
+  // A pack language is never parsed as a translated cartridge: without its pack
+  // in the cartridge, the bundled pack is the only right source. Parsing would
+  // read the USA text and call it Chinese.
+  if (translated && language->block && !pack) {
+    LogSetup("Language %s: cartridge carries no pack, using the bundled pack",
+             language->code);
+    free(translated);
+    return AddBuildLanguagePack(assets, assets_size);
+  }
   uint8 *combined = NULL;
   size_t combined_size = 0;
   bool ok = translated &&
