@@ -227,6 +227,20 @@ static void verify_text_atlas_follows_renderer(SDL_Renderer *model_renderer) {
   assert(chinese > 0);
   // The renderer is replaced while the old atlases are still cached.
   assert(draw_text_line(second, second_surface, "语言设置", 2) == chinese);
+  // A second return: the shutdown released the atlases and the next boot has a
+  // brand new renderer. One return must not be the only one that works.
+  for (int cycle = 0; cycle < 3; cycle++) {
+    destroy_textures();
+    SDL_Surface *next_surface =
+      SDL_CreateRGBSurfaceWithFormat(0, 320, 240, 32, SDL_PIXELFORMAT_ARGB8888);
+    assert(next_surface);
+    SDL_Renderer *next = SDL_CreateSoftwareRenderer(next_surface);
+    assert(next);
+    int ink = draw_text_line(next, next_surface, "语言设置", 2);
+    SDL_DestroyRenderer(second); SDL_FreeSurface(second_surface);
+    second = next; second_surface = next_surface;
+    assert(ink == chinese);
+  }
   // No atlas at all: the glyphs are drawn straight into the frame.
   destroy_textures();
   SS_TestBreakTextAtlas = true;

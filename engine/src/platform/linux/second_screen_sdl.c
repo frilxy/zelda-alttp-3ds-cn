@@ -475,6 +475,7 @@ static bool g_text_atlas_failure_logged;
 static bool g_stale_atlas_logged;
 static bool g_art_failure_logged;
 static unsigned g_art_failure_frames;
+static bool g_first_draw_logged;
 
 // The atlases are released together with the renderer they belong to, so a
 // mismatched owner means some path replaced the renderer first. Forget the
@@ -498,6 +499,18 @@ static void forget_stale_atlas(SDL_Texture **texture, SDL_Renderer **owner) {
   // owns it. Only the handle is forgotten; the next draw rebuilds it.
   *texture = NULL;
   *owner = NULL;
+}
+
+// A boot must never inherit a text atlas: the renderer that built it is gone,
+// and the new one can occupy the same address (SDL frees and reallocates the
+// renderer struct), which would fool the owner check below.
+static void reset_text_atlases(void) {
+  for (int i = 0; i < 3; i++) {
+    g_cjk_textures[i] = NULL;
+    g_cjk_owners[i] = NULL;
+    g_font_owners[i] = NULL;
+  }
+  g_text_atlas_failure_logged = g_stale_atlas_logged = false;
 }
 
 static void report_text_atlas_failure(const char *what, int w, int h) {
@@ -589,6 +602,10 @@ static SDL_Texture *cjk_texture(int size) {
   }
   g_cjk_textures[slot] = atlas;
   g_cjk_owners[slot] = ss_r;
+#ifdef __3DS__
+  Platform3DS_LogRuntime("Bottom text: Chinese atlas %dpx built (%dx%d, renderer %p)",
+                         size, w, h, (void *)ss_r);
+#endif
   return atlas;
 }
 
@@ -2393,6 +2410,11 @@ bool SecondScreenSDL_Init(SDL_Window *main_window) {
 #ifdef __3DS__
   main_win = main_window;
   ss_is_new_3ds = Platform3DS_IsNew3DS();
+  // Nothing from the previous boot's renderer may be drawn with, and the game
+  // above must have pinned the interface language already (ApplyConfig).
+  reset_text_atlases();
+  Platform3DS_LogRuntime("Bottom text: interface language %d, atlases reset",
+                         UI_GetLanguage());
   if (!NativeTouch_Init()) {
     Platform3DS_LogRuntime("ERROR registering native touch event: %s", SDL_GetError());
     return false;
@@ -3405,6 +3427,16 @@ static void draw_second_screen(int logic_frames) {
     }
   }
 
+#ifdef __3DS__
+  // One line per boot that says the bottom screen is really drawing, with what
+  // it is drawing from. Missing from runtime.log means no bottom frame at all.
+  if (!g_first_draw_logged) {
+    g_first_draw_logged = true;
+    Platform3DS_LogRuntime(
+      "Bottom draw: first frame, art ready, language %d, renderer %p",
+      UI_GetLanguage(), (void *)ss_r);
+  }
+#endif
   int link_x = SS_GetLinkX(), link_y = SS_GetLinkY();
   int area = SS_GetArea();
   bool indoors = SS_IsIndoors();
@@ -3881,15 +3913,12 @@ static void destroy_textures(void) {
   // The text atlases belong to the same renderer. Left behind they would keep
   // looking built while SDL refuses them from the new renderer, so a restart or
   // a return to the main menu - which rebuilds it - drew no Chinese at all.
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 3; i++)
     if (g_cjk_textures[i]) SDL_DestroyTexture(g_cjk_textures[i]);
-    g_cjk_textures[i] = NULL;
-    g_cjk_owners[i] = NULL;
-    // Same indices as tex_native_font, _large and _medium above.
-    g_font_owners[i] = NULL;
-  }
-  g_text_atlas_failure_logged = g_stale_atlas_logged = g_art_failure_logged = false;
+  reset_text_atlases();
+  g_art_failure_logged = false;
   g_art_failure_frames = 0;
+  g_first_draw_logged = false;
   art_ready = false;
 }
 
