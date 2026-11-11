@@ -3195,6 +3195,9 @@ static bool RomLooksJapanese(const uint8 *rom, size_t rom_size) {
 // width (bit 3), which is the shape engine/src/dialogue_cjk.h documents.
 enum { kLanguagePackDialogueFlags = 1 | 2 | 4 | 8 };
 
+// Declared where the profile is prepared; the pack path reports through it too.
+static const char *g_profile_prepare_status;
+
 static bool LanguageUsesPatch(const GameLanguage *language) {
   if (!language || !language->patch)
     return false;

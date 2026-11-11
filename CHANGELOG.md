@@ -1,5 +1,18 @@
 # Changelog
 
+## v4.1.0
+
+Rebuilt on upstream v4.1, with Chinese carried on the glyph path v4.1 added for
+Japanese.
+
+- Simplified Chinese: game text, item names and the port's own screens.
+- Chinese dialogue is page-coded like Japanese: a page byte and an index name a
+  glyph, so the text can print the letters o, p, q, r and s again.
+- Chinese draws 16x16 glyphs of their own width; the setup views and the bottom
+  screen share one wide-glyph description with Japanese.
+- Carried over: MSU-1 streaming audio, its audio configuration and the console
+  detach that keeps MSU logging off the framebuffer.
+
 ## v4.1
 
 - Added Japanese game and menus, automatic language selection and a corrected title logo.
