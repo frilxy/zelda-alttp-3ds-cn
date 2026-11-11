@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(zelda3_3ds VERSION 4.1 LANGUAGES C)
+project(zelda3_3ds VERSION 4.1.0 LANGUAGES C)
 
 set(ZELDA3_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
 set(ZELDA3_NATIVE "${ZELDA3_ROOT}/engine")
@@ -151,8 +151,12 @@ configure_file("${CMAKE_CURRENT_LIST_DIR}/romfs/update-ca.pem" "${ZELDA3_ROMFS}/
 # romfs/languages/README.md. A language whose patch is missing is offered but
 # reports itself unavailable when chosen.
 file(REMOVE_RECURSE "${ZELDA3_ROMFS}/languages")
-file(GLOB ZELDA3_LANGUAGE_PATCHES "${CMAKE_CURRENT_LIST_DIR}/romfs/languages/*.bps")
-file(COPY ${ZELDA3_LANGUAGE_PATCHES} DESTINATION "${ZELDA3_ROMFS}/languages")
+file(GLOB ZELDA3_LANGUAGE_FILES
+  "${CMAKE_CURRENT_LIST_DIR}/romfs/languages/*.bps"
+  "${CMAKE_CURRENT_LIST_DIR}/romfs/languages/*.bin")
+if(ZELDA3_LANGUAGE_FILES)
+  file(COPY ${ZELDA3_LANGUAGE_FILES} DESTINATION "${ZELDA3_ROMFS}/languages")
+endif()
 list(LENGTH ZELDA3_LANGUAGE_PATCHES ZELDA3_LANGUAGE_PATCH_COUNT)
 message(STATUS "Language patches in the RomFS: ${ZELDA3_LANGUAGE_PATCH_COUNT}")
 

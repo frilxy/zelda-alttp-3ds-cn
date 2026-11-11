@@ -26,11 +26,12 @@ code = r'''
 #include <string.h>
 #include <sys/stat.h>
 #define LANGUAGE_CART_FILE "zelda3_language.sfc"
-typedef struct { const char *code; int menu; const char *name, *patch; } GameLanguage;
+typedef struct { const char *code; int menu; const char *name, *patch, *block; } GameLanguage;
 static const char kProfileLanguageFile[] = "assets-language.txt";
 '''
 for name in ['static char *Trim(', 'static bool IsRegularFile(const char *path) {',
-             'static bool LanguageCacheStamp(', 'static bool ProfileLanguageMatches(']:
+             'static bool LanguageUsesPatch(', 'static bool LanguageCacheStamp(',
+             'static bool ProfileLanguageMatches(']:
     code += function(name)
 code += r'''
 static void Write(const char *path, const void *data, size_t size) {
@@ -38,8 +39,11 @@ static void Write(const char *path, const void *data, size_t size) {
   assert(fwrite(data, 1, size, f) == size); assert(fclose(f) == 0);
 }
 int main(void) {
-  GameLanguage en = {"en", 0, "English", NULL};
-  GameLanguage pt = {"pt", 0, "Portuguese", "pt.bps"};
+  GameLanguage en = {"en", 0, "English", NULL, NULL};
+  GameLanguage pt = {"pt", 0, "Portuguese", "pt.bps", NULL};
+  GameLanguage zh = {"zh", 0, "Chinese", NULL, "zh.bin"};
+  // The shipped form: the pack arrives inside the cartridge its patch builds.
+  GameLanguage zhp = {"zh", 0, "Chinese", "zh.bps", "zh.bin"};
   uint8_t patch[16] = {'B','P','S','1',0,0,0,0,0,0,0,0,0x12,0x34,0x56,0x78};
   char stamp[64];
   assert(mkdir("profile", 0700) == 0);
@@ -62,12 +66,26 @@ int main(void) {
   Write("pt.bps", patch, sizeof(patch));
   remove("profile/zelda3_language.sfc");
   assert(!ProfileLanguageMatches("profile", &pt));
+  // A pack has no cartridge: its stamp is the file itself, and its schema moved
+  // when the CJK dialogue flag moved, so old assets are read again.
+  Write("zh.bin", "pack", 4);
+  assert(LanguageCacheStamp(&zh, stamp) && !strncmp(stamp, "zh:3:", 5));
+  assert(!ProfileLanguageMatches("profile", &zh));
+  Write("profile/assets-language.txt", stamp, strlen(stamp));
+  assert(ProfileLanguageMatches("profile", &zh));
+  Write("zh.bin", "PACK", 4);
+  assert(!ProfileLanguageMatches("profile", &zh));
+  // A pack carried by a patch cartridge keeps the pack's schema: the assets
+  // built from it changed shape even though the patch file did not.
+  Write("zh.bps", patch, sizeof(patch));
+  assert(LanguageCacheStamp(&zhp, stamp) && !strncmp(stamp, "zh:3:", 5));
+  assert(!strncmp(stamp, "zh:3:", 5) && strcmp(stamp, "zh:2:") != 0);
   Write("pt.bps", patch, 7);
   assert(!LanguageCacheStamp(&pt, stamp));
   patch[0] = '?';
   Write("pt.bps", patch, sizeof(patch));
   assert(!LanguageCacheStamp(&pt, stamp));
-  puts("PASS language cache: new patch, legacy marker, missing cartridge and malformed patch");
+  puts("PASS language cache: new patch, pack schema, legacy marker, missing cartridge and malformed patch");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='alttp-language-cache-') as directory:
