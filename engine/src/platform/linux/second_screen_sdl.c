@@ -181,20 +181,21 @@ static float         u = 1.0f;
 #include "heart_pixels.h"
 
 // Wide glyphs: Japanese and Chinese each have their own tables and sizes. One
-// atlas per (family, size) is built on first use; the owner catches a renderer
-// that went away with the atlas still pointing at it.
+// atlas per (family, size) is built on first use and freed by destroy_textures,
+// the one path every renderer teardown goes through (see rebuild_renderer and
+// SecondScreenSDL_Shutdown), exactly as upstream does for the Japanese atlas.
 static SDL_Texture *tex_wide_font[2][4];
-static SDL_Renderer *tex_wide_font_owner[2][4];
 static int wide_font_family(unsigned code) { return code >= UI_FONT_CHINESE_CODE ? 1 : 0; }
 static unsigned wide_font_base(int family) { return family ? UI_FONT_CHINESE_CODE : UI_FONT_JAPANESE_CODE; }
 static int wide_font_count(int family) { return family ? (int)kUiCjkGlyphCount : (int)kUiJapaneseGlyphCount; }
 static int wide_font_slot(int size) { return size == 10 ? 0 : size == 12 ? 1 : size == 16 ? 2 : 3; }
 
-static void reset_wide_font_atlases(void) {
+static void destroy_wide_font_atlases(void) {
   for (int family = 0; family < 2; family++)
     for (int slot = 0; slot < 4; slot++) {
+      if (tex_wide_font[family][slot])
+        SDL_DestroyTexture(tex_wide_font[family][slot]);
       tex_wide_font[family][slot] = NULL;
-      tex_wide_font_owner[family][slot] = NULL;
     }
 }
 static SDL_Texture *tex_native_font, *tex_native_font_large, *tex_native_font_medium, *tex_native_sprites, *tex_native_cog;
@@ -479,12 +480,6 @@ static void draw_wide_glyph(unsigned code, int scale, int x, int y, uint32_t c) 
   int size=UiFontGlyphRows(code,scale), slot=wide_font_slot(size);
   int cell=size+1, per_row=(256-1)/cell;
   SDL_Texture *atlas=tex_wide_font[family][slot];
-  if (atlas && tex_wide_font_owner[family][slot]!=ss_r) {
-    // SDL frees a texture with its renderer, and a rebuilt renderer can reuse
-    // the address: rebuild rather than blit a texture this renderer rejects.
-    atlas=NULL;
-    tex_wide_font[family][slot]=NULL;
-  }
   if(!atlas) {
     int rows=wide_font_count(family)/per_row+1, h=rows*cell;
     uint32_t *pixels=calloc(256*h,sizeof(*pixels));
@@ -498,7 +493,6 @@ static void draw_wide_glyph(unsigned code, int scale, int x, int y, uint32_t c) 
     free(pixels);
     if(!atlas) return;
     tex_wide_font[family][slot]=atlas;
-    tex_wide_font_owner[family][slot]=ss_r;
   }
   int i=code-wide_font_base(family);
   SDL_SetTextureColorMod(atlas,(c>>16)&255,(c>>8)&255,c&255);
@@ -2236,9 +2230,6 @@ static void request_dump_now(void) {
 }
 
 bool SecondScreenSDL_Init(SDL_Window *main_window) {
-  // A boot starts without the previous session's atlases: SDL frees them with
-  // the renderer that made them, and a rebuilt renderer can reuse its address.
-  reset_wide_font_atlases();
 #ifdef __3DS__
   main_win = main_window;
   ss_is_new_3ds = Platform3DS_IsNew3DS();
@@ -3715,7 +3706,7 @@ static void destroy_textures(void) {
     if (*texes[i]) SDL_DestroyTexture(*texes[i]);
     *texes[i] = NULL;
   }
-  reset_wide_font_atlases();
+  destroy_wide_font_atlases();
   art_ready = false;
 }
 
