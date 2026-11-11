@@ -26,7 +26,6 @@
 #include <stdint.h>
 
 enum {
-  kDialogueCjkPageFlag = 4,       // dialogue_flags bit 2: pages name glyphs
   kDialogueCjkFlag = 8,           // dialogue_flags bit 3: 16x16 glyphs, own widths
   kDialogueCjkFirstChar = 111,    // first glyph index a page names
   kDialogueCjkPageFirst = 0xf0,   // first page byte

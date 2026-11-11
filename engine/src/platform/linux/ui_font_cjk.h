@@ -14,26 +14,6 @@
 
 #include "ui_glyphs_cjk.h"
 
-// Decodes one UTF-8 codepoint and advances *text past it. Invalid bytes give
-// '?' and advance by one.
-static inline uint32_t UiFont_DecodeUtf8(const char **text) {
-  const unsigned char *p = (const unsigned char *)*text;
-  if (p[0] < 0x80) {
-    (*text)++;
-    return p[0];
-  }
-  if ((p[0] & 0xe0) == 0xc0) {
-    *text += 2;
-    return (uint32_t)(((p[0] & 0x1f) << 6) | (p[1] & 0x3f));
-  }
-  if ((p[0] & 0xf0) == 0xe0) {
-    *text += 3;
-    return (uint32_t)(((p[0] & 0x0f) << 12) | ((p[1] & 0x3f) << 6) | (p[2] & 0x3f));
-  }
-  (*text)++;
-  return '?';
-}
-
 // Index of a character in the tables, or -1.
 static inline int UiCjk_Index(uint32_t codepoint) {
   if (codepoint < kUiCjkFirstCodepoint)
@@ -101,10 +81,4 @@ static inline int UiCjk_TopOffsetFor(int latin_top, int latin_rows, int size) {
 }
 
 // Pixels a character takes at `scale`, or 0 when it has no glyph.
-static inline int UiCjk_WidthFor(uint32_t codepoint, int scale) {
-  if (!UiCjk_HasGlyph(codepoint))
-    return 0;
-  return UiCjk_SizeForScale(scale);
-}
-
 #endif  // ZELDA3_UI_FONT_CJK_H_

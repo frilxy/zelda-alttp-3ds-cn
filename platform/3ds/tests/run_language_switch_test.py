@@ -31,6 +31,17 @@ HARNESS = r'''
 #include "ui_font.h"
 #include "game_languages.h"
 
+// The port's own decoders live in its font header; the test needs one too, and
+// this keeps the production header free of a test-only helper.
+static unsigned decode_utf8(const char **text) {
+  const unsigned char *p = (const unsigned char *)*text;
+  if (p[0] < 0x80) { (*text)++; return p[0]; }
+  if ((p[0] & 0xe0) == 0xc0) { *text += 2; return (unsigned)(((p[0] & 0x1f) << 6) | (p[1] & 0x3f)); }
+  if ((p[0] & 0xf0) == 0xe0) { *text += 3; return (unsigned)(((p[0] & 0x0f) << 12) | ((p[1] & 0x3f) << 6) | (p[2] & 0x3f)); }
+  (*text)++;
+  return '?';
+}
+
 static int is_cjk(unsigned cp) { return cp >= 0x2E80; }
 
 int main(void) {
@@ -51,7 +62,7 @@ int main(void) {
       if (lang == kUiLanguage_Chinese) {
         const char *p = text;
         while (*p) {
-          unsigned cp = UiFont_DecodeUtf8(&p);
+          unsigned cp = decode_utf8(&p);
           if (!is_cjk(cp)) continue;
           // A Han character can also live in the Japanese table; the drawer
           // must still take the Chinese one, or one label mixes 12 px and
