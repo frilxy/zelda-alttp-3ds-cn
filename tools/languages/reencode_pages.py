@@ -145,14 +145,32 @@ def reencode(message):
     return bytes(out)
 
 
-def is_migrated(messages):
-    """True when no message names a glyph with the old escape bytes: every one of
-    those bytes sits at a command or argument position, never as a letter."""
+def count_escapes(messages, first, last):
+    total = 0
     for message in messages:
-        for kind, value in tokens(message, 'pack', 0, ESCAPE_FIRST, ESCAPE_LAST):
-            if kind == 'escape':
-                return False
-    return True
+        i = 0
+        while i < len(message):
+            byte = message[i]
+            if first <= byte <= last:
+                if i + 1 >= len(message):
+                    break
+                total += 1
+                i += 2
+            elif byte < EU_FIRST_COMMAND:
+                i += 1
+            elif byte < EU_REST:
+                i += 1
+            else:
+                i += 3
+    return total
+
+
+def is_migrated(messages):
+    """Whichever scheme names more glyphs is the one the pack is written in: a
+    v3.2 pack has ~382 old escapes and a page-coded one has ~382 pages."""
+    old = count_escapes(messages, ESCAPE_FIRST, ESCAPE_LAST)
+    page = count_escapes(messages, PAGE_FIRST, PAGE_LAST)
+    return page > old
 
 
 def migrate(data):
@@ -187,6 +205,16 @@ def main(argv):
         raise SystemExit(__doc__)
     source = args[0]
     data = open(source, 'rb').read()
+    if check:
+        dialogue, _font = parse_pack(data)
+        messages = unpack_memblk(
+            unpack_memblk(dialogue, 'dialogue')[1], 'messages')
+        if not is_migrated(messages):
+            raise SystemExit(f'{source}: still uses the 0x6f..0x73 escapes '
+                             f'({count_escapes(messages, ESCAPE_FIRST, ESCAPE_LAST)} '
+                             f'glyphs to migrate)')
+        print(f'{source}: already uses page bytes')
+        return
     changed, total, migrated = migrate(data)
     if migrated == data:
         print(f'{source}: already uses page bytes')
