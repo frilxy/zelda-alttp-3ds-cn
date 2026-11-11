@@ -84,7 +84,12 @@ static inline const uint16_t *UiCjk_RowsFor(uint32_t codepoint) {
 // Vertical offset from a text line's y to the top of a `size`-pixel Chinese
 // glyph, centring the square in the Latin line box of that scale.
 static inline int UiCjk_TopOffset(int scale, int size) {
-  int latin = scale == 3 ? 15 : scale == 2 ? 21 : 11;
+  // At scale 3 the 15px Latin line keeps its capitals low (box top -3, ink from
+  // -1) while a 12px Chinese glyph fills its box; centring the boxes left the
+  // Chinese two rows high, so it starts where the Latin box does and the two
+  // baselines meet. Smaller scales have no such gap.
+  if (scale == 3) return -3;
+  int latin = scale == 2 ? 21 : 11;
   return -2 * scale + (latin - size) / 2;
 }
 
