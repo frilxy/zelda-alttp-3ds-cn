@@ -87,6 +87,19 @@ int main(void) {
     }
   }
 
+  // The offsets the 4.0 line settled on, restated so a later port cannot move
+  // Chinese text onto the row borders unnoticed: 10/16/12 pixels at scales
+  // 1..3, and the setup views' own Latin box (-(scale==3?3:2*scale), 15/21/11).
+  for (int s = 1; s <= 3; s++) {
+    int size = UiCjk_SizeForScale(s);
+    assert(size == (s == 2 ? 16 : s == 3 ? 12 : 10));
+    int latin_rows = s == 3 ? 15 : s == 2 ? 21 : 11;
+    int latin_top = -(s == 3 ? 3 : 2 * s);
+    assert(UiCjk_TopOffset(s, size) == (s == 1 ? -2 : s == 2 ? -2 : -5));
+    assert(UiCjk_TopOffsetFor(latin_top, latin_rows, 16) ==
+           (s == 1 ? -4 : s == 2 ? -2 : -3));
+  }
+
   // The selector's own language list: every game language names a menu
   // language and (except English) a file the RomFS carries.
   for (int i = 0; i < (int)kGameLanguageCount; i++) {
@@ -96,7 +109,7 @@ int main(void) {
     if (g->code[0] != 'e')
       assert(g->patch || g->block);
   }
-  printf("PASS language switch: %d strings, %d CJK glyph hits, %d glyph rows across %d languages\n",
+  printf("PASS language switch: %d strings, %d CJK glyph hits, %d glyph rows, offsets 10/16/12 at -2/-2/-5 and -4/-2/-3 across %d languages\n",
          checked, cjk_checked, glyphs, kUiLanguageCount);
   return 0;
 }
