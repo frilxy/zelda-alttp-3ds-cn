@@ -148,14 +148,14 @@ configure_file(
 configure_file("${CMAKE_CURRENT_LIST_DIR}/romfs/update-ca.pem" "${ZELDA3_ROMFS}/update-ca.pem" COPYONLY)
 
 # Language patches (romfs:/languages/<code>.bps), USA ROM -> translation; see
-# romfs/languages/README.md. A language whose patch is missing is offered but
+# romfs/languages/README.md. The Chinese pack is not copied: zh.bps carries the
+# same bytes in its TargetRead, so shipping both would duplicate the payload.
+# A language whose patch is missing is offered but
 # reports itself unavailable when chosen.
 file(REMOVE_RECURSE "${ZELDA3_ROMFS}/languages")
-file(GLOB ZELDA3_LANGUAGE_FILES
-  "${CMAKE_CURRENT_LIST_DIR}/romfs/languages/*.bps"
-  "${CMAKE_CURRENT_LIST_DIR}/romfs/languages/*.bin")
-if(ZELDA3_LANGUAGE_FILES)
-  file(COPY ${ZELDA3_LANGUAGE_FILES} DESTINATION "${ZELDA3_ROMFS}/languages")
+file(GLOB ZELDA3_LANGUAGE_PATCHES "${CMAKE_CURRENT_LIST_DIR}/romfs/languages/*.bps")
+if(ZELDA3_LANGUAGE_PATCHES)
+  file(COPY ${ZELDA3_LANGUAGE_PATCHES} DESTINATION "${ZELDA3_ROMFS}/languages")
 endif()
 list(LENGTH ZELDA3_LANGUAGE_PATCHES ZELDA3_LANGUAGE_PATCH_COUNT)
 message(STATUS "Language patches in the RomFS: ${ZELDA3_LANGUAGE_PATCH_COUNT}")

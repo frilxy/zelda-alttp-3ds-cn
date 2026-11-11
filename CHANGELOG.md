@@ -6,7 +6,7 @@ Rebuilt on upstream v4.1, with Chinese carried on the glyph path v4.1 added for
 Japanese.
 
 - Nine languages, all switchable: the seven upstream patches ride the release,
-  next to the Chinese pack.
+  next to zh.bps, which carries the Chinese pack inside its cartridge form.
 - Simplified Chinese: game text, item names and the port's own screens.
 - Chinese dialogue is page-coded like Japanese: a page byte and an index name a
   glyph, so the text can print the letters o, p, q, r and s again.
