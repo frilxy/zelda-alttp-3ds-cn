@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate engine/src/ui_glyphs_cjk.h: the Chinese glyphs the port's own
+"""Generate engine/src/platform/linux/ui_glyphs_cjk.h: the Chinese glyphs the port's own
 screens draw.
 
 One set: exactly the characters the port's strings use, at the three sizes the
@@ -126,7 +126,7 @@ def main() -> None:
         emit_table(out, 'uint16_t', f'kUiCjk{size}', size, ui_chars, glyphs)
 
     rendered = '\n'.join(out).rstrip('\n') + '\n'
-    target = root / 'engine/src/ui_glyphs_cjk.h'
+    target = root / 'engine/src/platform/linux/ui_glyphs_cjk.h'
     if args.check:
         current = target.read_text(encoding='utf-8') if target.exists() else ''
         if current != rendered:

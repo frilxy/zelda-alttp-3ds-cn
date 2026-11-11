@@ -80,12 +80,47 @@ int main(void) {
   Write("zh.bps", patch, sizeof(patch));
   assert(LanguageCacheStamp(&zhp, stamp) && !strncmp(stamp, "zh:3:", 5));
   assert(!strncmp(stamp, "zh:3:", 5) && strcmp(stamp, "zh:2:") != 0);
+  // Switching through the shipped list: every language gets its own stamp, the
+  // profile matches only the one it was built for, and moving on rebuilds.
+  {
+    GameLanguage shipped[] = {
+      {"en", 0, "English", NULL, NULL},
+      {"es", 0, "Spanish", "es.bps", NULL},
+      {"pt", 0, "Portuguese", "pt.bps", NULL},
+      {"it", 0, "Italian", "it.bps", NULL},
+      {"fr", 0, "French", "fr.bps", NULL},
+      {"de", 0, "German", "de.bps", NULL},
+      {"ru", 0, "Russian", "ru.bps", NULL},
+      {"ja", 0, "Japanese", "ja.bps", NULL},
+      {"zh", 0, "Chinese", "zh.bps", "zh.bin"},
+    };
+    uint8_t small[16] = {'B','P','S','1',0,0,0,0,0,0,0,0,0x12,0x34,0x56,0x78};
+    for (int i = 0; i < 9; i++) {
+      if (shipped[i].patch) Write(shipped[i].patch, small, sizeof(small));
+      if (shipped[i].block) Write(shipped[i].block, "pack", 4);
+      small[15] = (uint8_t)(0x78 + i);  // every patch has its own tail
+      if (shipped[i].patch) Write(shipped[i].patch, small, sizeof(small));
+      char mine[64];
+      assert(LanguageCacheStamp(&shipped[i], mine));
+      for (int j = 0; j < i; j++) {
+        char other[64];
+        assert(LanguageCacheStamp(&shipped[j], other));
+        assert(strcmp(mine, other) != 0);
+      }
+      Write("profile/assets-language.txt", mine, strlen(mine));
+      // A patch language only counts as built when its cartridge is there.
+      if (shipped[i].patch) Write("profile/zelda3_language.sfc", "cart", 4);
+      else remove("profile/zelda3_language.sfc");
+      assert(ProfileLanguageMatches("profile", &shipped[i]));
+      assert(!ProfileLanguageMatches("profile", &shipped[(i + 1) % 9]));
+    }
+  }
   Write("pt.bps", patch, 7);
   assert(!LanguageCacheStamp(&pt, stamp));
   patch[0] = '?';
   Write("pt.bps", patch, sizeof(patch));
   assert(!LanguageCacheStamp(&pt, stamp));
-  puts("PASS language cache: new patch, pack schema, legacy marker, missing cartridge and malformed patch");
+  puts("PASS language cache: nine-language switching, pack schema, legacy marker, missing cartridge and malformed patch");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='alttp-language-cache-') as directory:
