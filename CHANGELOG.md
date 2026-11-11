@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.1.1
+
+- Fairies now restore ten hearts, matching v4.1; the Chinese label and its
+  description still said eight.
+- The gameplay QoL rows on the top screen centre in their buttons instead of
+  sitting on the row's top edge.
+
 ## v4.1.0
 
 Rebuilt on upstream v4.1, with Chinese carried on the glyph path v4.1 added for

@@ -5424,13 +5424,20 @@ static void DrawQolListTop(int language,int selected,int first) {
   for(int row=0;row<rows&&first+row<kQolCount;row++) {
     int option=first+row,y=NativeListRowY(rows,row);bool enabled=Qol_Selected(option);
     uint16_t color=SetupRgb565(enabled?120:255,enabled?232:255,enabled?120:255);
+    const char *label=SetupUiText(language,kUi_QolFastSwitch+option);
+    const char *value=SetupUiText(language,enabled?kUi_On:kUi_Off);
+    // The gameplay theme draws each row into a 22px button (y-6), so the text
+    // centres in that button's ink box; the purple list has no button and keeps
+    // the row's own y.
+    int text_y=y;
     if(g_qol_gameplay_theme) {
       NativeMenuButton(SetupMenuSpan,(void*)(uintptr_t)GFX_TOP,20,y-6,360,22,.5f,option==selected);
-      if(option==selected)SetupMenuText(GFX_TOP,">",28,y,3,color);
+      if(option==selected)SetupMenuText(GFX_TOP,">",28,UiFontCenteredY(">",3,y-6,22),3,color);
+      text_y=UiFontCenteredY(label,3,y-6,22);
     } else if(option==selected)SetupDrawMaskedRgb565Image(GFX_TOP,22,y-5,kSetupFairyWidth,kSetupFairyHeight,kSetupFairyRgb565,kSetupFairyMask);
-    SetupMenuText(GFX_TOP,SetupUiText(language,kUi_QolFastSwitch+option),46,y,3,color);
-    const char *value=SetupUiText(language,enabled?kUi_On:kUi_Off);
-    SetupMenuText(GFX_TOP,value,354-UiFontWidth(value,3),y,3,color);
+    SetupMenuText(GFX_TOP,label,46,text_y,3,color);
+    // The value shares the label's line, so a mixed line keeps one baseline.
+    SetupMenuText(GFX_TOP,value,354-UiFontWidth(value,3),text_y,3,color);
   }
   char page_text[16];snprintf(page_text,sizeof(page_text),"%d / 3",page+1);
   SetupMenuText(GFX_TOP,page_text,(400-UiFontWidth(page_text,3))/2,kNativeListCounterY,3,SetupRgb565(255,255,255));
