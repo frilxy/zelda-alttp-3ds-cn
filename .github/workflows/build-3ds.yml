@@ -83,6 +83,14 @@ jobs:
           # 0xf0..0xf4 to the Japanese font pages. Migrate it here, from the
           # same untouched source, so the tree keeps no binary and the result
           # is reproducible.
+          # The eight upstream languages are patches from their own cartridges
+          # (de/fr/ja Nintendo's, es/pt/it/ru fan translations). They ride the
+          # same backup branch the pack does, so the tree keeps no binary and
+          # every language the selector offers can actually be built.
+          git fetch --depth 1 origin backup/languages-v4
+          for code in de es fr it ja pt ru; do
+            git show FETCH_HEAD:$code.bps > platform/3ds/romfs/languages/$code.bps
+          done
           python3 tools/languages/reencode_pages.py platform/3ds/romfs/languages/zh.bin
           ls -l platform/3ds/romfs/languages/zh.bin
           if command -v python3 >/dev/null; then
