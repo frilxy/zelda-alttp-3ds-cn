@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.1.5
+
+- Re-baked the Chinese UI glyph table from the current strings: 鲁, 侬, 神 and 殿
+  arrived with the new dungeon names but were not in the baked table, so 海拉鲁城
+  drew as a question mark.
+- CI runs the host language tests during the pack step, so a missing glyph fails
+  the build instead of reaching a console.
+
 ## v4.1.4
 
 - Dungeon names follow the current official naming: 海拉尔城 is 海拉鲁城,
