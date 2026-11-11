@@ -3329,6 +3329,7 @@ void RenderText_Draw_Choose1Or2() {  // 8ecf72
 }
 
 bool RenderText_Draw_Scroll() {  // 8ecfe2
+  return true;  // PROBE: no scroll
   uint8 r2 = Text_EffectiveScrollSpeed(dialogue_scroll_speed);
   do {
     for (int i = 0; i < 0x7e0; i += 16) {
