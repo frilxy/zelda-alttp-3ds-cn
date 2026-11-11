@@ -1,5 +1,11 @@
 # Changelog
 
+## v4.1.3
+
+- Chinese text after a line break is drawn on the new line again: the CJK branch
+  had been moved in front of the line advance, so every multi-line message
+  overlapped its previous line (clearest in the attract legend).
+
 ## v4.1.2
 
 - The pack migration no longer rewrites command arguments: a colour or position
