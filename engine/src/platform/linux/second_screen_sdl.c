@@ -1229,11 +1229,43 @@ static int draw_wrapped_center(const char *text, RectFS area, int scale, uint32_
   return lines;
 }
 
-static int draw_wrapped_left(const char *text, RectFS area, int scale, uint32_t color) {
+static int draw_wrapped_left_lines(const char *text, RectFS area, int scale) {
+  char line[256] = {0};
+  const char *start = text;
+  int lines = 0;
+  while (*start) {
+    const char *last_space = NULL, *end = start;
+    size_t length = 0;
+    while (*end && length + 4 < sizeof(line)) {
+      const char *next = end;
+      int accent;
+      UiFontNext(&next, &accent);
+      size_t bytes = (size_t)(next - start);
+      memcpy(line, start, bytes); line[bytes] = 0;
+      if (text_width(line, scale) > area.w) break;
+      last_space = UiFontBreakAt(end, last_space);
+      end = next; length = bytes;
+    }
+    end = UiFontLineEnd(start, end, last_space);
+    if (end == start) break;
+    lines++;
+    start = UiFontSkipBreak(end);
+  }
+  return lines;
+}
+
+// `centre` places a block shorter than the area in its middle: a panel with one
+// short sentence is meant to read that way, and the Chinese translation is much
+// shorter than the English text the panel was sized for.
+static int draw_wrapped_left(const char *text, RectFS area, int scale, uint32_t color, bool centre) {
   char line[256] = {0};
   const char *start = text, *end = text;
   float y = area.y;
   const int line_h = scale==3?16:scale==2?20:11;
+  if (centre) {
+    float block = (float)draw_wrapped_left_lines(text, area, scale) * line_h;
+    if (block < area.h) y = area.y + floorf((area.h - block) / 2);
+  }
   int lines=0;
   while (*start) {
     const char *last_space = NULL;
@@ -1925,7 +1957,7 @@ static void draw_qol_panel(RectFS r) {
     draw_settings_row(&qol_no,false);draw_button_label(qol_no,UI_Text(kUi_Cancel),3);
     draw_settings_row(&qol_yes,true);draw_button_label(qol_yes,UI_Text(kUi_Continue),3);
   } else {
-    draw_wrapped_left(Qol_Description(qol_selected),(RectFS){22,32,276,112},3,COL(255,255,255));
+    draw_wrapped_left(Qol_Description(qol_selected),(RectFS){22,32,276,112},3,COL(255,255,255),true);
     if(Qol_NeedsRestart(qol_selected)) {
       const char *notice=UI_Text(kUi_QolRestart);
       draw_tiny_text(notice,(320-text_width(notice,3))/2,158,3,COL(240,216,112));

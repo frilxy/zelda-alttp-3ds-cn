@@ -175,7 +175,8 @@ static inline const char *UiFontSkipBreak(const char *p) {
 // Where a wrapped line stops: at the last space of Latin text, anywhere between Japanese.
 static inline const char *UiFontLineEnd(const char *start, const char *end, const char *last_space) {
   if (*end && last_space) return last_space;
-  if (*end && end>start && UiFontNoLineStart(end) && (unsigned char)end[-1]>=0x80) {
+  if (*end && end>start && (UiFontNoLineStart(end) || UiFontCjkNoLineStart(end)) &&
+      (unsigned char)end[-1]>=0x80) {
     const char *back=end-1;
     while (back>start && ((unsigned char)*back&0xc0)==0x80) back--;
     if (back>start) return back;

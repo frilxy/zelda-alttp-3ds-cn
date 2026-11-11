@@ -2328,7 +2328,11 @@ static void SetupDrawChar(gfxScreen_t screen, uint32_t c, int x, int y,
     return;
   const uint16_t *chinese = UiCjk_RowsFor(c);
   if (chinese) {
-    int top = UiCjk_TopOffsetFor(-3 * scale, 15 * scale, 16);
+    // The setup views start their Latin ink at -3 for scale 3 while the bottom
+    // screen uses -2*scale, so they get their own offset (4.0.11).
+    int latin_rows = scale == 3 ? 15 : scale == 2 ? 21 : 11;
+    int latin_top = -(scale == 3 ? 3 : 2 * scale);
+    int top = UiCjk_TopOffsetFor(latin_top, latin_rows, 16);
     for (int row = 0; row < 16; row++)
       for (int col = 0; col < 16; col++)
         if (chinese[row] & (1 << (15 - col)))
