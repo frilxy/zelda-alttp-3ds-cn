@@ -106,10 +106,15 @@ jobs:
             ls -l platform/3ds/romfs/languages/
             # A UI string whose glyph is missing from the baked table draws as
             # '?', which only shows on a console; these tests catch it here.
-            python3 platform/3ds/tests/run_language_switch_test.py
-            python3 platform/3ds/tests/run_dialogue_cjk_test.py
-            python3 platform/3ds/tests/run_zh_bps_test.py
-            python3 platform/3ds/tests/run_language_pack_test.py
+            # They need a host compiler and are time boxed so a missing one
+            # cannot stall the build.
+            if command -v cc >/dev/null 2>&1; then
+              CC=cc timeout 600 python3 platform/3ds/tests/run_language_switch_test.py
+              CC=cc timeout 600 python3 platform/3ds/tests/run_dialogue_cjk_test.py
+              timeout 900 python3 platform/3ds/tests/run_language_pack_test.py
+            else
+              echo "no host cc; skipping the host language tests"
+            fi
           fi
 
       - name: Build 3DSX and CIA

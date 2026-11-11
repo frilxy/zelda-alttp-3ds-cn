@@ -2,9 +2,12 @@
 
 ## v4.1.5
 
-- Re-baked the Chinese UI glyph table from the current strings: 鲁, 侬, 神 and 殿
-  arrived with the new dungeon names but were not in the baked table, so 海拉鲁城
-  drew as a question mark.
+- Bottom-screen names follow the dialogue translation (LinkFish's
+  `tables/dialogue_cn.txt`), which is the text the game itself shows:
+  海拉鲁城堡, 加侬之塔, 东部神殿, 头骨之森, 盗贼之村, 乌龟岩, 三角神力, 魔镜,
+  精灵. Only names the dialogue never mentions keep the neutral wording.
+- Re-baked the Chinese UI glyph table from the current strings: the new names
+  brought characters the old bake did not carry, so they drew as question marks.
 - CI runs the host language tests during the pack step, so a missing glyph fails
   the build instead of reaching a console.
 
