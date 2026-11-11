@@ -84,64 +84,74 @@ ESCAPE_FIRST = 0x6f
 ESCAPE_LAST = 0x73
 
 
-def decode_escapes(message, name, index):
-    out, i = [], 0
+# The EU encoding, exactly as engine/src/messaging.c decodes it: bytes below
+# 0x7f are letters, 0x7f..0x86 are commands without arguments, and 0x87 and up
+# take a selector byte and one argument. Only a *letter* position can carry a
+# glyph escape. A command argument that happens to hold 0x6f..0x73 is data: the
+# first version of this tool rewrote those too, which shifted the rest of every
+# message that set a colour or a position to such a value.
+EU_FIRST_COMMAND = 0x7f
+EU_REST = 0x87
+
+
+def tokens(message, name, index, first, last):
+    """Split a message into ('escape', glyph) at letter positions and raw bytes.
+
+    A three-byte command comes back as one 'raw' token so the caller can copy it
+    untouched.
+    """
+    i = 0
     while i < len(message):
         byte = message[i]
-        if ESCAPE_FIRST <= byte <= ESCAPE_LAST:
+        # The engine tests the glyph escape before the letter/command split, and
+        # a page byte (0xf0..0xf4) is above every command, so the order matters.
+        if first <= byte <= last:
             if i + 1 >= len(message):
                 raise PackError(f'{name}: message {index} ends with a glyph prefix')
-            out.append(('glyph', (byte - ESCAPE_FIRST) * 256 + message[i + 1]))
+            yield ('escape', (byte - first) * 256 + message[i + 1])
             i += 2
-        else:
-            out.append(('byte', byte))
+        elif byte < EU_FIRST_COMMAND:
+            yield ('byte', byte)
             i += 1
-    return out
+        elif byte < EU_REST:
+            yield ('byte', byte)
+            i += 1
+        else:
+            # A message can end on a truncated command (the pack has a few); copy
+            # whatever is left rather than failing the whole migration.
+            chunk = message[i:i + 3]
+            yield ('raw', chunk)
+            i += len(chunk)
+
+
+def decode_escapes(message, name, index):
+    return list(tokens(message, name, index, ESCAPE_FIRST, ESCAPE_LAST))
 
 
 def decode_pages(message):
-    out, i = [], 0
-    while i < len(message):
-        byte = message[i]
-        if PAGE_FIRST <= byte <= PAGE_LAST:
-            if i + 1 >= len(message):
-                raise PackError('message ends with a page byte')
-            out.append(('glyph', (byte - PAGE_FIRST) * 256 + message[i + 1]))
-            i += 2
-        else:
-            out.append(('byte', byte))
-            i += 1
-    return out
+    return list(tokens(message, name='pack', index=0,
+                       first=PAGE_FIRST, last=PAGE_LAST))
 
 
 def reencode(message):
-    out, i = bytearray(), 0
-    while i < len(message):
-        byte = message[i]
-        if ESCAPE_FIRST <= byte <= ESCAPE_LAST:
-            if i + 1 >= len(message):
-                raise PackError('message ends with a glyph prefix')
-            out += bytes((PAGE_FIRST + (byte - ESCAPE_FIRST), message[i + 1]))
-            i += 2
+    out = bytearray()
+    for kind, value in tokens(message, 'pack', 0, ESCAPE_FIRST, ESCAPE_LAST):
+        if kind == 'escape':
+            out += bytes((PAGE_FIRST + (value >> 8), value & 0xff))
+        elif kind == 'raw':
+            out += value
         else:
-            out.append(byte)
-            i += 1
+            out.append(value)
     return bytes(out)
 
 
 def is_migrated(messages):
-    """True when no message carries a bare 0x6f..0x73 byte: every one of those
-    bytes is now an index behind a page byte."""
+    """True when no message names a glyph with the old escape bytes: every one of
+    those bytes sits at a command or argument position, never as a letter."""
     for message in messages:
-        i = 0
-        while i < len(message):
-            byte = message[i]
-            if PAGE_FIRST <= byte <= PAGE_LAST:
-                i += 2
-                continue
-            if ESCAPE_FIRST <= byte <= ESCAPE_LAST:
+        for kind, value in tokens(message, 'pack', 0, ESCAPE_FIRST, ESCAPE_LAST):
+            if kind == 'escape':
                 return False
-            i += 1
     return True
 
 

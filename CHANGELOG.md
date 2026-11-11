@@ -1,5 +1,11 @@
 # Changelog
 
+## v4.1.2
+
+- The pack migration no longer rewrites command arguments: a colour or position
+  whose value happened to be 0x6f..0x73 was taken for a glyph prefix, which
+  shifted the rest of seven messages.
+
 ## v4.1.1
 
 - Fairies now restore ten hearts, matching v4.1; the Chinese label and its
