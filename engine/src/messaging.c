@@ -3106,6 +3106,22 @@ static void VWF_RenderJapanese(int g) {
 }
 
 void VWF_RenderSingle(int c) {  // 8ecab8
+  if ((g_zenv.dialogue_flags & 4) && !(g_zenv.dialogue_flags & kDialogueCjkFlag)) {
+    VWF_RenderJapanese(c);
+    return;
+  }
+  if (c != 0x59)
+    sound_effect_2 = 12;
+  vwf_line_speed_cur = vwf_line_speed;
+
+  if (vwf_flag_next_line) {
+    vwf_line_ptr = kVWF_RenderCharacter_renderPos[vwf_curline>>1];
+    vwf_var1 = kVWF_RenderCharacter_linePositions[vwf_curline>>1];
+    vwf_flag_next_line = 0;
+  }
+
+  // The line advance above must run first: a break arrives as a command and
+  // the glyph after it is the one that moves to the new line (4.0 did the same).
   // A Chinese glyph is 16x16 and carries its own width; it cannot go through
   // the letter path below, which looks its width up in the 99-letter table.
   // The language block keeps the glyphs behind those letters.
@@ -3121,19 +3137,6 @@ void VWF_RenderSingle(int c) {  // 8ecab8
     };
     DialogueCjk_Render(&target, c - kDialogueCjkFirstChar);
     return;
-  }
-  if (g_zenv.dialogue_flags & 4) {
-    VWF_RenderJapanese(c);
-    return;
-  }
-  if (c != 0x59)
-    sound_effect_2 = 12;
-  vwf_line_speed_cur = vwf_line_speed;
-
-  if (vwf_flag_next_line) {
-    vwf_line_ptr = kVWF_RenderCharacter_renderPos[vwf_curline>>1];
-    vwf_var1 = kVWF_RenderCharacter_linePositions[vwf_curline>>1];
-    vwf_flag_next_line = 0;
   }
   
   const uint8 *kFontData = FindIndexInMemblk(g_zenv.dialogue_font_blk, 0).ptr;
@@ -3329,7 +3332,6 @@ void RenderText_Draw_Choose1Or2() {  // 8ecf72
 }
 
 bool RenderText_Draw_Scroll() {  // 8ecfe2
-  return true;  // PROBE: no scroll
   uint8 r2 = Text_EffectiveScrollSpeed(dialogue_scroll_speed);
   do {
     for (int i = 0; i < 0x7e0; i += 16) {
