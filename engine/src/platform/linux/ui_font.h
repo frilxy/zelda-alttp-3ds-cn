@@ -3,6 +3,7 @@
 #include "generated_ui_sprites.h"
 #include "generated_ui_japanese.h"
 #include "ui_font_cjk.h"
+#include "../../ui_strings.h"  // UI_GetLanguage: which wide table wins
 
 // Deterministic Latin and Cyrillic UI glyphs. Decode once per character; accented letters
 // use the same editable 5x7 base and an explicit accent, never byte fragments.
@@ -66,17 +67,22 @@ static inline char UiFontNext(const char **text, int *accent) {
     default: return '?';
     }
   }
-  if ((*p & 0xf0) == 0xe0 && (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80 &&
-      UiFontJapaneseIndex(((*p & 15u) << 12) | ((p[1] & 63u) << 6) | (p[2] & 63u)) >= 0) {
-    *text += 2;
-    *accent = UI_FONT_JAPANESE;
-    return ' ';
-  }
-  if ((*p & 0xf0) == 0xe0 && (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80 &&
-      UiCjk_HasGlyph(((*p & 15u) << 12) | ((p[1] & 63u) << 6) | (p[2] & 63u))) {
-    *text += 2;
-    *accent = UI_FONT_CHINESE;
-    return ' ';
+  if ((*p & 0xf0) == 0xe0 && (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80) {
+    unsigned cp = ((*p & 15u) << 12) | ((p[1] & 63u) << 6) | (p[2] & 63u);
+    int zh = UiCjk_Index(cp), ja = UiFontJapaneseIndex(cp);
+    // A Han character can exist in both tables (回, 直, 骨...), and the two
+    // tables differ in size: 12 px against 10 at scale 3. The language on
+    // screen picks its own table, so one line never mixes both.
+    if (zh >= 0 && (ja < 0 || UI_GetLanguage() == kUiLanguage_Chinese)) {
+      *text += 2;
+      *accent = UI_FONT_CHINESE;
+      return ' ';
+    }
+    if (ja >= 0) {
+      *text += 2;
+      *accent = UI_FONT_JAPANESE;
+      return ' ';
+    }
   }
   unsigned remaining = *p >= 0xf0 && *p <= 0xf4 ? 3 : *p >= 0xe0 && *p <= 0xef ? 2 : *p >= 0xc2 && *p <= 0xdf ? 1 : 0;
   while (remaining-- && **text && ((unsigned char)**text & 0xc0) == 0x80) (*text)++;

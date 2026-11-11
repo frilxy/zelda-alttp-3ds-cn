@@ -53,6 +53,17 @@ int main(void) {
         while (*p) {
           unsigned cp = UiFont_DecodeUtf8(&p);
           if (!is_cjk(cp)) continue;
+          // A Han character can also live in the Japanese table; the drawer
+          // must still take the Chinese one, or one label mixes 12 px and
+          // 10 px cells (回 next to 返).
+          {
+            const char *at = p - 3;
+            int accent = -1;
+            const char *scan = at;
+            UiFontNext(&scan, &accent);
+            assert(accent == UI_FONT_CHINESE);
+            assert(UiFontNextCode(&at) >= UI_FONT_CHINESE_CODE);
+          }
           int index = UiCjk_Index(cp);
           assert(index >= 0);
           for (int size = 10; size <= 16; size += 2) {
