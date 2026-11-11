@@ -1,5 +1,11 @@
 # Changelog
 
+## v4.1.4
+
+- Dungeon names follow the current official naming: 海拉尔城 is 海拉鲁城,
+  加农之塔 is 盖侬之塔, and the Palace dungeons use 神殿 as in the Japanese
+  originals (东之神殿, 沙漠神殿, 沼泽神殿, 暗之神殿, 冰之神殿).
+
 ## v4.1.3
 
 - Chinese text after a line break is drawn on the new line again: the CJK branch

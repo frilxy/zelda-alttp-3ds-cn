@@ -200,19 +200,19 @@ static const char *const kUiStrings[kUiStringCount][kUiLanguageCount] = {
 // Dungeons in game order. Names are wrapped or use the small native face.
 static const char *const kUiDungeonNames[14][kUiLanguageCount] = {
   { "SEWERS", "\xC3\x89GOUTS", "ALCANTARILLAS", "ESGOTOS", "FOGNE", "KANALISATION", "КАНАЛИЗАЦИЯ", "地下水路", "下水道" },
-  { "HYRULE CASTLE", "CHATEAU D'HYRULE", "CASTILLO DE HYRULE", "CASTELO DE HYRULE", "CASTELLO DI HYRULE", "SCHLOSS HYRULE", "ЗАМОК ХАЙРУЛА", "ハイラル城", "海拉尔城" },
-  { "EASTERN PALACE", "PALAIS DE L'EST", "PALACIO DEL ESTE", "PALÁCIO DO LESTE", "PALAZZO ORIENTALE", "OSTPALAST", "ВОСТОЧНЫЙ ДВОРЕЦ", "東の神殿", "东方宫殿" },
-  { "DESERT PALACE", "PALAIS DU D\xC3\x89SERT", "PALACIO DEL DESIERTO", "PALÁCIO DO DESERTO", "PALAZZO DEL DESERTO", "WÜSTENPALAST", "ПУСТЫННЫЙ ДВОРЕЦ", "砂漠の神殿", "沙漠宫殿" },
+  { "HYRULE CASTLE", "CHATEAU D'HYRULE", "CASTILLO DE HYRULE", "CASTELO DE HYRULE", "CASTELLO DI HYRULE", "SCHLOSS HYRULE", "ЗАМОК ХАЙРУЛА", "ハイラル城", "海拉鲁城" },
+  { "EASTERN PALACE", "PALAIS DE L'EST", "PALACIO DEL ESTE", "PALÁCIO DO LESTE", "PALAZZO ORIENTALE", "OSTPALAST", "ВОСТОЧНЫЙ ДВОРЕЦ", "東の神殿", "东之神殿" },
+  { "DESERT PALACE", "PALAIS DU D\xC3\x89SERT", "PALACIO DEL DESIERTO", "PALÁCIO DO DESERTO", "PALAZZO DEL DESERTO", "WÜSTENPALAST", "ПУСТЫННЫЙ ДВОРЕЦ", "砂漠の神殿", "沙漠神殿" },
   { "CASTLE TOWER", "TOUR DU CHATEAU", "TORRE DEL CASTILLO", "TORRE DO CASTELO", "TORRE DEL CASTELLO", "SCHLOSSTURM", "БАШНЯ ЗАМКА", "城の塔", "城堡塔" },
-  { "SWAMP PALACE", "PALAIS DES MARAIS", "PALACIO DEL PANTANO", "PALÁCIO DO PÂNTANO", "PALAZZO DELLA PALUDE", "SUMPFPALAST", "БОЛОТНЫЙ ДВОРЕЦ", "水の神殿", "沼泽宫殿" },
-  { "DARK PALACE", "PALAIS DES T\xC3\x89N\xC3\x88""BRES", "PALACIO OSCURO", "PALÁCIO DAS TREVAS", "PALAZZO OSCURO", "DUNKELPALAST", "ТЁМНЫЙ ДВОРЕЦ", "ヤミの神殿", "黑暗宫殿" },
+  { "SWAMP PALACE", "PALAIS DES MARAIS", "PALACIO DEL PANTANO", "PALÁCIO DO PÂNTANO", "PALAZZO DELLA PALUDE", "SUMPFPALAST", "БОЛОТНЫЙ ДВОРЕЦ", "水の神殿", "沼泽神殿" },
+  { "DARK PALACE", "PALAIS DES T\xC3\x89N\xC3\x88""BRES", "PALACIO OSCURO", "PALÁCIO DAS TREVAS", "PALAZZO OSCURO", "DUNKELPALAST", "ТЁМНЫЙ ДВОРЕЦ", "ヤミの神殿", "暗之神殿" },
   { "MISERY MIRE", "MARAIS SANS FIN", "PALACIO DE MISERY MIRE", "PALÁCIO DO PÂNTANO SOMBRIO", "PALAZZO DELLA PALUDE OSCURA", "ELENDSSUMPF", "БОЛОТО СТРАДАНИЙ", "沼の神殿", "苦难沼泽" },
   { "SKULL WOODS", "BOIS DU CRANE", "PALACIO DE LA CALAVERA", "PALÁCIO DA CAVEIRA", "PALAZZO DEL TESCHIO", "SCHÄDELWALD", "ЛЕС КОСТЕЙ", "森の神殿", "骷髅森林" },
-  { "ICE PALACE", "PALAIS DE GLACE", "PALACIO DE HIELO", "PALÁCIO DE GELO", "PALAZZO DI GHIACCIO", "EISPALAST", "ЛЕДЯНОЙ ДВОРЕЦ", "氷の神殿", "冰之宫殿" },
+  { "ICE PALACE", "PALAIS DE GLACE", "PALACIO DE HIELO", "PALÁCIO DE GELO", "PALAZZO DI GHIACCIO", "EISPALAST", "ЛЕДЯНОЙ ДВОРЕЦ", "氷の神殿", "冰之神殿" },
   { "TOWER OF HERA", "TOUR D'H\xC3\x89RA", "TORRE DE HERA", "TORRE DE HERA", "TORRE DI HERA", "HERATURM", "БАШНЯ ГЕРЫ", "ヘラの塔", "赫拉之塔" },
   { "THIEVES TOWN", "VILLAGE DES VOLEURS", "PUEBLO DE LADRONES", "VILA DOS LADRÕES", "VILLAGGIO DEI LADRI", "DIEBESVERSTECK", "ГОРОД ВОРОВ", "盗賊の村", "盗贼镇" },
   { "TURTLE ROCK", "ROCHER DE LA TORTUE", "ROCA DE LA TORTUGA", "ROCHA DA TARTARUGA", "ROCCIA DELLA TARTARUGA", "SCHILDKRÖTENFELS", "ЧЕРЕПАШЬЯ СКАЛА", "カメイワ", "龟岩" },
-  { "GANONS TOWER", "TOUR DE GANON", "TORRE DE GANON", "TORRE DE GANON", "TORRE DI GANON", "GANONS TURM", "БАШНЯ ГАНОНА", "ガノンの塔", "加农之塔" },
+  { "GANONS TOWER", "TOUR DE GANON", "TORRE DE GANON", "TORRE DE GANON", "TORRE DI GANON", "GANONS TURM", "БАШНЯ ГАНОНА", "ガノンの塔", "盖侬之塔" },
 };
 
 static int g_ui_language = kUiLanguage_English;
