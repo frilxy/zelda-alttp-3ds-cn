@@ -5178,7 +5178,7 @@ static const char *LanguageText(int language, int id) {
   return SetupCanDraw(text) ? text : kLanguageSelectorText[0][id];
 }
 
-static bool g_startup_menu_seen,g_startup_menu_pending,g_startup_intro_seen,g_startup_reopen_once;
+static bool g_startup_menu_seen=true,g_startup_menu_pending,g_startup_intro_seen,g_startup_reopen_once;
 static bool g_startup_card_pending;
 
 // Return to the full startup home without forcing language selection or
