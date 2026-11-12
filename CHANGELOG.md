@@ -1,5 +1,10 @@
 # Changelog
 
+## v4.1.7
+
+- Cheat descriptions read 不赠送炸弹 / 不赠送箭, 精灵恢复10颗心 and 4瓶独立, and
+  the glyph table is rebaked for the new characters.
+
 ## v4.1.6
 
 - The update check survives an exhausted anonymous GitHub API quota: when the
