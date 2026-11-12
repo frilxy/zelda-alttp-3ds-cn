@@ -117,9 +117,11 @@ def tokens(message, name, index, first, last):
             yield ('byte', byte)
             i += 1
         else:
-            # A message can end on a truncated command (the pack has a few); copy
-            # whatever is left rather than failing the whole migration.
-            chunk = message[i:i + 3]
+            # 0x87 and up take a selector byte that doubles as the argument, so the
+            # command is two bytes: the loader does `*dst++ = *src` with src on the
+            # selector and then `src += 1` past it. Treating it as three bytes ate
+            # the first glyph of the messages that put text right after one.
+            chunk = message[i:i + 2]
             yield ('raw', chunk)
             i += len(chunk)
 

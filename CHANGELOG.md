@@ -2,6 +2,11 @@
 
 ## v4.1.7
 
+- The pack migration reads 0x87-and-up commands as the two bytes the engine
+  consumes (opcode and selector), not three. Seven messages put a glyph right
+  after such a command and lost it: the game-over prompt showed a stray letter
+  before 存并继续, and Agahnim's two hints and the fortune teller's four lines
+  were affected the same way.
 - Cheat descriptions read 不赠送炸弹 / 不赠送箭, 精灵恢复10颗心 and 4瓶独立, and
   the glyph table is rebaked for the new characters.
 
