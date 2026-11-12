@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.1.8
+
+- The fork is line with upstream again: the top-screen QoL rows go back to the
+  row's own y, the bottom-screen description block goes back to top alignment,
+  and only a pack language (Chinese) pins the chosen language after the ini is
+  parsed. Those three were local polish that moved text for all nine languages,
+  which the upstream pull request deliberately does not carry.
+
 ## v4.1.7
 
 - The pack migration reads 0x87-and-up commands as the two bytes the engine
