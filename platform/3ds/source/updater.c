@@ -255,14 +255,26 @@ static bool head_url(const char *url, char *final_url, size_t final_cap, uint64_
 
 // Stable channel without the API: tag from the release page redirect, length
 // from the asset and digest from SHASUMS256 (published with every release).
-static bool check_via_web(UpdateRelease *out) {
+static bool check_via_web(UpdateRelease *out, bool prerelease) {
   char final_url[512];
-  uint64_t size = 0;
-  if (!head_url("https://github.com/" UPDATE_REPOSITORY "/releases/latest",
-                final_url, sizeof(final_url), NULL))
-    return false;
   char tag[48];
-  if (!Update_TagFromReleaseUrl(final_url, tag, sizeof(tag))) return false;
+  uint64_t size = 0;
+  if (prerelease) {
+    // /releases/latest only names the newest stable release, so the pre-release
+    // channel reads the Atom feed instead: it lists every release, newest first.
+    Transfer feed = {0};
+    bool have = fetch("https://github.com/" UPDATE_REPOSITORY "/releases.atom", &feed);
+    int found = have ? Update_TagFromReleaseList(feed.data ? feed.data : "", feed.size, tag,
+                                                  sizeof(tag))
+                     : 0;
+    free(feed.data);
+    if (!found) return false;
+  } else {
+    if (!head_url("https://github.com/" UPDATE_REPOSITORY "/releases/latest",
+                  final_url, sizeof(final_url), NULL))
+      return false;
+    if (!Update_TagFromReleaseUrl(final_url, tag, sizeof(tag))) return false;
+  }
   const char *v = tag[0] == 'v' ? tag + 1 : tag;
   char name[96], url[512], sums_url[512];
   snprintf(name, sizeof(name), "zelda3-3ds-v%s.%s", v, homebrew ? "3dsx" : "cia");
@@ -312,7 +324,7 @@ static void run_job(void *arg) {
     int result = fetch(url, &t)
                      ? Update_ParseRelease(t.data, t.size, s.prerelease, homebrew, &candidate)
                      : -1;
-    if (result < 0 && !s.prerelease && check_via_web(&candidate)) result = 1;
+    if (result < 0 && check_via_web(&candidate, s.prerelease)) result = 1;
     if (result < 0) { publish(UPDATE_ERROR, "INVALID RELEASE DATA"); goto done; }
     if (!result) { publish(UPDATE_EMPTY, "NO PRE-RELEASE AVAILABLE"); ok = true; goto done; }
     LightLock_Lock(&lock); release = candidate; strcpy(status.version, release.version); LightLock_Unlock(&lock);

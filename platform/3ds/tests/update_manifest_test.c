@@ -40,6 +40,14 @@ int main(void) {
   CHECK(!Update_TagFromReleaseUrl("https://github.com/frilxy/zelda-alttp-3ds-cn/releases/tag/nonsense",
                                   tag, sizeof(tag)), "invalid tag rejected");
 
+  const char *atom =
+    "<feed><entry><link rel=\"alternate\" type=\"text/html\" "
+    "href=\"https://github.com/frilxy/zelda-alttp-3ds-cn/releases/tag/v4.1.6\"/></entry>"
+    "<entry><link href=\"https://github.com/frilxy/zelda-alttp-3ds-cn/releases/tag/v4.1.5\"/></entry></feed>";
+  CHECK(Update_TagFromReleaseList(atom, strlen(atom), tag, sizeof(tag)) && !strcmp(tag, "v4.1.6"),
+        "newest tag from the atom feed");
+  CHECK(!Update_TagFromReleaseList("<feed></feed>", 13, tag, sizeof(tag)), "empty feed has no tag");
+
   char sha[65];
   const char *sums =
     "1111111111111111111111111111111111111111111111111111111111111111  other-file.cia\r\n"

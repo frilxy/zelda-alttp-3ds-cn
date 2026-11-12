@@ -78,6 +78,24 @@ static bool candidate(json_t *o, bool pre, bool homebrew, UpdateRelease *out) {
   }
   return found;
 }
+int Update_TagFromReleaseList(const char *data, size_t size, char *tag, size_t cap) {
+  static const char marker[] = "/releases/tag/";
+  if (!data || !tag || cap < 2) return 0;
+  for (size_t i = 0; i + sizeof(marker) < size; i++) {
+    if (memcmp(data + i, marker, sizeof(marker) - 1)) continue;
+    size_t at = i + sizeof(marker) - 1, n = 0;
+    while (at + n < size && n + 1 < cap) {
+      char c = data[at + n];
+      if (!(isalnum((unsigned char)c) || c == '.' || c == '-' || c == '_')) break;
+      tag[n] = c;
+      n++;
+    }
+    tag[n] = 0;
+    if (n && Update_ValidVersion(tag)) return 1;
+  }
+  return 0;
+}
+
 int Update_TagFromReleaseUrl(const char *url, char *tag, size_t cap) {
   static const char marker[] = "/releases/tag/";
   if (!url || !tag || cap < 2) return 0;

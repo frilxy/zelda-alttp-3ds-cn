@@ -21,6 +21,8 @@ bool Update_AllowedDownloadUrl(const char *url);
 // A sha256sum(1) file: "<64 hex>  <name>" per line.
 int Update_ParseSha256Sums(const char *data, size_t size, const char *asset,
                            char sha256[65]);
+// The first release tag in an Atom feed, which GitHub lists newest first.
+int Update_TagFromReleaseList(const char *data, size_t size, char *tag, size_t cap);
 // The tag out of https://github.com/<repo>/releases/tag/<tag>.
 int Update_TagFromReleaseUrl(const char *url, char *tag, size_t cap);
 
