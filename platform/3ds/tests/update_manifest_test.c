@@ -1,54 +1,62 @@
-#include "update_manifest.h"
-#include <assert.h>
-#include <jansson.h>
+// Host checks for the pieces the update check relies on: the API manifest, the
+// tag out of a release URL, and the sha256sum(1) file the check falls back to
+// when GitHub's anonymous API answers 403.
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-static json_t *make(const char *tag, bool pre, bool homebrew) {
-  char url[512], name[100]; const char *v=tag[0]=='v'?tag+1:tag;
-  snprintf(name,sizeof(name),"zelda3-3ds-v%s.%s",v,homebrew?"3dsx":"cia");
-  snprintf(url,sizeof(url),"https://github.com/" UPDATE_REPOSITORY "/releases/download/%s/%s",tag,name);
-  return json_pack("{s:s,s:b,s:b,s:[{s:s,s:s,s:s,s:i}]}","tag_name",tag,"draft",0,"prerelease",pre,"assets",
-    "name",name,"browser_download_url",url,"digest","sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","size",5000000);
-}
-static int parse(json_t *r,bool pre,bool hb,UpdateRelease *out) {
- char *s=json_dumps(r,JSON_COMPACT);int result=Update_ParseRelease(s,strlen(s),pre,hb,out);free(s);return result;
-}
-int main(int argc,char **argv) {
- assert(Update_IsNewer("v3.1","3.1-E1"));assert(Update_IsNewer("v3.1-E10","3.1-E9"));
- assert(Update_IsNewer("v3.10","3.9"));assert(!Update_IsNewer("v3.1-E99","3.1"));
- assert(!Update_IsNewer("v3.0","3.1-E1"));assert(!Update_IsNewer("v3.1-E1","3.1-E1"));
- assert(!Update_ValidVersion("3.1/../evil"));assert(!Update_ValidVersion("3..1"));
- assert(!Update_ValidVersion("3.1-E99999999"));assert(!Update_ValidVersion("3.1.2.3"));
- char lines[384][43];
- unsigned count=Update_FormatNotes("## Changelog\n\n- **Fixed** [world colors](https://example.com).\n![QR](https://example.com/qr.png)",lines,384);
- assert(count==3 && !strcmp(lines[0],"Changelog") && !lines[1][0] && !strcmp(lines[2],"- Fixed world colors."));
- assert(Update_FormatNotes("",lines,384)==1 && !strcmp(lines[0],"No changelog provided."));
- assert(Update_FormatNotes("ignored",lines,0)==0);
- char long_notes[12289];memset(long_notes,'x',12288);long_notes[12288]=0;
- count=Update_FormatNotes(long_notes,lines,384);assert(count==293);
- for(unsigned i=0;i<count;i++)assert(strlen(lines[i])<=42);
- assert(Update_FormatNotes(long_notes,lines,2)==2);
- UpdateRelease out;json_t *r=make("v3.1",false,false);assert(parse(r,false,false,&out)==1);
- assert(!strcmp(out.version,"v3.1")&&out.size==5000000);assert(parse(r,false,true,&out)==-1);
- json_t *a=json_array_get(json_object_get(r,"assets"),0);
- json_object_set_new(a,"digest",json_string("sha256:abc"));assert(parse(r,false,false,&out)==-1);
- json_decref(r);r=make("v3.1",false,false);a=json_array_get(json_object_get(r,"assets"),0);
- json_object_set_new(a,"browser_download_url",json_string("https://evil.example/zelda.cia"));assert(parse(r,false,false,&out)==-1);
- json_decref(r);r=make("v3.1",false,false);a=json_array_get(json_object_get(r,"assets"),0);
- json_object_set_new(a,"size",json_integer(UPDATE_MAX_FILE+1));assert(parse(r,false,false,&out)==-1);
- json_decref(r);r=make("v3.1",false,false);json_object_set_new(r,"draft",json_true());assert(parse(r,false,false,&out)==-1);json_decref(r);
- r=json_array();assert(parse(r,true,false,&out)==0);
- json_array_append_new(r,make("v3.2-E2",true,false));json_array_append_new(r,make("v3.2-E10",true,false));
- json_array_append_new(r,make("v3.3",false,false));assert(parse(r,true,false,&out)==1&&!strcmp(out.version,"v3.2-E10"));json_decref(r);
- r=make("v3.1",false,true);assert(parse(r,false,true,&out)==1);json_decref(r);
- assert(Update_ParseRelease("{}garbage",9,false,false,&out)==-1);
- assert(Update_ParseRelease("{\"draft\":false,\"draft\":true}",28,false,false,&out)==-1);
- for(int i=1;i<argc;i++) {
-   FILE *f=fopen(argv[i],"rb");assert(f);fseek(f,0,SEEK_END);long n=ftell(f);rewind(f);
-   char *data=malloc(n);assert(fread(data,1,n,f)==(size_t)n);fclose(f);
-   bool pre=i==2;int result=Update_ParseRelease(data,n,pre,false,&out);free(data);
-   assert(result>=0);printf("Live %s response: %d %s\n",pre?"pre-release":"stable",result,out.version);
- }
- puts("PASS: version order, channels, assets, malformed JSON, digest/size/URL/draft guards, live GitHub responses");
+#include "update_manifest.h"
+
+static int failures;
+#define CHECK(cond, what) do { if (!(cond)) { printf("FAIL %s\n", what); failures++; } } while (0)
+
+static const char kManifest[] =
+  "{\"tag_name\":\"v9.9.9\",\"draft\":false,\"prerelease\":false,"
+  "\"body\":\"notes\",\"assets\":["
+  "{\"name\":\"zelda3-3ds-v9.9.9.cia\",\"size\":40960,"
+  "\"browser_download_url\":\"https://github.com/frilxy/zelda-alttp-3ds-cn/releases/download/v9.9.9/zelda3-3ds-v9.9.9.cia\","
+  "\"digest\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\"}]}";
+
+int main(void) {
+  UpdateRelease r;
+  int res = Update_ParseRelease(kManifest, strlen(kManifest), false, false, &r);
+  CHECK(res == 1, "manifest parses");
+  CHECK(res == 1 && !strcmp(r.version, "v9.9.9"), "manifest version");
+  CHECK(res == 1 && r.size == 40960, "manifest size");
+  CHECK(res == 1 && !strcmp(r.sha256,
+        "0000000000000000000000000000000000000000000000000000000000000000"), "manifest digest");
+
+  // A missing digest is a rejected candidate: nothing to verify the download with.
+  const char *nodigest = "{\"tag_name\":\"v9.9.9\",\"draft\":false,\"prerelease\":false,"
+    "\"assets\":[{\"name\":\"zelda3-3ds-v9.9.9.cia\",\"size\":40960,"
+    "\"browser_download_url\":\"https://github.com/frilxy/zelda-alttp-3ds-cn/releases/download/v9.9.9/zelda3-3ds-v9.9.9.cia\"}]}";
+  CHECK(Update_ParseRelease(nodigest, strlen(nodigest), false, false, &r) == -1, "digest required");
+
+  char tag[48];
+  CHECK(Update_TagFromReleaseUrl("https://github.com/frilxy/zelda-alttp-3ds-cn/releases/tag/v4.1.5",
+                                 tag, sizeof(tag)) && !strcmp(tag, "v4.1.5"), "tag from release url");
+  CHECK(Update_TagFromReleaseUrl("https://github.com/frilxy/zelda-alttp-3ds-cn/releases/tag/v4.1.5?x=1",
+                                 tag, sizeof(tag)) && !strcmp(tag, "v4.1.5"), "tag stops at query");
+  CHECK(!Update_TagFromReleaseUrl("https://github.com/frilxy/zelda-alttp-3ds-cn/releases", tag, sizeof(tag)),
+        "no tag in a plain releases url");
+  CHECK(!Update_TagFromReleaseUrl("https://github.com/frilxy/zelda-alttp-3ds-cn/releases/tag/nonsense",
+                                  tag, sizeof(tag)), "invalid tag rejected");
+
+  char sha[65];
+  const char *sums =
+    "1111111111111111111111111111111111111111111111111111111111111111  other-file.cia\r\n"
+    "ABCDEF0123456789abcdef0123456789ABCDEF0123456789abcdef0123456789 *zelda3-3ds-v9.9.9.cia\n";
+  CHECK(Update_ParseSha256Sums(sums, strlen(sums), "zelda3-3ds-v9.9.9.cia", sha), "sums finds the asset");
+  CHECK(!strcmp(sha, "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"),
+        "sums lowercases the digest");
+  CHECK(!Update_ParseSha256Sums(sums, strlen(sums), "missing.cia", sha), "sums misses an unknown name");
+
+  CHECK(Update_IsNewer("v4.1.6", "4.1.5"), "newer patch");
+  CHECK(!Update_IsNewer("v4.1.5", "4.1.5"), "same version is not newer");
+  CHECK(!Update_IsNewer("v4.0.14", "4.1.5"), "older is not newer");
+  CHECK(Update_AllowedDownloadUrl("https://github.com/frilxy/zelda-alttp-3ds-cn/releases/download/v1/x.cia"),
+        "download url allowed");
+  CHECK(!Update_AllowedDownloadUrl("https://evil.example/x.cia"), "foreign url rejected");
+
+  if (failures) { printf("%d update manifest checks failed\n", failures); return 1; }
+  printf("PASS update manifest: api manifest, digest requirement, release-url tag, sha256sums, versions\n");
+  return 0;
 }

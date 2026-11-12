@@ -111,6 +111,7 @@ jobs:
             if command -v cc >/dev/null 2>&1; then
               CC=cc timeout 600 python3 platform/3ds/tests/run_language_switch_test.py
               CC=cc timeout 600 python3 platform/3ds/tests/run_dialogue_cjk_test.py
+              CC=cc timeout 600 python3 platform/3ds/tests/run_update_manifest_test.py
               timeout 900 python3 platform/3ds/tests/run_language_pack_test.py
             else
               echo "no host cc; skipping the host language tests"

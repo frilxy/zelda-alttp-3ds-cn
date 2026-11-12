@@ -78,6 +78,51 @@ static bool candidate(json_t *o, bool pre, bool homebrew, UpdateRelease *out) {
   }
   return found;
 }
+int Update_TagFromReleaseUrl(const char *url, char *tag, size_t cap) {
+  static const char marker[] = "/releases/tag/";
+  if (!url || !tag || cap < 2) return 0;
+  const char *p = strstr(url, marker);
+  if (!p) return 0;
+  p += sizeof(marker) - 1;
+  size_t n = 0;
+  while (p[n] && p[n] != '/' && p[n] != '?' && p[n] != '#' && n + 1 < cap) {
+    tag[n] = p[n];
+    n++;
+  }
+  tag[n] = 0;
+  return n != 0 && Update_ValidVersion(tag);
+}
+
+int Update_ParseSha256Sums(const char *data, size_t size, const char *asset,
+                           char sha256[65]) {
+  if (!data || !asset || !sha256) return 0;
+  size_t asset_len = strlen(asset), i = 0;
+  while (i < size) {
+    size_t end = i;
+    while (end < size && data[end] != '\n') end++;
+    if (end - i > 64 + 1) {
+      bool hex = true;
+      for (int j = 0; j < 64 && hex; j++)
+        hex = isxdigit((unsigned char)data[i + j]) != 0;
+      if (hex && (data[i + 64] == ' ' || data[i + 64] == '\t')) {
+        const char *name = data + i + 64;
+        size_t name_len = end - (i + 64);
+        while (name_len && (*name == ' ' || *name == '\t')) { name++; name_len--; }
+        if (name_len && *name == '*') { name++; name_len--; }
+        while (name_len && (name[name_len - 1] == ' ' || name[name_len - 1] == '\r' ||
+                           name[name_len - 1] == '\t')) name_len--;
+        if (name_len == asset_len && !memcmp(name, asset, name_len)) {
+          for (int j = 0; j < 64; j++) sha256[j] = (char)tolower((unsigned char)data[i + j]);
+          sha256[64] = 0;
+          return 1;
+        }
+      }
+    }
+    i = end + 1;
+  }
+  return 0;
+}
+
 int Update_ParseRelease(const char *data, size_t size, bool pre, bool homebrew, UpdateRelease *out) {
   memset(out, 0, sizeof(*out));
   json_error_t err; json_t *root = json_loadb(data, size, JSON_REJECT_DUPLICATES, &err);

@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.1.6
+
+- The update check survives an exhausted anonymous GitHub API quota: when the
+  manifest request fails (a shared address hits the 60 requests per hour limit
+  and the API answers 403), the check reads the release page redirect for the
+  tag, the asset's own response for its length and the release's `SHA256SUMS`
+  asset for the digest. Downloads stay verified against that digest.
+
 ## v4.1.5
 
 - Bottom-screen names follow the dialogue translation (LinkFish's

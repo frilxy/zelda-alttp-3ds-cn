@@ -213,6 +213,82 @@ static bool install_3dsx(void) {
   if (rename(UPDATE_PART, launch_file) != 0) { rename(backup, launch_file); return false; }
   remove(backup); return true;
 }
+// The anonymous GitHub API allows 60 requests an hour per address, and a shared
+// address (mobile, CGNAT, an office) exhausts that quickly: the manifest request
+// then answers 403. The release pages carry the same facts, so a failed API
+// check falls back to them. /releases/latest redirects to /releases/tag/<tag>,
+// the asset's own response gives its length, and the SHA256SUMS asset we publish
+// next to the build gives its digest.
+static bool head_url(const char *url, char *final_url, size_t final_cap, uint64_t *length) {
+  CURL *c = curl_easy_init();
+  if (!c) return false;
+  curl_easy_setopt(c, CURLOPT_URL, url);
+  curl_easy_setopt(c, CURLOPT_USERAGENT, "Zelda-ALttP-3DS/" ZELDA3_3DS_VERSION);
+  curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+  curl_easy_setopt(c, CURLOPT_MAXREDIRS, 5L);
+  curl_easy_setopt(c, CURLOPT_NOBODY, 1L);
+  curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "https");
+  curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, "https");
+  curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 1L);
+  curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 2L);
+  curl_easy_setopt(c, CURLOPT_CAINFO, "romfs:/update-ca.pem");
+  curl_easy_setopt(c, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+  curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 30L);
+  curl_easy_setopt(c, CURLOPT_TIMEOUT, 60L);
+  curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+  CURLcode code = curl_easy_perform(c);
+  long http = 0;
+  char *effective = NULL;
+  curl_off_t content = -1;
+  curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http);
+  curl_easy_getinfo(c, CURLINFO_EFFECTIVE_URL, &effective);
+  curl_easy_getinfo(c, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &content);
+  bool ok = code == CURLE_OK && http == 200 && effective != NULL &&
+            strlen(effective) < final_cap && content > 0;
+  if (ok) {
+    snprintf(final_url, final_cap, "%s", effective);
+    if (length) *length = (uint64_t)content;
+  }
+  curl_easy_cleanup(c);
+  return ok;
+}
+
+// Stable channel without the API: tag from the release page redirect, length
+// from the asset and digest from SHASUMS256 (published with every release).
+static bool check_via_web(UpdateRelease *out) {
+  char final_url[512];
+  uint64_t size = 0;
+  if (!head_url("https://github.com/" UPDATE_REPOSITORY "/releases/latest",
+                final_url, sizeof(final_url), NULL))
+    return false;
+  char tag[48];
+  if (!Update_TagFromReleaseUrl(final_url, tag, sizeof(tag))) return false;
+  const char *v = tag[0] == 'v' ? tag + 1 : tag;
+  char name[96], url[512], sums_url[512];
+  snprintf(name, sizeof(name), "zelda3-3ds-v%s.%s", v, homebrew ? "3dsx" : "cia");
+  snprintf(url, sizeof(url),
+           "https://github.com/" UPDATE_REPOSITORY "/releases/download/%s/%s", tag, name);
+  snprintf(sums_url, sizeof(sums_url),
+           "https://github.com/" UPDATE_REPOSITORY "/releases/download/%s/SHA256SUMS", tag);
+  if (!Update_AllowedDownloadUrl(url)) return false;
+  if (!head_url(url, final_url, sizeof(final_url), &size)) return false;
+  Transfer t = {0};
+  if (!fetch(sums_url, &t)) { free(t.data); return false; }
+  char sha256[65];
+  int found = Update_ParseSha256Sums(t.data ? t.data : "", t.size, name, sha256);
+  free(t.data);
+  if (!found) return false;
+  if (size < 4096 || size > UPDATE_MAX_FILE) return false;
+  memset(out, 0, sizeof(*out));
+  snprintf(out->version, sizeof(out->version), "%s", tag);
+  snprintf(out->url, sizeof(out->url), "%s", url);
+  memcpy(out->sha256, sha256, sizeof(sha256));
+  out->size = (uint32_t)size;
+  Platform3DS_LogRuntime("Updater check fell back to the release pages: %s (%llu bytes)",
+                         tag, (unsigned long long)size);
+  return true;
+}
+
 static void run_job(void *arg) {
   void *soc_buffer = NULL; bool soc_ready = false, curl_ready = false, ac_ready = false, ssl_ready = false;
   bool ok = false; Transfer t = {0};
@@ -232,9 +308,11 @@ static void run_job(void *arg) {
     const char *url = s.prerelease ?
       "https://api.github.com/repos/" UPDATE_REPOSITORY "/releases?per_page=100" :
       "https://api.github.com/repos/" UPDATE_REPOSITORY "/releases/latest";
-    if (!fetch(url, &t)) goto done;
     UpdateRelease candidate;
-    int result = Update_ParseRelease(t.data, t.size, s.prerelease, homebrew, &candidate);
+    int result = fetch(url, &t)
+                     ? Update_ParseRelease(t.data, t.size, s.prerelease, homebrew, &candidate)
+                     : -1;
+    if (result < 0 && !s.prerelease && check_via_web(&candidate)) result = 1;
     if (result < 0) { publish(UPDATE_ERROR, "INVALID RELEASE DATA"); goto done; }
     if (!result) { publish(UPDATE_EMPTY, "NO PRE-RELEASE AVAILABLE"); ok = true; goto done; }
     LightLock_Lock(&lock); release = candidate; strcpy(status.version, release.version); LightLock_Unlock(&lock);

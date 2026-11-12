@@ -18,4 +18,10 @@ bool Update_IsNewer(const char *candidate, const char *installed);
 bool Update_ValidVersion(const char *version);
 bool Update_AllowedDownloadUrl(const char *url);
 
+// A sha256sum(1) file: "<64 hex>  <name>" per line.
+int Update_ParseSha256Sums(const char *data, size_t size, const char *asset,
+                           char sha256[65]);
+// The tag out of https://github.com/<repo>/releases/tag/<tag>.
+int Update_TagFromReleaseUrl(const char *url, char *tag, size_t cap);
+
 unsigned Update_FormatNotes(const char *markdown, char lines[][43], unsigned capacity);
